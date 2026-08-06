@@ -34,6 +34,11 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/duanchao/clamicro"
-  }
+    "url": "git+https://github.com/laosji/clamicro.git"
+  },
+  "bugs": {
+    "url": "https://github.com/laosji/clamicro/issues"
+  },
+  "homepage": "https://github.com/laosji/clamicro#readme",
+  "author": "laosji"
 }
