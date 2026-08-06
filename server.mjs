@@ -474,6 +474,13 @@ async function handler(req, res) {
 
       // Pause/Cancel 的拦截点。Claude Code 没有运行时暂停原语，
       // 只能在下一个工具调用前把它挂住。
+      // 同一个 tool_use_id 的工具开始执行 = 这次授权已在别处放行，
+      // 把还挂着的那条审批销掉，别让它在界面上冒充「待处理」
+      if ((event === 'pre-tool-use' || event === 'post-tool-use') && payload.tool_use_id) {
+        const gone = approvals.supersede(payload.tool_use_id)
+        if (gone) console.log(`[approval] ${gone.id.slice(0, 8)} 已在别处放行，销掉挂起记录`)
+      }
+
       if (event === 'pre-tool-use' && payload.session_id) {
         store.applyHook(event, payload, config.notify)
         const gated = await control.gate(payload.session_id)

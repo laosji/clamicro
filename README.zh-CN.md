@@ -192,7 +192,7 @@ npx clamicro stop         # 停止服务
 
 ## 使用教程
 
-第一次用、或者遇到「这是 bug 还是设计如此」的困惑，看 [docs/guide.zh-CN.md](./docs/guide.zh-CN.md)。
+第一次用、或者遇到「这是 bug 还是设计如此」的困惑，看 [docs/guide.zh-CN.md](./docs/guide.zh-CN.md) · [English](./docs/guide.md)。
 
 ---
 

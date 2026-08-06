@@ -443,7 +443,8 @@ const RESULTS = {
   auto_allowed: ['◈', 'auto-approved', '已自动通过', '无人操作，按预授权规则放行'],
   denied:    ['◇', 'access denied',  '已拒绝', 'Claude Code 已收到拒绝'],
   expired:   ['◷', 'session expired', '已超时', '超时未决策，已自动拒绝'],
-  abandoned: ['◐', 'handled elsewhere', '已在别处处理', '这条请求已由终端处理或会话已结束'],
+  abandoned:  ['◐', 'handled elsewhere', '已在别处处理', '这条请求已由终端处理或会话已结束'],
+  superseded: ['◐', 'already granted', '已在别处放行', '这个操作已经由终端或权限规则批准并执行了'],
 };
 
 function renderResult(a) {

@@ -1,6 +1,6 @@
 # Clamicro 使用教程
 
-[← 回到 README](../README.zh-CN.md)
+[← 回到 README](../README.zh-CN.md) · [English](./guide.md)
 
 ---
 

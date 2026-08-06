@@ -94,6 +94,7 @@ hooks 里存的是**绝对路径**，而 `npx` 跑在会变的缓存目录、全
 | 取消之后下一个工具调用也被取消 | `cancel()` 唤醒挂起的 waiter 后没复位状态，`CANCELLED` 留着被下一次消费 |
 | 额度反复变空 | 额度是纯内存的，没进 `history.json`，每次重启就清零 |
 | 卸载后残留一个 hook | 卸载用路径片段 `clamicro/bin/` 匹配，而目录结构改过（`app/bin/`）。改成按脚本文件名认 |
+| 界面显示「待审批」，可操作其实早执行完了 | 终端那边放行后，Claude Code **不会取消**已发出的 PermissionRequest 请求，连接还开着、close 事件也不触发，记录挂到超时。用 `tool_use_id` 和 PreToolUse 对账，销掉并返回 allow |
 | `npm i` 后 CLI 报 import 失败 | `package.json` 的 `files` 白名单漏了 `install.mjs`。这种错只有真的打包安装才会暴露 |
 | 管道输入时安装程序挂死 | `printf 'y\ny\n' \| node install.mjs` 会一次性 EOF，readline 把所有行同时发完，第二行在第二次提问注册前就丢了。要自己缓冲行队列 |
 
