@@ -202,6 +202,12 @@ Config lives at `~/.claude/clamicro/config.json` (mode 600, contains the token a
 
 ---
 
+## Notes
+
+Maintainer notes — mistakes made and why decisions were taken the way they were: [NOTES.md](./NOTES.md) (Chinese).
+
+---
+
 ## License
 
 MIT

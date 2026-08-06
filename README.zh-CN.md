@@ -190,6 +190,12 @@ npx clamicro stop         # 停止服务
 
 ---
 
+## 维护笔记
+
+踩过的坑和当时的判断依据记在 [NOTES.md](./NOTES.md)。
+
+---
+
 ## 已知限制
 
 - 需与 Mac 同一 Wi-Fi（或同一 tailnet）；公司网络若开启客户端隔离或 VLAN 隔离则不通
