@@ -202,6 +202,12 @@ Config lives at `~/.claude/clamicro/config.json` (mode 600, contains the token a
 
 ---
 
+## Guide
+
+A walkthrough covering first run, the three usage scenarios, how to read the approval screen, and troubleshooting: [docs/guide.zh-CN.md](./docs/guide.zh-CN.md) (Chinese — English version pending).
+
+---
+
 ## Notes
 
 Maintainer notes — mistakes made and why decisions were taken the way they were: [NOTES.md](./NOTES.md) (Chinese).
