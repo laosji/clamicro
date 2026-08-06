@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0b0d10" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f7f8fa" media="(prefers-color-scheme: light)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>会话 · Clamicro</title>
+<style>
+  :root{
+    --bg:#f7f8fa; --card:#fff; --fg:#12151a; --dim:#6b7280; --line:#e4e7ec; --monobg:#f0f2f5;
+    --ok:#0a7d34; --no:#b42318; --warn:#b54708; --run:#1570ef;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --bg:#0b0d10; --card:#14181d; --fg:#e8eaed; --dim:#8b93a1; --line:#242a32; --monobg:#0f1318;
+      --ok:#4ade80; --no:#f87171; --warn:#fbbf24; --run:#60a5fa;
+    }
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  /* iOS Safari 从 10 起就忽略 user-scalable=no，双击放大只能靠 touch-action 挡。
+     manipulation = 保留滚动和捏合，去掉双击缩放那 300ms 的等待。 */
+  html{touch-action:manipulation; -webkit-text-size-adjust:100%}
+  html,body{margin:0;height:100%;overflow-x:hidden;overscroll-behavior:none}
+  body{
+    background:var(--bg); color:var(--fg); display:flex; flex-direction:column;
+    font:16px/1.5 -apple-system,BlinkMacSystemFont,"PingFang SC","Helvetica Neue",sans-serif;
+    padding:env(safe-area-inset-top) 0 0;
+  }
+  header{padding:14px 16px 10px; flex:0 0 auto; border-bottom:1px solid var(--line)}
+  .nav{display:flex; align-items:center; gap:10px; margin-bottom:8px}
+  .nav a{color:var(--run); text-decoration:none; font-size:15px}
+  .nav h1{font-size:18px; margin:0; font-weight:600; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .state{font-size:12px; padding:3px 9px; border-radius:20px; background:var(--monobg); color:var(--dim); flex:0 0 auto}
+  .state.Running{color:var(--run)} .state.Done{color:var(--ok)}
+  .state.Error{color:var(--no)} .state.Paused{color:var(--warn)}
+  .state[class*="Waiting"]{color:var(--warn)}
+  .path{font:12px/1.4 ui-monospace,Menlo,monospace; color:var(--dim); overflow-wrap:anywhere}
+  .chips{display:flex; gap:6px; flex-wrap:wrap; margin-top:9px}
+  .chip{font-size:11.5px; padding:3px 8px; border-radius:20px; background:var(--monobg); color:var(--dim)}
+
+  main{flex:1 1 auto; overflow-y:auto; overflow-x:hidden; overscroll-behavior:contain; padding:14px 16px calc(90px + env(safe-area-inset-bottom))}
+
+  /* 时间线：左侧一条轴，每个事件一个节点 */
+  .tl{position:relative; padding-left:24px}
+  .tl::before{content:''; position:absolute; left:6px; top:6px; bottom:6px; width:2px; background:var(--line)}
+  .ev{position:relative; padding:0 0 18px}
+  .ev::before{
+    content:''; position:absolute; left:-22px; top:5px; width:10px; height:10px;
+    border-radius:50%; background:var(--line); border:2px solid var(--bg);
+  }
+  .ev[data-t="prompt"]::before{background:var(--run)}
+  .ev[data-t="stop"]::before{background:var(--ok)}
+  .ev[data-t="error"]::before,.ev[data-t="tool-error"]::before{background:var(--no)}
+  .ev[data-t="approval-requested"]::before,.ev[data-t="control"]::before,.ev[data-t="quota-warn"]::before{background:var(--warn)}
+  .ev .h{display:flex; align-items:baseline; gap:8px}
+  .ev .k{font-size:12px; color:var(--dim); flex:0 0 auto}
+  .ev .t{font-size:11.5px; color:var(--dim); margin-left:auto; flex:0 0 auto; font-variant-numeric:tabular-nums}
+  .ev .d{
+    font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;
+    margin-top:3px; overflow-wrap:anywhere; white-space:pre-wrap;
+    max-height:8em; overflow:hidden;
+  }
+  .empty{color:var(--dim); font-size:14px; text-align:center; padding:44px 20px}
+
+  footer{
+    position:fixed; left:0; right:0; bottom:0; display:flex; gap:10px;
+    padding:12px 16px calc(12px + env(safe-area-inset-bottom));
+    border-top:1px solid var(--line); background:var(--card);
+  }
+  footer button{
+    flex:1; padding:14px 0; border-radius:12px; cursor:pointer;
+    font:600 15px -apple-system,"PingFang SC",sans-serif;
+    background:var(--card); border:1.5px solid var(--line); color:var(--fg);
+  }
+  footer .danger{color:var(--no); border-color:color-mix(in srgb,var(--no) 32%,transparent)}
+  footer .go{color:var(--ok); border-color:color-mix(in srgb,var(--ok) 40%,transparent)}
+  footer button:disabled{opacity:.4}
+  /* 底栏是 fixed 的，提示必须一起脱离普通流，否则会被挡在后面看不见 */
+  .note{
+    position:fixed; left:0; right:0; z-index:1;
+    bottom:calc(70px + env(safe-area-inset-bottom));
+    font-size:12px; line-height:1.5; color:var(--warn); text-align:center;
+    padding:9px 16px; margin:0 16px; border-radius:10px;
+    background:var(--warnbg,color-mix(in srgb,var(--warn) 12%,var(--card)));
+    border:1px solid color-mix(in srgb,var(--warn) 30%,transparent);
+  }
+  .hidden{display:none !important}
+</style>
+</head>
+<body>
+<header>
+  <div class="nav">
+    <a href="/ui">‹ 返回</a>
+    <h1 id="name">—</h1>
+    <span class="state" id="state">—</span>
+  </div>
+  <div class="path" id="path"></div>
+  <div class="chips" id="chips"></div>
+</header>
+
+<main><div class="tl" id="tl"></div></main>
+
+<div class="note hidden" id="note"></div>
+<footer>
+  <button id="btnPause">暂停</button>
+  <button class="danger" id="btnCancel">取消本轮</button>
+</footer>
+
+<script>
+const SID = location.pathname.split('/').pop();
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+const KIND = {
+  'session-start': '会话开始', prompt: '提问', tool: '工具', 'tool-error': '工具失败',
+  'approval-requested': '请求审批', 'permission-prompt': '权限提示', control: '控制',
+  'quota-warn': '额度预警', stop: '完成', error: '出错', idle: '空闲',
+  notification: '通知', 'session-end': '会话结束',
+};
+
+function clock(ts) {
+  const d = new Date(ts);
+  return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}:${String(d.getSeconds()).padStart(2,'0')}`;
+}
+
+let session = null;
+
+function render(data) {
+  session = data.session;
+  const s = session;
+  if (!s) {
+    $('name').textContent = '会话已结束';
+    $('tl').innerHTML = '<div class="empty">这个会话已经不在了<br>历史事件仍保留在下方</div>';
+  } else {
+    const dir = (s.cwd || '').split('/').filter(Boolean).pop() || s.session_id.slice(0, 8);
+    $('name').textContent = s.session_name || dir;
+    $('path').textContent = s.cwd || '';
+    $('state').textContent = s.state + (s.sub_state ? ' · ' + s.sub_state : '');
+    $('state').className = 'state ' + String(s.state).replace(/\s/g, '-');
+    $('chips').innerHTML = [
+      s.model && `<span class="chip">${esc(s.model)}</span>`,
+      s.context && `<span class="chip">ctx ${Math.round(s.context.used_pct)}%</span>`,
+      s.cost_usd != null && `<span class="chip">$${s.cost_usd.toFixed(4)}</span>`,
+    ].filter(Boolean).join('');
+
+    const paused = s.state === 'Paused';
+    $('btnPause').textContent = paused ? '恢复' : '暂停';
+    $('btnPause').className = paused ? 'go' : '';
+    // Claude Code 没有运行时暂停原语，说清楚才不会以为点了没反应
+    $('note').textContent = paused
+      ? '已请求暂停 — 会在下一个工具调用前停住，当前这一步仍会跑完'
+      : '';
+    $('note').classList.toggle('hidden', !paused);
+  }
+
+  const evs = (data.events || []).slice().reverse();
+  if (evs.length) {
+    $('tl').innerHTML = evs.map((e) => `
+      <div class="ev" data-t="${esc(e.type)}">
+        <div class="h">
+          <span class="k">${esc(KIND[e.type] || e.type)}</span>
+          <span class="t">${clock(e.ts)}</span>
+        </div>
+        ${e.detail ? `<div class="d">${esc(e.detail)}</div>` : ''}
+      </div>`).join('');
+  } else if (session) {
+    $('tl').innerHTML = '<div class="empty">还没有事件</div>';
+  }
+}
+
+async function refresh() {
+  const d = await fetch(`/api/sessions/${SID}`).then((r) => r.json());
+  render(d);
+}
+
+async function act(action) {
+  $('btnPause').disabled = $('btnCancel').disabled = true;
+  await fetch(`/api/sessions/${SID}/${action}`, { method: 'POST' }).catch(() => {});
+  await refresh();
+  $('btnPause').disabled = $('btnCancel').disabled = false;
+}
+
+$('btnPause').onclick = () => act(session?.state === 'Paused' ? 'resume' : 'pause');
+$('btnCancel').onclick = () => {
+  if (confirm('取消当前这一轮？\n\nClaude Code 会在下一个工具调用前终止本轮任务。')) act('cancel');
+};
+
+const es = new EventSource('/api/stream');
+es.addEventListener('session', refresh);
+es.addEventListener('event', refresh);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') refresh();
+});
+
+refresh();
+</script>
+</body>
+</html>

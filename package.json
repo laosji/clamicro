@@ -1,0 +1,39 @@
+{
+  "name": "clamicro",
+  "version": "1.0.0",
+  "description": "Watch Claude Code from your phone and approve what it wants to run. LAN-direct, zero dependencies.",
+  "keywords": [
+    "claude-code",
+    "claude",
+    "hooks",
+    "approval",
+    "monitor",
+    "mobile"
+  ],
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "bin": {
+    "clamicro": "cli.mjs"
+  },
+  "files": [
+    "cli.mjs",
+    "install.mjs",
+    "server.mjs",
+    "lib/",
+    "ui/",
+    "bin/",
+    "README.md",
+    "README.zh-CN.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "postinstall": "node -e \"console.log('\\n  Clamicro 已下载。执行 npx clamicro install 完成安装。\\n')\""
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/duanchao/clamicro"
+  }
+}

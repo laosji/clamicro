@@ -1,0 +1,201 @@
+# Clamicro
+
+[English](./README.md)
+
+在手机上看 Claude Code 的状态、审批它要执行的操作。
+
+跑任务时不用一直盯着终端——需要授权时手机会响，点开看一句人话摘要就能批准或拒绝，Claude Code 随即继续。
+
+**零依赖**：只需要 Node ≥ 18 和 curl（macOS 自带）。运行时不含任何 `node_modules`。
+
+> 仅支持 macOS + iPhone。服务用到 macOS 专有能力（`scutil`、`osascript`、Bonjour），界面是按 iOS Safari 做的。
+
+---
+
+## 安装
+
+```bash
+npx clamicro install
+```
+
+两步走完：
+
+1. **终端里**：检查环境 → 展示将要对 `~/.claude/settings.json` 做的改动 → 你确认 → 自动备份并写入 → 确认信任当前网络 → 启动服务 → 打印二维码
+2. **手机扫码**：点「发一条测试审批」，在手机上真批一次。走完这遍就算装好了。
+
+装完即可用：需要审批时 Mac 会弹通知并响一声，终端状态栏显示 `⏳ N 条待审批`，手机网页随时能看和批。
+
+**可选**：想「人不在电脑边也能被叫醒」，在设置页填一个 Bark key（App Store 搜 Bark，打开 App 复制首页那串 key）。这是唯一会把「你有个审批」这个事实透露给外部服务器的地方，不填也能用。
+
+> 安装程序**只追加不替换**。你已有的 hook 配置会完整保留，`statusLine` 若已被别的工具占用则不覆盖、只提示。改动前自动备份。
+
+卸载：
+
+```bash
+npx clamicro uninstall
+```
+
+只摘掉自己加的东西，实测与安装前的配置**逐字节一致**。配置和历史保留在 `~/.claude/clamicro/`，可手动删除。
+
+### 运行时装在哪
+
+npm 包只是**安装器**。运行时文件会被复制到 `~/.claude/clamicro/app/`，hooks 指向那里。
+
+这不是多此一举：hooks 里写的是绝对路径，而 `npx` 每次跑在会变的缓存目录、全局安装路径又随 node 版本 / nvm / homebrew 变化。指向 npm 包意味着某天路径失效，**所有 hook 会静默失败**——你不会看到任何报错，只是再也收不到通知。实测删掉 `node_modules` 后服务与 hook 照常工作。
+
+升级就是重跑一次 `npx clamicro install`。
+
+---
+
+## 它做了什么
+
+| 你在手机上看到 | 来自 |
+|---|---|
+| 会话状态、子状态（Thinking/Searching/Editing） | hooks 事件流 |
+| 5 小时 / 7 天用量、上下文占用、本次花费 | `statusLine` |
+| 待审批操作 + 一句人话摘要 + 影响面标签 | `PermissionRequest` |
+| 任务完成 / 出错通知 | `Stop` / `StopFailure` |
+| 事件时间线（每个会话的完整流水） | 全部 hooks |
+| 暂停 / 恢复 / 取消本轮 | `PreToolUse` 拦截点 |
+| 额度接近上限预警 | `statusLine` |
+
+### 手势
+
+审批卡片左滑拒绝、右滑批准，详情页和首页列表都支持。批准有 3 秒撤销窗口。
+高风险操作（`rm -rf`、`git push --force`、密钥文件、越界写入）在详情页需要划得更远，
+在列表里则完全不能滑动批准——列表是快速分诊的地方，真要放行危险操作得点进去看清楚。
+
+### 暂停的真实语义
+
+Claude Code 没有「运行时暂停」原语，没法在任意时刻冻结它。「暂停」实际是
+**在下一个工具调用前把它挂住**，当前这一步仍会跑完。UI 上有明确提示，
+免得你以为点了没反应。取消同理，也是在下一个拦截点返回 `{continue:false}`。
+
+审批链路：
+
+```
+Claude Code 要执行需授权的操作
+  → PermissionRequest hook（HTTP，timeout 600）
+  → 服务建审批记录，推送到手机，然后阻塞住
+  → 你在手机上批准 / 拒绝
+  → hook 返回 decision → Claude Code 继续或被拒
+```
+
+---
+
+## 安全
+
+这是一个把 Claude Code 的执行权限交到手机上的工具，值得把边界写清楚。
+
+### 网络信任闸门
+
+服务只在**你显式信任过的网络**里暴露到局域网。换到陌生网络（咖啡厅、机场、酒店）时自动只绑回环，手机连不上，同时 Mac 弹通知让你确认。
+
+```bash
+npx clamicro networks   # 看当前网络和已信任列表
+npx clamicro trust      # 信任当前网络
+```
+
+网络指纹用**网关 IP + 网关 MAC + 网段**。SSID 在新版 macOS 需要定位权限常常拿不到；而 `00:00:5e:00:01:xx` 是 VRRP 虚拟 MAC，企业网里并不唯一——单靠 MAC 会把不同公司的网络认成同一个，所以必须组合。
+
+### 已实现的防护
+
+| 防护 | 挡住什么 |
+|---|---|
+| **Host 头白名单** | DNS rebinding。恶意站点把域名重绑到你的局域网 IP 后浏览器视为同源，CORS 完全失效，能读看板、命令原文并批准操作——**且攻击者不需要在你的 Wi-Fi 上** |
+| **hooks / statusLine 仅回环** | 同网段的人伪造 hook 事件：刷审批通知、注入假时间线、伪造额度 |
+| **`/api/pair` 要求自定义头** | CSRF。跨站「简单请求」浏览器会照发，副作用已发生——等于你访问的任何网站都能让这台 Mac 弹二维码 |
+| **CSP `frame-ancestors 'none'`** | 点击劫持：恶意页面把审批页嵌进 iframe 诱导你滑动 |
+| **常数时间比较** | token 与审批 key 的时间侧信道 |
+| **SameSite=Lax + HttpOnly** | CSRF；同时保证从推送通知点进来仍然是登录态（Strict 会导致每次都要重新扫码） |
+| **单条审批专属 key** | 拿到一条深链只能决定那一条，且随它过期 |
+
+### 剩下的风险：HTTP 明文
+
+局域网内是明文。**同网络的被动嗅探者能拿到你的 token**，进而获得完整控制权，包括批准 `rm -rf`。命令原文同样是明文。
+
+这在保持「扫码即用」的前提下无解——自签证书会让 Safari 报警并破坏整个体验。网络信任闸门把它从「你得记得别在咖啡厅用」变成了「陌生网络默认就用不了」，但如果你**确实需要在不可信网络上用**：
+
+**装 Tailscale。** WireGuard 端到端加密，没有任何第三方看到明文，且不限于同一 Wi-Fi。服务会自动识别 `100.64/10` 地址并绑上去，**且不受网络信任闸门限制**——覆盖网自带加密，不关心底下是什么物理网络。
+
+其余方案都在某个环节把明文交给了别人：内网穿透服务终结 TLS、ntfy 中转看得到控制流。
+
+---
+
+## 近场只用 Wi-Fi
+
+控制面**不出局域网**。命令原文、审批指令、时间线、额度全部走 `http://<局域网IP>:8765` 直连。
+
+按"人在哪儿"分三层，逐层才增加对外依赖：
+
+| 场景 | 提醒方式 | 联网范围 |
+|---|---|---|
+| **① 人在电脑边** | macOS 本地通知 + 提示音 | **完全不联网** |
+| **② 同一 Wi-Fi，不在电脑边** | 手机推送（Bark） | 只有「有个审批」这一句出公网 |
+| **③ 不在同一 Wi-Fi** | ntfy 通知内按钮 | 控制面也经第三方 |
+
+默认开 ①+②，③ 默认关闭（`relay.enabled`）。
+
+**为什么 ② 无法只用 Wi-Fi**：iOS 不允许后台 App 维持局域网长连接，锁屏可达的通知只能走 APNs。缓解办法是把出公网的内容压到最小——`detailInPush` 默认关闭，推送正文只说「Bash 操作（高风险）」，命令全文只在局域网页面显示。推送服务商知道你有个审批，但不知道要批准什么，也批不动。
+
+---
+
+## 设计要点
+
+**hook 必须先回包再推送。** `async: true` 只对 `command` 类型有效，HTTP hook 一律阻塞等响应。所以所有端点立即返回 `{}`，推送在响应之后异步发出。
+
+**570 秒自超时返回 deny。** 不能走到系统 600s 超时——那会被当成「非阻塞错误」放行到正常权限流程，人不在电脑边时终端会空挂着等一个没人看的弹框。
+
+**四种终态**：`allowed` / `denied` / `expired`（超时自动拒绝）/ `abandoned`（终端自己批了，或会话被 Ctrl-C）。同一条审批被多路重复决策时，第一个写入的赢，后到的返回当前真实状态而不报错。
+
+**Stop 的推送阈值。** `Stop` 在每一轮回复结束时都触发，包括两秒就结束的对话。默认只有 turn ≥ 30s 才推送。`turn_started_at` 未知时（服务中途启动）按「要推」处理——宁可多推一次，也别漏掉一次任务完成。
+
+**状态栏由服务端渲染。** `bin/statusline.sh` 不解析 JSON，直接把载荷 POST 给服务，服务返回渲染好的文本。因此不依赖 `jq`，也不用付 Node 的 ~115ms 启动开销（实测 15ms）。有待审批时状态栏会显示 `⏳ N 条待审批`。
+
+**子状态是推导的。** Claude Code 没有 Thinking/Searching/Editing 事件，全部从 `PreToolUse.tool_name` 推导；`PostToolUse` 到下一个 `PreToolUse` 之间视为 Thinking。
+
+**服务挂了不拖累 Claude Code。** 回环端口拒绝连接是即时的，hook 拿到非阻塞错误后照常继续，只是收不到通知。而且 `SessionStart` 是个 command hook，会先把服务拉起来再转发事件——打开 Claude Code 就等于服务可用。
+
+**地址用 Bonjour 主机名而不是 IP。** macOS 已经在广播 `<LocalHostName>.local`，用它做基址，DHCP 换 IP 后旧链接依然有效，不必重新扫码。极少数路由器屏蔽组播，那种情况把 `hostMode` 改成 `"ip"`。
+
+**登录 cookie 必须是 `SameSite=Lax` 不能是 `Strict`。** 从推送通知点进 Safari 属于跨站导航，Strict 的 cookie 不会被带上，每次从通知进来都像没登录过。
+
+**额度是账号级的，不按会话存。** 按会话存会出现旧会话的陈旧数字把最新数字顶掉。只认最新一次观测，并在界面上标出更新时间和来源会话。
+
+**审批与事件落盘。** `~/.claude/clamicro/history.json`，防抖写入 + 临时文件原子替换。重启时仍挂起的审批一律转 `abandoned`——那些 hook 的连接早断了，再显示成「待审批」是在骗人。
+
+**hooks 是热加载的，statusLine 不是。** 改完 hooks 当前会话立刻生效；statusLine 要新开会话。
+
+---
+
+## 常用命令
+
+```bash
+npx clamicro install      # 安装 / 升级
+npx clamicro uninstall    # 卸载
+npx clamicro qr           # 打印登录二维码
+npx clamicro status       # 服务、网络、版本
+npx clamicro trust        # 信任当前网络
+npx clamicro networks     # 当前网络 + 已信任列表
+npx clamicro test-push    # 发一条测试通知
+npx clamicro logs         # 跟踪日志
+npx clamicro stop         # 停止服务
+```
+
+平时不用手动启动——`SessionStart` hook 会在你打开 Claude Code 时自动把服务拉起来。
+
+配置在 `~/.claude/clamicro/config.json`（权限 600，含 token 与推送凭证）。日常设置改手机网页即可，不用编辑这个文件。
+
+`ignoreCwds` 里的工作目录不做阻塞审批——开发 clamicro 自身时用，正常使用应留空。
+
+---
+
+## 已知限制
+
+- 需与 Mac 同一 Wi-Fi（或同一 tailnet）；公司网络若开启客户端隔离或 VLAN 隔离则不通
+- 局域网内明文传输，不可信网络请用 Tailscale，见上方「安全」
+- 纯 HTTP 非 secure context，拿不到 Service Worker / Web Push
+- 仅 iPhone + macOS
+- Pause 为「下一个可拦截点暂停」，不是运行时冻结
+- 手势为主的界面，VoiceOver 用户目前没有等价入口
+- 审批与事件保留一天、上限 300/3000 条，超出滚动丢弃

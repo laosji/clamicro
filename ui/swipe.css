@@ -1,0 +1,69 @@
+/* 卡片滑动手势的共用样式，配合 ui/swipe.js */
+
+.sw-armed {
+  position: relative;
+  overflow: hidden;
+  /* 飞出用的是 transform，不占布局空间，但父层仍要 overflow-x:hidden 兜底 */
+  contain: layout paint;
+  /* pan-y 把纵向滚动交给浏览器，横向留给我们，不用手动 preventDefault */
+  touch-action: pan-y;
+  will-change: transform;
+  cursor: grab;
+}
+
+.sw-tint {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  border-radius: inherit;
+  transition: opacity 0.12s linear;
+}
+.sw-tint[data-dir='r'] {
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--ok) 42%, transparent));
+}
+.sw-tint[data-dir='l'] {
+  background: linear-gradient(270deg, transparent, color-mix(in srgb, var(--no) 42%, transparent));
+}
+
+.sw-stamp {
+  position: absolute;
+  top: 50%;
+  pointer-events: none;
+  opacity: 0;
+  font: 800 clamp(18px, 6vw, 30px) / 1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.14em;
+  padding: 7px 12px;
+  border: 3px solid currentColor;
+  border-radius: 8px;
+  z-index: 2;
+}
+.sw-stamp[data-dir='r'] {
+  left: 18px;
+  transform: translateY(-50%) rotate(-14deg);
+  color: var(--ok);
+}
+.sw-stamp[data-dir='l'] {
+  right: 18px;
+  transform: translateY(-50%) rotate(14deg);
+  color: var(--no);
+}
+
+/* 越过承诺点：图章「咬合」——放大 + 反白实底 + 辉光。
+   松手之前必须能看出过没过线，这是滑动手势最关键的一个反馈。 */
+.sw-stamp.locked {
+  color: var(--card);
+  transition: transform 0.12s cubic-bezier(0.2, 1.6, 0.4, 1), background 0.12s, box-shadow 0.12s;
+}
+.sw-stamp.locked[data-dir='r'] {
+  transform: translateY(-50%) rotate(-14deg) scale(1.12);
+  background: var(--ok);
+  border-color: var(--ok);
+  box-shadow: 0 0 30px var(--ok);
+}
+.sw-stamp.locked[data-dir='l'] {
+  transform: translateY(-50%) rotate(14deg) scale(1.12);
+  background: var(--no);
+  border-color: var(--no);
+  box-shadow: 0 0 30px var(--no);
+}

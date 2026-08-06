@@ -1,0 +1,326 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0b0d10" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f7f8fa" media="(prefers-color-scheme: light)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>设置 · Clamicro</title>
+<style>
+  :root{
+    --bg:#f7f8fa; --card:#fff; --fg:#12151a; --dim:#6b7280; --line:#e4e7ec; --monobg:#f0f2f5;
+    --ok:#0a7d34; --warn:#b54708; --accent:#1570ef;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --bg:#0b0d10; --card:#14181d; --fg:#e8eaed; --dim:#8b93a1; --line:#242a32; --monobg:#0f1318;
+      --ok:#4ade80; --warn:#fbbf24; --accent:#60a5fa;
+    }
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  /* iOS Safari 从 10 起就忽略 user-scalable=no，双击放大只能靠 touch-action 挡。
+     manipulation = 保留滚动和捏合，去掉双击缩放那 300ms 的等待。 */
+  html{touch-action:manipulation; -webkit-text-size-adjust:100%}
+  body{
+    margin:0; background:var(--bg); color:var(--fg); min-height:100vh;
+    font:16px/1.5 -apple-system,BlinkMacSystemFont,"PingFang SC","Helvetica Neue",sans-serif;
+    padding:env(safe-area-inset-top) 16px calc(32px + env(safe-area-inset-bottom));
+  }
+  .nav{display:flex; align-items:center; gap:10px; padding:16px 2px 6px}
+  .nav a{color:var(--accent); text-decoration:none; font-size:15px}
+  h1{font-size:19px; margin:0}
+  h2{font-size:13px; color:var(--dim); font-weight:600; margin:24px 2px 8px}
+  .card{background:var(--card); border:1px solid var(--line); border-radius:14px; padding:4px 14px; margin-bottom:10px}
+  .row{display:flex; align-items:center; gap:12px; padding:13px 0; border-bottom:1px solid var(--line)}
+  .row:last-child{border-bottom:none}
+  .row .lbl{flex:1; min-width:0}
+  .row .lbl b{display:block; font-weight:500; font-size:15px}
+  .row .lbl span{display:block; font-size:12.5px; color:var(--dim); margin-top:2px}
+  input[type=text]{
+    width:100%; padding:12px 13px; border-radius:10px; border:1px solid var(--line);
+    background:var(--monobg); color:var(--fg); font:14px ui-monospace,Menlo,monospace;
+  }
+  /* 原生开关 */
+  input[type=checkbox]{appearance:none; width:50px; height:30px; border-radius:15px; background:var(--line); position:relative; transition:background .2s; flex:0 0 auto}
+  input[type=checkbox]::after{content:''; position:absolute; top:3px; left:3px; width:24px; height:24px; border-radius:50%; background:#fff; transition:left .2s; box-shadow:0 1px 3px rgba(0,0,0,.3)}
+  input[type=checkbox]:checked{background:var(--ok)}
+  input[type=checkbox]:checked::after{left:23px}
+  input[type=checkbox]:disabled{opacity:.4}
+  button{
+    width:100%; padding:14px; border-radius:11px; border:1.5px solid var(--line);
+    background:var(--card); color:var(--fg); font:600 16px -apple-system,"PingFang SC",sans-serif;
+    cursor:pointer; margin-top:10px;
+  }
+  button.primary{border-color:color-mix(in srgb,var(--accent) 45%,transparent); color:var(--accent)}
+  button:disabled{opacity:.45}
+  .hint{font-size:12.5px; color:var(--dim); margin:8px 2px 0; line-height:1.6}
+  .hint code{
+    font:12px ui-monospace,Menlo,monospace; background:var(--monobg);
+    padding:1px 5px; border-radius:4px;
+  }
+  .hint.warn.on{color:var(--warn)}
+  /* 安全相关的开关要长得不一样，不能和「换个音效」混在一起 */
+  .card.danger{border-color:color-mix(in srgb,var(--warn) 45%,transparent)}
+  .card.danger.on{
+    border-color:color-mix(in srgb,var(--no) 60%,transparent);
+    background:color-mix(in srgb,var(--no) 7%,var(--card));
+  }
+  .card.danger input[type=checkbox]:checked{background:var(--no)}
+  .lbl code{font:11.5px ui-monospace,Menlo,monospace; opacity:.9}
+  /* 让「去装一个」和「填 key」在同一处——手机上点一下就跳 App Store */
+  .getapp{
+    display:inline-block; margin-top:6px; color:var(--accent); text-decoration:none;
+    font-size:12.5px; font-weight:500;
+  }
+  .seg{
+    flex:1; margin:0; padding:11px 0; border-radius:9px; font-size:14px;
+    border:1.5px solid var(--line); background:var(--card); color:var(--dim);
+  }
+  .seg.on{border-color:color-mix(in srgb,var(--accent) 50%,transparent); color:var(--accent); font-weight:600}
+  .toast{
+    position:fixed; left:50%; bottom:calc(28px + env(safe-area-inset-bottom)); transform:translateX(-50%);
+    background:var(--fg); color:var(--bg); padding:11px 20px; border-radius:22px; font-size:14px;
+    opacity:0; transition:opacity .25s; pointer-events:none; max-width:90vw; text-align:center;
+  }
+  .toast.on{opacity:.95}
+</style>
+</head>
+<body>
+<div class="nav"><a href="/ui">‹ 返回</a><h1>设置</h1></div>
+
+<h2>手机推送（可选）</h2>
+<p class="hint" style="margin:0 2px 10px">
+  不填也能用——需要审批时 Mac 会弹通知并响一声，终端状态栏也会显示待审批数。
+  只有当你想<b>人不在电脑边也能被叫醒</b>时才需要配置。
+</p>
+<div class="card">
+  <div class="row" style="display:block">
+    <div class="lbl" style="margin-bottom:9px">
+      <b>Bark Key</b>
+      <span>
+        打开 Bark App，复制首页那串 key 粘贴到这里
+        <a class="getapp" href="https://apps.apple.com/app/id1403753865" target="_blank" rel="noopener">
+          还没装？去 App Store ↗
+        </a>
+      </span>
+    </div>
+    <input type="text" id="barkKey" placeholder="粘贴 Bark App 首页那串 key" autocapitalize="off" autocorrect="off" spellcheck="false">
+  </div>
+  <div class="row">
+    <div class="lbl"><b>启用手机推送</b><span>锁屏通知需要走 APNs，无法只用 Wi-Fi</span></div>
+    <input type="checkbox" id="pushEnabled">
+  </div>
+  <div class="row">
+    <div class="lbl"><b>推送里显示命令全文</b><span>关闭时公网只看到「Bash 操作」，命令只在局域网页面显示</span></div>
+    <input type="checkbox" id="detailInPush">
+  </div>
+</div>
+<button id="testPush">发一条测试通知</button>
+
+<h2>Mac 本地提醒</h2>
+<div class="card">
+  <div class="row">
+    <div class="lbl"><b>macOS 通知</b><span>人在电脑边时由 Mac 自己出声，完全不联网</span></div>
+    <input type="checkbox" id="macNotify">
+  </div>
+</div>
+
+<h2>任务完成通知</h2>
+<div class="card">
+  <div class="row">
+    <div class="lbl"><b>任务完成时提醒</b><span>每轮回复结束都会触发，用下面的时长过滤</span></div>
+    <input type="checkbox" id="onStop">
+  </div>
+  <div class="row">
+    <div class="lbl"><b>最短时长</b><span>短于此的任务不提醒，避免每问一句都响</span></div>
+    <input type="text" id="minTurnMs" style="width:90px;text-align:right" inputmode="numeric">
+  </div>
+</div>
+<p class="hint">单位秒。设 0 表示每轮都提醒。</p>
+
+<h2>审批策略</h2>
+<div class="card">
+  <div class="row">
+    <div class="lbl"><b>普通操作自动通过</b><span>没人处理时自动放行，别为 npm run build 这种事等着</span></div>
+    <input type="checkbox" id="autoOn">
+  </div>
+  <div class="row">
+    <div class="lbl"><b>等待时长</b><span>这段时间内你随时可以在手机上拒绝</span></div>
+    <input type="text" id="autoSec" style="width:90px;text-align:right" inputmode="numeric">
+  </div>
+</div>
+<p class="hint">单位秒。高风险操作不受这条影响，见下方。</p>
+
+<div class="card danger">
+  <div class="row">
+    <div class="lbl">
+      <b>高风险操作也自动通过</b>
+      <span>包括 <code>rm -rf</code>、<code>git push --force</code>、密钥文件、写工作目录之外</span>
+    </div>
+    <input type="checkbox" id="autoHigh">
+  </div>
+</div>
+<p class="hint warn" id="highHint">
+  关闭时高风险操作会一直等你决策（最长 <b id="toSec">570</b> 秒），超时则拒绝。
+  开启后，你没看手机时 <code>rm -rf</code> 会自己放行 —— 这正是审批功能要防的事。
+</p>
+
+<h2>访问地址</h2>
+<div class="card">
+  <div class="row" style="display:block">
+    <div class="lbl"><b>当前地址</b><span id="curUrl" style="font-family:ui-monospace,Menlo,monospace"></span></div>
+  </div>
+  <div class="row" style="display:block">
+    <div class="lbl" style="margin-bottom:9px">
+      <b>地址方式</b>
+      <span>主机名不随 IP 变化，换 Wi-Fi 也不用重扫码；万一你的路由器屏蔽组播导致打不开，就改用 IP</span>
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="seg" data-mode="ip">IP（稳）</button>
+      <button class="seg" data-mode="hostname">主机名</button>
+    </div>
+    <p class="hint" id="probe" style="margin-top:10px"></p>
+  </div>
+  <div class="row">
+    <div class="lbl"><b>当前网络</b><span id="netLabel">—</span></div>
+  </div>
+</div>
+<p class="hint" id="altHint"></p>
+
+<h2>验收</h2>
+<button class="primary" id="selftest">发一条测试审批</button>
+<p class="hint">会造一条假的待审批推到你手机上，批准或拒绝都<b>不会真的执行任何操作</b>。走完这一遍，说明安装成功。</p>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let toastTimer;
+function toast(msg) {
+  $('toast').textContent = msg;
+  $('toast').classList.add('on');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => $('toast').classList.remove('on'), 2200);
+}
+
+async function load() {
+  const c = await fetch('/api/config').then((r) => r.json());
+  $('barkKey').value = c.barkKey;
+  $('barkKey').dataset.masked = c.barkConfigured ? '1' : '';
+  $('pushEnabled').checked = c.pushEnabled;
+  $('pushEnabled').disabled = !c.barkConfigured;
+  $('detailInPush').checked = c.detailInPush;
+  $('macNotify').checked = c.macNotify;
+  $('onStop').checked = c.onStop;
+  $('minTurnMs').value = Math.round(c.minTurnMs / 1000);
+
+  $('autoOn').checked = c.autoApproveMs > 0;
+  $('autoSec').value = Math.round((c.autoApproveMs || 10000) / 1000);
+  $('autoSec').disabled = !c.autoApproveMs;
+  $('autoHigh').checked = c.autoApproveHighRisk;
+  $('curUrl').textContent = c.baseUrl;
+  $('netLabel').textContent = c.network.label + (c.network.trusted ? ' · 已信任' : ' · 未信任（仅本机可用）');
+  $('netLabel').style.color = c.network.trusted ? '' : 'var(--warn)';
+  for (const b of document.querySelectorAll('.seg')) b.classList.toggle('on', b.dataset.mode === c.hostMode);
+  probeHostname(c);
+  $('altHint').innerHTML = c.altUrl
+    ? `打不开的话试试备用地址 <code>${c.altUrl}</code>（改动后需重启服务）`
+    : '改动后需重启服务';
+  $('autoHigh').disabled = !c.autoApproveMs;
+  $('toSec').textContent = Math.round(c.timeoutMs / 1000);
+  document.querySelector('.card.danger').classList.toggle('on', c.autoApproveHighRisk);
+  $('highHint').classList.toggle('on', c.autoApproveHighRisk);
+}
+
+async function save(patch, note = '已保存') {
+  await fetch('/api/config', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(patch),
+  });
+  toast(note);
+  await load();
+}
+
+// 掩码值不回传，避免把 "rNJf••••" 当成新 key 存进去
+$('barkKey').addEventListener('focus', function () {
+  if (this.dataset.masked) { this.value = ''; this.dataset.masked = ''; }
+});
+$('barkKey').addEventListener('change', function () {
+  const v = this.value.trim();
+  // 空串不再当作「清除」——聚焦时掩码被清空、直接失焦也会走到这里，
+  // 那样会把已配置的 key 误删。真要清除请长按下面的开关说明。
+  if (!v) return load();
+  save({ barkKey: v, pushEnabled: true }, 'Key 已保存，推送已开启');
+});
+
+for (const [id, key] of [['pushEnabled','pushEnabled'],['detailInPush','detailInPush'],['macNotify','macNotify'],['onStop','onStop']]) {
+  $(id).addEventListener('change', function () { save({ [key]: this.checked }); });
+}
+$('minTurnMs').addEventListener('change', function () {
+  save({ minTurnMs: Math.max(0, Number(this.value) || 0) * 1000 });
+});
+
+$('autoOn').addEventListener('change', function () {
+  const sec = Math.max(1, Number($('autoSec').value) || 10);
+  save({ autoApproveMs: this.checked ? sec * 1000 : 0 },
+       this.checked ? `普通操作 ${sec} 秒后自动通过` : '已关闭自动通过');
+});
+$('autoSec').addEventListener('change', function () {
+  save({ autoApproveMs: Math.max(1, Number(this.value) || 10) * 1000 });
+});
+
+// 这个开关会取消掉审批功能对危险操作的全部保护，值得一次显式确认
+$('autoHigh').addEventListener('change', function () {
+  if (this.checked) {
+    const ok = confirm(
+      '开启后，rm -rf、git push --force、写密钥文件这类操作\n' +
+      '在你没看手机时也会自动放行。\n\n' +
+      '这正是审批功能本来要防的事。确定开启？'
+    );
+    if (!ok) { this.checked = false; return; }
+  }
+  save({ autoApproveHighRisk: this.checked },
+       this.checked ? '⚠️ 高风险操作将自动通过' : '高风险操作恢复为等你决策');
+});
+
+/* 只有手机自己试过才算数：Mac 解析 .local 走回环，永远成功，
+   服务端的探测毫无意义。这里从手机发一个真实请求过去。 */
+async function probeHostname(c) {
+  const el = $('probe');
+  if (!c.localHost) { el.textContent = '本机没有 Bonjour 主机名，只能用 IP'; return; }
+  el.textContent = `正在从这台手机测试 ${c.localHost} 能否解析…`;
+  try {
+    const r = await fetch(`http://${c.localHost}:${location.port || 80}/healthz`,
+      { signal: AbortSignal.timeout(3000), cache: 'no-store' });
+    if (!r.ok) throw new Error();
+    el.innerHTML = `✅ 这台手机能解析 <code>${c.localHost}</code>，可以切到主机名 —— 之后 Mac 换 IP 也不用重扫码`;
+    el.style.color = 'var(--ok)';
+  } catch {
+    el.innerHTML = `⚠️ 这台手机<b>解析不了</b> <code>${c.localHost}</code>（网络可能屏蔽了组播）。请保持用 IP。`;
+    el.style.color = 'var(--warn)';
+  }
+}
+
+for (const b of document.querySelectorAll('.seg')) {
+  b.onclick = () => save({ hostMode: b.dataset.mode }, '已保存，重启服务后生效');
+}
+
+$('testPush').onclick = async function () {
+  this.disabled = true;
+  await fetch('/api/selftest/push', { method: 'POST' });
+  toast('已发出，看看锁屏');
+  this.disabled = false;
+};
+
+$('selftest').onclick = async function () {
+  this.disabled = true;
+  const r = await fetch('/api/selftest/approval', { method: 'POST' }).then((r) => r.json());
+  location.href = `/ui/a/${r.id}`;
+};
+
+load();
+</script>
+</body>
+</html>

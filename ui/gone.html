@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#05060a">
+<title>已结束 · Clamicro</title>
+<style>
+  /* iOS Safari 忽略 user-scalable=no，双击放大只能靠 touch-action 挡 */
+  html{touch-action:manipulation; -webkit-text-size-adjust:100%}
+  *{-webkit-tap-highlight-color:transparent}
+  body{
+    margin:0; min-height:100vh; background:#05060a; color:#e8eaed; overflow:hidden;
+    display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center;
+    font:16px/1.6 -apple-system,BlinkMacSystemFont,"PingFang SC","Helvetica Neue",sans-serif;
+    padding:24px calc(24px + env(safe-area-inset-left)) calc(24px + env(safe-area-inset-bottom));
+    --neon:#6b7280; --neon2:#7aa2f7;
+  }
+  body::before{
+    content:''; position:fixed; inset:0; pointer-events:none; opacity:.18;
+    background:
+      linear-gradient(transparent 0 calc(100% - 1px), color-mix(in srgb,var(--neon2) 60%,transparent) 100%) 0 0/100% 34px,
+      linear-gradient(90deg, transparent 0 calc(100% - 1px), color-mix(in srgb,var(--neon2) 60%,transparent) 100%) 0 0/34px 100%;
+    mask-image:radial-gradient(120% 80% at 50% 45%, #000 20%, transparent 72%);
+  }
+  body::after{
+    content:''; position:fixed; inset:0; pointer-events:none; opacity:.5;
+    background:repeating-linear-gradient(180deg, rgba(255,255,255,.035) 0 1px, transparent 1px 3px);
+  }
+  main{position:relative; z-index:1; max-width:340px}
+  .glyph{
+    font-size:58px; line-height:1; margin-bottom:20px; color:var(--neon2);
+    filter:drop-shadow(0 0 14px color-mix(in srgb,var(--neon2) 60%,transparent));
+  }
+  .code{
+    display:inline-block;
+    font:700 12px/1 ui-monospace,SFMono-Regular,Menlo,monospace;
+    letter-spacing:.3em; text-transform:uppercase; color:var(--neon2);
+    padding:8px 15px; border:1px solid color-mix(in srgb,var(--neon2) 45%,transparent);
+    border-radius:4px; background:color-mix(in srgb,var(--neon2) 8%,transparent);
+  }
+  h1{margin:20px 0 8px; font-size:21px; font-weight:600}
+  p{margin:0; color:#8b93a1; font-size:13.5px}
+  a{
+    display:inline-block; margin-top:30px; padding:13px 30px; border-radius:4px;
+    border:1px solid color-mix(in srgb,var(--neon2) 50%,transparent); color:var(--neon2);
+    text-decoration:none;
+    font:600 13px/1 ui-monospace,Menlo,monospace; letter-spacing:.18em; text-transform:uppercase;
+  }
+</style>
+</head>
+<body>
+<main>
+  <div class="glyph">◌</div>
+  <div class="code">no longer pending</div>
+  <h1>这条审批已经结束了</h1>
+  <p>
+    它可能已被批准、拒绝、自动通过，或者超时。<br>
+    如果 clamicro 服务在此期间重启过，历史记录也会一并清空。
+  </p>
+  <a href="/ui">← 回到首页</a>
+</main>
+</body>
+</html>

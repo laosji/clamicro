@@ -1,0 +1,484 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0b0d10" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f7f8fa" media="(prefers-color-scheme: light)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Clamicro</title>
+<style>
+  :root{
+    --bg:#f7f8fa; --card:#fff; --fg:#12151a; --dim:#6b7280; --line:#e4e7ec; --monobg:#f0f2f5;
+    --ok:#0a7d34; --no:#b42318; --warn:#b54708; --run:#1570ef;
+    --tabbg:rgba(255,255,255,.82);
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --bg:#0b0d10; --card:#14181d; --fg:#e8eaed; --dim:#8b93a1; --line:#242a32; --monobg:#0f1318;
+      --ok:#4ade80; --no:#f87171; --warn:#fbbf24; --run:#60a5fa;
+      --tabbg:rgba(14,18,23,.82);
+    }
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  /* iOS Safari 从 10 起就忽略 user-scalable=no，双击放大只能靠 touch-action 挡。
+     manipulation = 保留滚动和捏合，去掉双击缩放那 300ms 的等待。 */
+  html{touch-action:manipulation; -webkit-text-size-adjust:100%}
+  html,body{margin:0;height:100%;overflow-x:hidden;overscroll-behavior:none}
+  body{
+    background:var(--bg); color:var(--fg);
+    font:16px/1.5 -apple-system,BlinkMacSystemFont,"PingFang SC","Helvetica Neue",sans-serif;
+    display:flex; flex-direction:column;
+    padding:env(safe-area-inset-top) 0 0;
+  }
+  header{
+    display:flex; align-items:center; gap:8px; padding:16px 18px 10px; flex:0 0 auto;
+  }
+  header h1{font-size:19px; margin:0; font-weight:600}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--dim);flex:0 0 auto;transition:background .3s}
+  .dot.live{background:var(--ok)}
+  header a{margin-left:auto; font-size:14px; color:var(--run); text-decoration:none}
+
+  main{
+    flex:1 1 auto; overflow-y:auto; overflow-x:hidden; -webkit-overflow-scrolling:touch;
+    overscroll-behavior:contain;
+    padding:0 16px calc(80px + env(safe-area-inset-bottom));
+  }
+  h2{font-size:13px; color:var(--dim); font-weight:600; margin:20px 2px 8px; letter-spacing:.02em}
+
+  .card{
+    background:var(--card); border:1px solid var(--line); border-radius:14px;
+    padding:14px; margin-bottom:10px; display:block; color:inherit; text-decoration:none;
+  }
+  .card.alert{border-color:color-mix(in srgb,var(--warn) 55%,transparent)}
+  .top{display:flex; align-items:center; gap:8px; margin-bottom:6px}
+  .name{font-weight:600; font-size:16px; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .state{font-size:12px; padding:3px 9px; border-radius:20px; background:var(--monobg); color:var(--dim); flex:0 0 auto}
+  .state.Running{color:var(--run)} .state.Done{color:var(--ok)}
+  .state.Error{color:var(--no)} .state[class*="Waiting"]{color:var(--warn)}
+  .path{font:12px/1.4 ui-monospace,Menlo,monospace; color:var(--dim); overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .chips{display:flex; gap:6px; flex-wrap:wrap; margin-top:9px}
+  .chip{font-size:11.5px; padding:3px 8px; border-radius:20px; background:var(--monobg); color:var(--dim)}
+  .chip.warn{color:var(--warn)}
+  .head{font-size:15px; margin-top:9px; line-height:1.45; overflow-wrap:anywhere}
+
+  .meters{margin-top:12px; display:grid; gap:8px}
+  .meter{display:flex; align-items:center; gap:9px; font-size:12px; color:var(--dim)}
+  .meter b{font-weight:500; width:34px; flex:0 0 auto}
+  .bar{flex:1; height:6px; border-radius:3px; background:var(--line); overflow:hidden}
+  .bar i{display:block; height:100%; background:var(--run); border-radius:3px; transition:width .4s}
+  .bar i.mid{background:var(--warn)} .bar i.hot{background:var(--no)}
+  .pct{width:34px; text-align:right; flex:0 0 auto; font-variant-numeric:tabular-nums}
+  .reset{font-size:11.5px; color:var(--dim); margin-top:2px; text-align:right}
+
+  .empty{color:var(--dim); font-size:14px; text-align:center; padding:44px 20px; line-height:1.8}
+  .empty b{display:block; color:var(--fg); font-size:15px; font-weight:500; margin-bottom:4px}
+
+  /* 底部 tab bar */
+  nav{
+    position:fixed; left:0; right:0; bottom:0; z-index:5;
+    display:flex; border-top:1px solid var(--line);
+    background:var(--tabbg); backdrop-filter:saturate(180%) blur(20px);
+    padding-bottom:env(safe-area-inset-bottom);
+  }
+  nav button{
+    flex:1; border:none; background:none; cursor:pointer; color:var(--dim);
+    padding:9px 0 8px; display:flex; flex-direction:column; align-items:center; gap:3px;
+    font:500 11px -apple-system,"PingFang SC",sans-serif;
+  }
+  nav button svg{width:24px; height:24px; stroke:currentColor; fill:none; stroke-width:1.7; stroke-linecap:round; stroke-linejoin:round}
+  nav button.on{color:var(--run)}
+  nav .badge{
+    position:absolute; transform:translate(13px,-4px);
+    min-width:17px; height:17px; border-radius:9px; background:var(--no); color:#fff;
+    font:600 11px/17px -apple-system,sans-serif; text-align:center; padding:0 4px;
+  }
+  .hidden{display:none !important}
+
+  /* 发消息 */
+  textarea{
+    width:100%; min-height:120px; padding:14px; border-radius:12px; resize:vertical;
+    border:1px solid var(--line); background:var(--card); color:var(--fg);
+    font:15px/1.55 -apple-system,"PingFang SC",sans-serif;
+  }
+  textarea:focus{outline:none; border-color:color-mix(in srgb,var(--run) 50%,transparent)}
+  .send{
+    width:100%; margin-top:10px; padding:15px; border-radius:12px; cursor:pointer;
+    border:1.5px solid color-mix(in srgb,var(--run) 45%,transparent);
+    background:var(--card); color:var(--run);
+    font:600 16px -apple-system,"PingFang SC",sans-serif;
+  }
+  .send:disabled{opacity:.45}
+  .pick{display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px}
+  .pick button{
+    padding:8px 13px; border-radius:20px; cursor:pointer; font-size:13px;
+    border:1.5px solid var(--line); background:var(--card); color:var(--dim);
+  }
+  .pick button.on{border-color:color-mix(in srgb,var(--run) 50%,transparent); color:var(--run); font-weight:600}
+  .qitem{
+    display:flex; gap:10px; align-items:flex-start;
+    background:var(--card); border:1px solid var(--line); border-radius:12px;
+    padding:12px 14px; margin-bottom:8px;
+  }
+  .qitem p{margin:0; flex:1; font-size:14px; line-height:1.5; overflow-wrap:anywhere; white-space:pre-wrap}
+  .qitem button{
+    flex:0 0 auto; border:none; background:none; color:var(--no);
+    font-size:13px; cursor:pointer; padding:2px 4px;
+  }
+  .note{
+    font-size:12.5px; line-height:1.6; color:var(--warn); margin:10px 2px 0;
+    padding:10px 12px; border-radius:10px;
+    background:color-mix(in srgb,var(--warn) 10%,var(--card));
+    border:1px solid color-mix(in srgb,var(--warn) 28%,transparent);
+  }
+
+  /* 那 10 秒是你唯一能否决的窗口，卡片上必须看得见还剩多久、到点会怎样 */
+  .dl{
+    display:flex; align-items:center; gap:9px; margin-top:11px;
+    padding-top:10px; border-top:1px solid var(--line);
+    font:11.5px/1 ui-monospace,Menlo,monospace; color:var(--dim);
+    position:relative; z-index:1;
+  }
+  .dlbar{flex:1; height:4px; border-radius:2px; background:var(--line); overflow:hidden}
+  .dlbar i{display:block; height:100%; width:100%; background:var(--dim); transition:width 1s linear}
+  .dltext{flex:0 0 auto; font-variant-numeric:tabular-nums}
+  .dl.auto{color:var(--ok)}   .dl.auto .dlbar i{background:var(--ok)}
+  .dl.warn{color:var(--warn)} .dl.warn .dlbar i{background:var(--warn)}
+
+  /* 列表里的待审批卡片可直接左右滑 */
+  .swipecard{border-radius:14px}
+  .swipecard .head{position:relative; z-index:1}
+  .undoline{
+    display:flex; align-items:center; gap:12px;
+    background:var(--fg); color:var(--bg); border-radius:14px; padding:14px;
+    margin-bottom:10px; font-size:14.5px; font-weight:500;
+  }
+  .undoline span{flex:1}
+  .undoline button{
+    border:none; background:var(--bg); color:var(--fg); border-radius:9px;
+    padding:8px 15px; font:600 14px -apple-system,"PingFang SC",sans-serif; cursor:pointer;
+  }
+</style>
+<link rel="stylesheet" href="/ui/swipe.css">
+</head>
+<body>
+<header>
+  <span class="dot" id="dot"></span>
+  <h1 id="title">概览</h1>
+  <a href="/ui/settings">设置</a>
+</header>
+
+<main id="view"></main>
+
+<nav>
+  <button id="tabHome" class="on" data-tab="home">
+    <span style="position:relative"><svg viewBox="0 0 24 24"><path d="M3 10.5 12 3l9 7.5"/><path d="M5.5 9.5V20a1 1 0 0 0 1 1h11a1 1 0 0 0 1-1V9.5"/></svg><i class="badge hidden" id="badge"></i></span>
+    首页
+  </button>
+  <button id="tabSess" data-tab="sess">
+    <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M7 9.5l2.5 2.5L7 14.5M12.5 15H17"/></svg>
+    会话
+  </button>
+  <button id="tabSay" data-tab="say">
+    <span style="position:relative"><svg viewBox="0 0 24 24"><path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 9.5 9.5 0 0 1-2.8-.4L4 21l1.4-4a8.3 8.3 0 0 1-1.4-4.6A8.4 8.4 0 0 1 12.6 4 8.4 8.4 0 0 1 21 11.5z"/></svg><i class="badge hidden" id="qbadge"></i></span>
+    发消息
+  </button>
+</nav>
+
+<script src="/ui/swipe.js"></script>
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+let tab = sessionStorage.getItem('ccm-tab') || 'home';
+let sessions = [], pending = [], cfg = null, quota = null, inbox = {};
+
+function meter(label, pct) {
+  const v = Math.min(100, Math.max(0, pct ?? 0));
+  const cls = v >= 90 ? 'hot' : v >= 70 ? 'mid' : '';
+  return `<div class="meter"><b>${label}</b><div class="bar"><i class="${cls}" style="width:${v}%"></i></div><span class="pct">${Math.round(v)}%</span></div>`;
+}
+
+function until(ts) {
+  if (!ts) return '';
+  const ms = ts * 1000 - Date.now();
+  if (ms <= 0) return '即将重置';
+  const h = Math.floor(ms / 3600000), m = Math.floor((ms % 3600000) / 60000);
+  return h >= 24 ? `${Math.floor(h / 24)} 天后重置` : h ? `${h} 小时 ${m} 分后重置` : `${m} 分后重置`;
+}
+
+function ago(ts) {
+  if (!ts) return '未知';
+  const s = Math.round((Date.now() - ts) / 1000);
+  if (s < 60) return `${s} 秒前`;
+  if (s < 3600) return `${Math.round(s / 60)} 分钟前`;
+  return `${Math.round(s / 3600)} 小时前`;
+}
+
+const dirOf = (s) => (s.cwd || '').split('/').filter(Boolean).pop() || s.session_id.slice(0, 8);
+
+function renderHome() {
+  const busy = sessions.filter((s) => s.state === 'Running' || s.state === 'Waiting Approval');
+
+  let h = '';
+
+  // 推送悄悄关掉了你是看不出来的——只有 Mac 会响，人一走开就彻底静默。
+  // 这个状态必须在首页明说。
+  if (cfg && !cfg.pushEnabled) {
+    // 配过 key 却被关掉 = 大概率是失手，用告警样式；
+    // 从没配过 = 可能是主动选择，用普通样式，别一直唠叨
+    const oops = cfg.barkConfigured;
+    h += `<a class="card${oops ? ' alert' : ''}" href="/ui/settings" style="display:block">
+      <div class="top"><span class="name">🔕 手机推送已关闭</span></div>
+      <div class="path" style="white-space:normal">${oops
+        ? '通道被关掉了，现在只有 Mac 会提醒你。点此开启'
+        : '只有 Mac 会提醒你。高风险操作在你离开电脑时会等到超时被拒绝'}</div>
+    </a>`;
+  }
+
+  if (pending.length) {
+    h += '<h2>待审批</h2>' + pending.map((a) => undoing.has(a.id) ? `
+      <div class="undoline">
+        <span>已批准 · <b id="undo-${a.id}">3</b> 秒后执行</span>
+        <button onclick="cancelUndo('${a.id}')">撤销</button>
+      </div>` : `
+      <div class="card alert swipecard" data-ap="${a.id}" data-risk="${esc(a.risk.level)}">
+        <div class="top">
+          <span class="name">${a.risk.level === 'high' ? '⚠️ ' : '🔐 '}${esc(a.session_name || (a.cwd||'').split('/').filter(Boolean).pop() || '')}</span>
+          <span class="state" style="color:var(--warn)">${esc(a.tool_name)}</span>
+        </div>
+        <div class="head">${esc(a.headline || a.summary)}</div>
+        <div class="chips">${(a.impact||[]).map((i) => `<span class="chip ${i.tone==='calm'?'':'warn'}">${esc(i.label)}</span>`).join('')}
+          <a class="chip" href="/ui/a/${a.id}" style="color:var(--run)">${a.risk.level === 'high' ? '需详情页批准 ›' : '详情 ›'}</a>
+        </div>
+        <div class="dl" data-exp="${a.expires_at}" data-born="${a.created_at}" data-auto="${a.auto_decision}">
+          <span class="dlbar"><i></i></span><span class="dltext">—</span>
+        </div>
+      </div>`).join('');
+  }
+
+  h += '<h2>用量</h2>';
+  h += quota ? `<div class="card">
+      ${meter('5h', quota.five_hour?.pct)}
+      <div class="reset">${until(quota.five_hour?.resets_at)}</div>
+      <div style="height:10px"></div>
+      ${meter('7d', quota.seven_day?.pct)}
+      <div class="reset">${until(quota.seven_day?.resets_at)}</div>
+      <div class="reset" style="margin-top:8px;opacity:.7">更新于 ${ago(quota.at)}</div>
+    </div>`
+    : `<div class="card"><div class="path">暂无数据 — statusLine 需新开会话才生效</div></div>`;
+
+  h += '<h2>状态</h2>';
+  h += `<div class="card"><div class="top">
+      <span class="name">${busy.length ? `${busy.length} 个会话进行中` : '空闲'}</span>
+      <span class="state ${busy.length ? 'Running' : ''}">${sessions.length} 个会话</span>
+    </div>${busy.length ? `<div class="path">${busy.map((s) => esc(dirOf(s))).join(' · ')}</div>` : ''}</div>`;
+
+  $('view').innerHTML = h;
+}
+
+function renderSessions() {
+  if (!sessions.length) {
+    $('view').innerHTML = '<div class="empty"><b>暂无活跃会话</b>新开一个 Claude Code 会话即可</div>';
+    return;
+  }
+  $('view').innerHTML = sessions.map((s) => {
+    const c = s.context;
+    return `<a class="card" href="/ui/s/${s.session_id}" style="margin-top:14px">
+      <div class="top">
+        <span class="name">${esc(s.session_name || dirOf(s))}</span>
+        <span class="state ${esc(s.state).replace(/\s/g,'-')}">${esc(s.state)}${s.sub_state ? ' · ' + esc(s.sub_state) : ''}</span>
+      </div>
+      <div class="path">${esc(s.cwd || '')}</div>
+      ${c ? `<div class="meters">${meter('ctx', c.used_pct)}</div>` : ''}
+      <div class="chips">
+        ${s.model ? `<span class="chip">${esc(s.model)}</span>` : ''}
+        ${s.cost_usd != null ? `<span class="chip">$${s.cost_usd.toFixed(4)}</span>` : ''}
+        <span class="chip" style="color:var(--run)">时间线 ›</span>
+      </div>
+    </a>`;
+  }).join('');
+}
+
+/* ── 列表内快捷滑动 ──
+   与审批页共用 ui/swipe.js。批准同样给 3 秒撤销窗口——手势比按钮容易误触发，
+   而这里卡片更小、更密集，误触发概率只高不低。 */
+const undoing = new Map();
+
+async function submit(id, decision) {
+  try {
+    await fetch(`/api/approvals/${id}/decide`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ decision }),
+    });
+  } catch { /* 下一次轮询/SSE 会纠正 */ }
+  refresh();
+}
+
+function cancelUndo(id) {
+  const u = undoing.get(id);
+  if (!u) return;
+  clearInterval(u.tick); clearTimeout(u.timer);
+  undoing.delete(id);
+  render();
+}
+
+function startUndo(id) {
+  let n = 3;
+  const tick = setInterval(() => {
+    n--;
+    const el = document.getElementById(`undo-${id}`);
+    if (el) el.textContent = Math.max(0, n);
+  }, 1000);
+  const timer = setTimeout(() => {
+    clearInterval(tick);
+    undoing.delete(id);
+    submit(id, 'allow');
+  }, 3000);
+  undoing.set(id, { tick, timer });
+  render();
+}
+
+/** 只刷倒计时。整页重绘会重建 DOM，把滑动手势的绑定一起弄丢。 */
+function tickDeadlines() {
+  for (const el of document.querySelectorAll('.dl')) {
+    const exp = +el.dataset.exp, born = +el.dataset.born;
+    const auto = el.dataset.auto === 'allow';
+    const left = Math.max(0, exp - Date.now());
+    const s = Math.ceil(left / 1000);
+    const mmss = s >= 60 ? `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}` : `${s}s`;
+    el.querySelector('.dlbar i').style.width = (left / (exp - born)) * 100 + '%';
+    el.querySelector('.dltext').textContent = `${mmss} 后${auto ? '自动通过' : '自动拒绝'}`;
+    el.classList.toggle('auto', auto);
+    el.classList.toggle('warn', !auto && left <= 60000);
+  }
+}
+
+function attachListSwipes() {
+  for (const card of document.querySelectorAll('.swipecard')) {
+    const id = card.dataset.ap;
+    attachSwipe(card, {
+      // 列表是「快速分诊」的地方：例行操作放行、可疑的拒掉。
+      // 但在密集滚动的列表里滑一下就批准 rm -rf 太容易了——高危只能拒绝，
+      // 要批准必须点进详情页看清楚。
+      mode: card.dataset.risk === 'high' ? 'denyOnly' : 'normal',
+      ignore: 'a, button',
+      onCommit: (dir) => (dir === 'deny' ? submit(id, 'deny') : startUndo(id)),
+    });
+  }
+}
+
+let sayTarget = null, draft = '';
+
+function renderSay() {
+  const live = sessions.filter((s) => s.state !== 'Done');
+  const pool = live.length ? live : sessions;
+  if (!pool.length) {
+    $('view').innerHTML = '<div class="empty"><b>没有会话可发送</b>先在 Mac 上开一个 Claude Code 会话</div>';
+    return;
+  }
+  if (!pool.find((s) => s.session_id === sayTarget)) sayTarget = pool[0].session_id;
+  const target = pool.find((s) => s.session_id === sayTarget);
+  const q = (inbox[sayTarget] || []);
+
+  $('view').innerHTML = `
+    <h2>发给哪个会话</h2>
+    <div class="pick">${pool.map((s) => `
+      <button data-sid="${s.session_id}" class="${s.session_id === sayTarget ? 'on' : ''}">${esc(s.session_name || dirOf(s))}</button>`).join('')}
+    </div>
+    <textarea id="draft" placeholder="想让它改做什么？&#10;例如：先别动数据库，改成只读一遍现有 schema">${esc(draft)}</textarea>
+    <button class="send" id="sendBtn">加入队列</button>
+    <div class="note">
+      消息不会立刻送达。hooks 是单向的，唯一的注入点是「这一轮结束时」——
+      所以它会在 <b>${esc(target.session_name || dirOf(target))}</b> 跑完当前这一轮后进入对话。
+      ${target.state === 'Done' || target.state === 'Idle'
+        ? '<br><br>⚠️ 这个会话现在是空闲的，已经停过了。消息要等到你在终端里再发起一轮、那一轮结束时才会送达。'
+        : ''}
+    </div>
+    ${q.length ? `<h2>队列中（${q.length}）</h2>` + q.map((m) => `
+      <div class="qitem"><p>${esc(m.text)}</p><button data-del="${m.id}">删除</button></div>`).join('') : ''}
+  `;
+
+  for (const b of document.querySelectorAll('.pick button')) {
+    b.onclick = () => { sayTarget = b.dataset.sid; render(); };
+  }
+  $('draft').oninput = (e) => { draft = e.target.value; };
+  $('sendBtn').onclick = async () => {
+    const text = $('draft').value.trim();
+    if (!text) return;
+    $('sendBtn').disabled = true;
+    await fetch(`/api/sessions/${sayTarget}/say`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    }).catch(() => {});
+    draft = '';
+    await refresh();
+  };
+  for (const b of document.querySelectorAll('[data-del]')) {
+    b.onclick = async () => {
+      await fetch(`/api/sessions/${sayTarget}/say/${b.dataset.del}`, { method: 'DELETE' }).catch(() => {});
+      await refresh();
+    };
+  }
+}
+
+function render() {
+  $('title').textContent = { home: '概览', sess: '会话', say: '发消息' }[tab];
+  for (const b of document.querySelectorAll('nav button')) b.classList.toggle('on', b.dataset.tab === tab);
+  $('badge').textContent = pending.length;
+  $('badge').classList.toggle('hidden', !pending.length);
+  const qn = Object.values(inbox).reduce((a, v) => a + v.length, 0);
+  $('qbadge').textContent = qn;
+  $('qbadge').classList.toggle('hidden', !qn);
+  ({ home: renderHome, sess: renderSessions, say: renderSay }[tab])();
+  if (tab === 'home') { attachListSwipes(); tickDeadlines(); }
+}
+
+for (const b of document.querySelectorAll('nav button')) {
+  b.onclick = () => {
+    tab = b.dataset.tab;
+    sessionStorage.setItem('ccm-tab', tab);
+    $('view').scrollTop = 0;
+    render();
+  };
+}
+
+async function refresh() {
+  const [s, a, c, i] = await Promise.all([
+    fetch('/api/sessions').then((r) => r.json()),
+    fetch('/api/approvals').then((r) => r.json()),
+    fetch('/api/config').then((r) => r.json()),
+    fetch('/api/inbox').then((r) => r.json()),
+  ]);
+  sessions = s.sessions;
+  quota = s.limits;
+  pending = a.approvals;
+  cfg = c;
+  inbox = i.inbox || {};
+  render();
+}
+
+// SSE 实时更新；切后台会断，回前台先全量刷新再重连（计划附录 A.4）
+function connect() {
+  const es = new EventSource('/api/stream');
+  es.onopen = () => $('dot').classList.add('live');
+  es.onerror = () => $('dot').classList.remove('live');
+  es.addEventListener('session', refresh);
+  es.addEventListener('approval', refresh);
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') refresh();
+});
+
+setInterval(() => { if (tab === 'home') render(); }, 30000); // 让「N 分后重置」自己走
+setInterval(() => { if (tab === 'home') tickDeadlines(); }, 1000);
+
+render();
+refresh().then(connect).catch(() => {
+  $('view').innerHTML = '<div class="empty"><b>连不上服务</b>确认 clamicro 还在 Mac 上运行</div>';
+});
+</script>
+</body>
+</html>

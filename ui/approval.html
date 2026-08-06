@@ -1,0 +1,546 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0b0d10" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f7f8fa" media="(prefers-color-scheme: light)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>审批 · Clamicro</title>
+<style>
+  :root{
+    --bg:#f7f8fa; --card:#fff; --fg:#12151a; --dim:#6b7280; --line:#e4e7ec;
+    --mono:#0f1115; --monobg:#f0f2f5;
+    --ok:#0a7d34; --no:#b42318; --warn:#b54708; --warnbg:#fef3e2; --calm:#475467;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --bg:#0b0d10; --card:#14181d; --fg:#e8eaed; --dim:#8b93a1; --line:#242a32;
+      --mono:#d7dbe0; --monobg:#0f1318;
+      --ok:#4ade80; --no:#f87171; --warn:#fbbf24; --warnbg:#2a1f0a; --calm:#9aa3b0;
+    }
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  /* iOS Safari 从 10 起就忽略 user-scalable=no，双击放大只能靠 touch-action 挡。
+     manipulation = 保留滚动和捏合，去掉双击缩放那 300ms 的等待。 */
+  html{touch-action:manipulation; -webkit-text-size-adjust:100%}
+  /* 卡片飞出时会把布局撑宽，产生横向滚动条；加上 iOS 的橡皮筋回弹，
+     整页会跟着晃。只有卡片该动，页面不该动。 */
+  html,body{margin:0;height:100%;overflow-x:hidden;overscroll-behavior:none}
+  body{
+    background:var(--bg); color:var(--fg);
+    font:16px/1.5 -apple-system,BlinkMacSystemFont,"PingFang SC","Helvetica Neue",sans-serif;
+    display:flex; flex-direction:column;
+    padding:env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left);
+  }
+
+  /* 倒计时：顶部一条细线。9 分钟不是紧急信息，不该占据视觉中心 */
+  #bar{height:3px; background:var(--line); flex:0 0 auto}
+  #bar i{display:block; height:100%; width:100%; background:var(--dim); transition:width 1s linear}
+  #bar.urgent i{background:var(--no)}
+
+  header{padding:12px 18px 10px; border-bottom:1px solid var(--line); flex:0 0 auto}
+  .crumb{
+    font-size:13px; color:var(--dim); display:flex; gap:8px; align-items:baseline;
+    white-space:nowrap; overflow:hidden;
+  }
+  .crumb b{color:var(--fg); font-weight:600; flex:0 0 auto}
+  /* 曾用 direction:rtl 做左截断，副作用是把开头的 "/" 甩到末尾，
+     开头的斜杠会跑到末尾。改为在 JS 里取末尾几段。 */
+  .crumb span{overflow:hidden; text-overflow:ellipsis; min-width:0}
+  #clock{margin-left:auto; flex:0 0 auto; font-variant-numeric:tabular-nums}
+  #clock.urgent{color:var(--no); font-weight:600}
+
+  main{
+    flex:1 1 auto; overflow-y:auto; overflow-x:hidden; padding:14px;
+    -webkit-overflow-scrolling:touch;
+    /* contain：滚到头时不把回弹传给外层，页面不会整体上下漂 */
+    overscroll-behavior:contain;
+    display:flex; flex-direction:column;
+  }
+
+  /* ── 卡片滑动手势：左滑拒绝，右滑批准 ── */
+  .swipe{
+    position:relative; background:var(--card); border:1px solid var(--line);
+    border-radius:18px; padding:18px; overflow:hidden;
+    /* margin:auto 让内容短时垂直居中、内容长时正常从顶部滚动
+       （justify-content:center 会在溢出时把顶部裁掉） */
+    width:100%; max-width:560px; margin:auto;
+    /* pan-y 把纵向滚动交给浏览器，横向留给我们，不用手动 preventDefault */
+    touch-action:pan-y; will-change:transform;
+  }
+  .swipe.armed{cursor:grab}
+  .swipehint{
+    display:flex; align-items:center; justify-content:center; gap:8px;
+    font-size:12px; color:var(--dim); margin-top:14px; opacity:.75;
+  }
+  .swipehint b{font-weight:500}
+
+  /* 到期倒计时。放在卡片里、紧挨手势提示——它是「不操作会怎样」的答案，
+     顶部那条 3px 线太隐蔽，看不见就等于没有。 */
+  .deadline{
+    display:flex; align-items:center; gap:9px; margin-top:12px;
+    padding-top:12px; border-top:1px solid var(--line);
+    font:12px/1 ui-monospace,SFMono-Regular,Menlo,monospace; color:var(--dim);
+  }
+  #dlBar{flex:1; height:4px; border-radius:2px; background:var(--line); overflow:hidden}
+  #dlBar i{display:block; height:100%; width:100%; background:var(--dim); transition:width 1s linear}
+  #dlText{flex:0 0 auto; font-variant-numeric:tabular-nums}
+  .deadline.urgent{color:var(--no)}
+  .deadline.urgent #dlBar i{background:var(--no)}
+  .deadline.auto{color:var(--ok)}
+  .deadline.auto #dlBar i{background:var(--ok)}
+
+  /* ── 撤销窗口：手势比按钮更容易误触发，批准给一个反悔窗口。
+     沿用结果页的赛博朋克语汇，让「批准中 → 已批准」是一条连续的视觉线。 ── */
+  #undo{
+    position:fixed; inset:0; z-index:9;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    background:#05060a; color:#e8eaed; overflow:hidden;
+    padding:24px calc(24px + env(safe-area-inset-left)) calc(24px + env(safe-area-inset-bottom));
+    --neon:#39ff14; --neon2:#00f0ff;
+  }
+  #undo::before{
+    content:''; position:absolute; inset:0; pointer-events:none; opacity:.18;
+    background:
+      linear-gradient(transparent 0 calc(100% - 1px), color-mix(in srgb,var(--neon2) 60%,transparent) 100%) 0 0/100% 34px,
+      linear-gradient(90deg, transparent 0 calc(100% - 1px), color-mix(in srgb,var(--neon2) 60%,transparent) 100%) 0 0/34px 100%;
+    mask-image:radial-gradient(120% 80% at 50% 45%, #000 20%, transparent 72%);
+  }
+  #undo::after{
+    content:''; position:absolute; inset:0; pointer-events:none; opacity:.5;
+    background:repeating-linear-gradient(180deg, rgba(255,255,255,.035) 0 1px, transparent 1px 3px);
+  }
+  #undo > *{position:relative; z-index:1}
+
+  /* 倒计时环：把「还剩多久」做成可看得见的进度，而不是一个数字 */
+  .ring{
+    width:132px; height:132px; border-radius:50%; display:grid; place-items:center;
+    background:conic-gradient(var(--neon) var(--p,100%), rgba(255,255,255,.07) 0);
+    filter:drop-shadow(0 0 16px color-mix(in srgb,var(--neon) 55%,transparent));
+    transition:background .1s linear;
+  }
+  .ring > div{
+    width:118px; height:118px; border-radius:50%; background:#05060a;
+    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px;
+  }
+  .ring b{
+    font:700 40px/1 ui-monospace,SFMono-Regular,Menlo,monospace; color:var(--neon);
+    text-shadow:0 0 14px var(--neon); font-variant-numeric:tabular-nums;
+  }
+  .ring i{font:500 10px/1 ui-monospace,Menlo,monospace; letter-spacing:.22em; color:#6b7280; font-style:normal}
+
+  #undoText{
+    margin-top:26px; font:700 12px/1 ui-monospace,SFMono-Regular,Menlo,monospace;
+    letter-spacing:.32em; text-transform:uppercase; color:var(--neon);
+    text-shadow:0 0 10px color-mix(in srgb,var(--neon) 70%,transparent);
+  }
+  #undoSub{margin:10px 0 0; font-size:13.5px; color:#8b93a1; text-align:center; max-width:280px}
+  #undoBtn{
+    margin-top:32px; padding:15px 40px; border-radius:4px; cursor:pointer;
+    background:transparent; border:1px solid color-mix(in srgb,var(--neon2) 55%,transparent);
+    color:var(--neon2);
+    font:600 13px/1 ui-monospace,Menlo,monospace; letter-spacing:.2em; text-transform:uppercase;
+    text-shadow:0 0 10px color-mix(in srgb,var(--neon2) 70%,transparent);
+  }
+  #undoBtn:active{background:color-mix(in srgb,var(--neon2) 14%,transparent)}
+  @media (prefers-reduced-motion:reduce){
+    .swipe{transition:opacity .2s !important}
+  }
+
+  .tags{display:flex; align-items:center; gap:7px; flex-wrap:wrap; margin-bottom:12px}
+  .tag{font-size:12px; padding:4px 9px; border-radius:20px; background:var(--monobg); color:var(--dim)}
+  .tag.tool{font-family:ui-monospace,Menlo,monospace; color:var(--fg); font-weight:600}
+  .tag.warn{background:var(--warnbg); color:var(--warn)}
+  .tag.danger{background:var(--warnbg); color:var(--no); font-weight:600}
+  .tag.calm{color:var(--calm)}
+
+  /* 主角：一句人话 */
+  h1{font-size:21px; line-height:1.4; margin:0 0 14px; font-weight:600; overflow-wrap:anywhere}
+
+  .risk{
+    background:var(--warnbg); border:1px solid color-mix(in srgb,var(--warn) 35%,transparent);
+    color:var(--warn); border-radius:10px; padding:11px 13px; margin-bottom:14px; font-size:14px;
+  }
+  .risk b{display:block; margin-bottom:3px}
+
+  details{margin-bottom:8px}
+  summary{
+    font-size:14px; color:var(--dim); cursor:pointer; padding:9px 0;
+    list-style:none; display:flex; align-items:center; gap:6px;
+  }
+  summary::-webkit-details-marker{display:none}
+  summary::before{content:'▸'; transition:transform .15s}
+  details[open] summary::before{transform:rotate(90deg)}
+  .codewrap{position:relative}
+  .codewrap::after{
+    content:''; position:absolute; left:0; right:0; bottom:0; height:34px; pointer-events:none;
+    background:linear-gradient(transparent,var(--monobg)); border-radius:0 0 10px 10px;
+  }
+  .codewrap.short::after{display:none}
+  pre{
+    margin:0; padding:14px; border-radius:10px;
+    background:var(--monobg); color:var(--mono); border:1px solid var(--line);
+    font:13.5px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;
+    /* break-all 会把 clamicro 从中间劈开；anywhere 优先在分隔符处断 */
+    white-space:pre-wrap; word-break:normal; overflow-wrap:anywhere;
+    max-height:46vh; overflow:auto;
+  }
+
+  /* ── 结果态：赛博朋克。这是一个「时刻」而不是一个界面，
+     所以不跟随系统深浅色，固定深色 + 霓虹。 ── */
+  #result{
+    position:fixed; inset:0; z-index:10;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    background:#05060a; color:#e8eaed; text-align:center; overflow:hidden;
+    padding:24px calc(24px + env(safe-area-inset-left)) calc(24px + env(safe-area-inset-bottom));
+    --neon:#39ff14; --neon2:#00f0ff;
+  }
+  #result[data-s="auto_allowed"]{ --neon:#7dff9e; --neon2:#00f0ff }
+  #result[data-s="denied"]   { --neon:#ff2d78; --neon2:#ff6b9d }
+  #result[data-s="expired"]  { --neon:#ffb300; --neon2:#ffd166 }
+  #result[data-s="abandoned"]{ --neon:#7aa2f7; --neon2:#a6c1ff }
+
+  /* 网格地平线 */
+  #result::before{
+    content:''; position:absolute; inset:0; pointer-events:none; opacity:.22;
+    background:
+      linear-gradient(transparent 0 calc(100% - 1px), color-mix(in srgb,var(--neon2) 60%,transparent) 100%) 0 0/100% 34px,
+      linear-gradient(90deg, transparent 0 calc(100% - 1px), color-mix(in srgb,var(--neon2) 60%,transparent) 100%) 0 0/34px 100%;
+    mask-image:radial-gradient(120% 80% at 50% 45%, #000 20%, transparent 72%);
+  }
+  /* 扫描线 */
+  #result::after{
+    content:''; position:absolute; inset:0; pointer-events:none; opacity:.5;
+    background:repeating-linear-gradient(180deg, rgba(255,255,255,.035) 0 1px, transparent 1px 3px);
+  }
+  #result > *{position:relative; z-index:1}
+  #result .txt{display:flex; flex-direction:column; align-items:center}
+
+  .glyph{
+    font-size:70px; line-height:1; margin-bottom:22px;
+    filter:drop-shadow(0 0 14px var(--neon)) drop-shadow(0 0 34px color-mix(in srgb,var(--neon) 55%,transparent));
+    animation:pop .5s cubic-bezier(.2,1.5,.4,1) both;
+  }
+  @keyframes pop{from{transform:scale(.3);opacity:0}to{transform:scale(1);opacity:1}}
+
+  .code{
+    font:700 13px/1 ui-monospace,SFMono-Regular,Menlo,monospace;
+    letter-spacing:.34em; text-transform:uppercase; color:var(--neon);
+    text-shadow:0 0 10px var(--neon), 0 0 26px color-mix(in srgb,var(--neon) 60%,transparent);
+    padding:9px 16px; border:1px solid color-mix(in srgb,var(--neon) 45%,transparent);
+    border-radius:4px; background:color-mix(in srgb,var(--neon) 8%,transparent);
+    animation:flicker 2.4s steps(1) infinite;
+  }
+  @keyframes flicker{
+    0%,94%,100%{opacity:1} 95%{opacity:.55} 96%{opacity:1} 97%{opacity:.7} 98%{opacity:1}
+  }
+
+  #rtitle{margin:20px 0 6px; font-size:23px; font-weight:600; letter-spacing:.04em}
+  #rdesc{margin:0; color:#8b93a1; font-size:13.5px; letter-spacing:.02em}
+
+  /* 扫过一道光 */
+  .sweep{
+    position:absolute; left:0; right:0; height:2px; top:0; z-index:2;
+    background:linear-gradient(90deg,transparent,var(--neon2),transparent);
+    box-shadow:0 0 18px var(--neon2);
+    animation:sweep .85s ease-out both;
+  }
+  @keyframes sweep{from{top:0;opacity:0}20%{opacity:1}to{top:100%;opacity:0}}
+
+  #back{
+    display:inline-block; margin-top:34px; padding:12px 28px; border-radius:4px;
+    background:transparent; border:1px solid color-mix(in srgb,var(--neon2) 50%,transparent);
+    color:var(--neon2); text-decoration:none;
+    font:600 13px/1 ui-monospace,Menlo,monospace; letter-spacing:.18em; text-transform:uppercase;
+    text-shadow:0 0 10px color-mix(in srgb,var(--neon2) 70%,transparent);
+  }
+  @media (prefers-reduced-motion:reduce){
+    .glyph,.code,.sweep{animation:none}
+    .sweep{display:none}
+  }
+
+  /* ── 横屏：高度骤减，垂直方向的一切都要压缩 ── */
+  @media (orientation:landscape) and (max-height:520px){
+    main{padding:10px 12px}
+    .swipe{padding:14px; border-radius:14px}
+    h1{font-size:18px; margin-bottom:10px}
+    .tags{margin-bottom:8px}
+    /* 46vh 在横屏只剩 ~150px，改用固定值 */
+    pre{max-height:min(40vh, 180px); font-size:12.5px}
+    .risk{padding:9px 11px; margin-bottom:10px; font-size:13px}
+    .swipehint{margin-top:10px}
+    .stamp{font-size:22px; top:14px; padding:6px 11px; border-width:2px}
+    header{padding:8px 18px 7px}
+
+    /* 结果页竖向空间不够，改横向布局 */
+    #result{flex-direction:row; flex-wrap:wrap; gap:0 26px; align-content:center; padding:16px 24px}
+    #result .glyph{font-size:46px; margin:0}
+    #result .code{font-size:11px; letter-spacing:.26em}
+    #rtitle{font-size:19px; margin:8px 0 4px}
+    #rdesc{font-size:12.5px}
+    #result .txt{align-items:flex-start; text-align:left}
+    #back{margin-top:14px}
+    #undo{bottom:calc(16px + env(safe-area-inset-bottom))}
+  }
+  .hidden{display:none !important}
+</style>
+<link rel="stylesheet" href="/ui/swipe.css">
+</head>
+<body>
+<div id="bar"><i></i></div>
+<header>
+  <div class="crumb"><b id="proj">—</b><span id="path"></span><span id="clock">–:––</span></div>
+</header>
+
+<main id="detail">
+  <div class="swipe" id="card">
+    <div class="tags" id="tags"></div>
+    <h1 id="headline">…</h1>
+    <div class="risk hidden" id="risk"></div>
+    <div id="cmdbox"></div>
+    <div class="swipehint hidden" id="swipehint">
+      <b style="color:var(--no)">←</b> 左滑拒绝 &nbsp;·&nbsp; 右滑批准 <b style="color:var(--ok)">→</b>
+    </div>
+    <div class="deadline" id="deadline">
+      <span id="dlBar"><i></i></span>
+      <span id="dlText">—</span>
+    </div>
+  </div>
+</main>
+
+<div id="undo" class="hidden">
+  <div class="ring" id="undoRing"><div><b id="undoNum">3</b><i>SEC</i></div></div>
+  <div id="undoText">executing in</div>
+  <p id="undoSub">批准即将生效，命令会真的执行</p>
+  <button id="undoBtn">✕ 撤销</button>
+</div>
+
+<main id="result" class="hidden">
+  <div class="sweep" id="sweep"></div>
+  <div class="glyph" id="ricon"></div>
+  <div class="txt">
+    <div class="code" id="rcode"></div>
+    <h2 id="rtitle"></h2>
+    <p id="rdesc"></p>
+    <a id="back" class="hidden" href="/ui">返回首页</a>
+  </div>
+</main>
+
+
+<script src="/ui/swipe.js"></script>
+<script>
+const BOOT = __BOOTSTRAP__;
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+let ticker = null;
+
+function show(view) {
+  $('detail').classList.toggle('hidden', view !== 'detail');
+  $('result').classList.toggle('hidden', view !== 'result');
+  $('bar').classList.toggle('hidden', view !== 'detail');
+}
+
+// 只留末尾两段：完整路径在手机上放不下，而项目名已经单独显示了
+function shortPath(p) {
+  const parts = (p || '').split('/').filter(Boolean);
+  return parts.length <= 2 ? '/' + parts.join('/') : '…/' + parts.slice(-2).join('/');
+}
+
+function render(a) {
+  const dir = (a.cwd || '').split('/').filter(Boolean).pop() || a.session_id.slice(0, 8);
+  $('proj').textContent = a.session_name || dir;
+  $('path').textContent = shortPath(a.cwd);
+
+  if (a.status !== 'pending') return renderResult(a);
+
+  $('tags').innerHTML =
+    `<span class="tag tool">${esc(a.tool_name)}</span>` +
+    (a.impact || []).map((i) => `<span class="tag ${esc(i.tone)}">${esc(i.label)}</span>`).join('') +
+    (a.rule ? `<span class="tag">规则 ${esc(a.rule)}</span>` : '');
+
+  $('headline').textContent = a.headline || a.summary;
+
+  // 限制只加在「批准」上，不加在「拒绝」上：
+  // 拒绝永远是左滑这个轻动作，批准的重量随风险升级。
+  if (a.risk.level === 'high') {
+    $('risk').innerHTML = `<b>⚠️ 高风险操作</b>${esc(a.risk.reasons.join(' · '))}`;
+    $('risk').classList.remove('hidden');
+    armSwipe('high');
+  } else {
+    armSwipe('normal');
+  }
+
+  renderCommand(a);
+  tick();
+  ticker = setInterval(tick, 1000);
+  syncTimer = setInterval(sync, 3000);
+  // 切回前台立刻对一次状态，别等下一个轮询周期
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') { tick(); sync(); }
+  });
+  show('detail');
+}
+
+// 短命令直接摊开，长脚本折叠——一行 rm -rf 没必要藏，14 行脚本没必要霸屏
+function renderCommand(a) {
+  const d = a.detail || '';
+  if (!d) return;
+  const lines = a.detail_lines || 1;
+  const short = lines <= 2 && d.length <= 120;
+  const code = `<div class="codewrap${short ? ' short' : ''}"><pre>${esc(d)}</pre></div>`;
+  $('cmdbox').innerHTML = short
+    ? code
+    : `<details><summary>查看完整命令（${lines} 行）</summary>${code}</details>`;
+}
+
+function tick() {
+  const total = BOOT.expires_at - BOOT.created_at;
+  const left = Math.max(0, BOOT.expires_at - Date.now());
+  const s = Math.ceil(left / 1000);
+  const mmss = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  const urgent = left <= 60_000;
+  const pct = (left / total) * 100 + '%';
+
+  $('clock').textContent = mmss;
+  $('clock').classList.toggle('urgent', urgent);
+  $('bar').classList.toggle('urgent', urgent);
+  $('bar').firstElementChild.style.width = pct;
+
+  const autoAllow = BOOT.auto_decision === 'allow';
+  $('dlText').textContent = `${mmss} 后${autoAllow ? '自动通过' : '自动拒绝'}`;
+  $('dlBar').firstElementChild.style.width = pct;
+  // 到点是「放行」时不该显示成红色警告 —— 语义不同，颜色也要跟着变
+  $('deadline').classList.toggle('auto', autoAllow);
+  $('deadline').classList.toggle('urgent', !autoAllow && urgent);
+
+  // 本地计时到点不自己下结论——以服务端为准，避免时钟漂移造成状态不一致
+  if (left <= 0) { clearInterval(ticker); sync(true); }
+}
+
+/* 审批页原本没有任何实时同步：终端那边批了、或服务端 570s 超时了，
+   手机页面完全不知道。这里做轮询（?k= 只授权单条审批，用不了全局 SSE）。 */
+let syncTimer = null;
+async function sync(force = false) {
+  try {
+    const r = await fetch(`/api/approvals/${BOOT.id}?k=${encodeURIComponent(BOOT.key)}`);
+    if (!r.ok) return;
+    const { approval } = await r.json();
+    if (approval.status !== 'pending') {
+      clearInterval(syncTimer);
+      renderResult(approval);
+    } else if (force) {
+      // 服务端还没判超时，稍后再确认一次
+      setTimeout(() => sync(true), 1500);
+    }
+  } catch {
+    /* 断网时保持现状，下次轮询再说 */
+  }
+}
+
+const RESULTS = {
+  allowed:      ['◈', 'access granted', '已批准', '操作正在执行'],
+  auto_allowed: ['◈', 'auto-approved', '已自动通过', '无人操作，按预授权规则放行'],
+  denied:    ['◇', 'access denied',  '已拒绝', 'Claude Code 已收到拒绝'],
+  expired:   ['◷', 'session expired', '已超时', '超时未决策，已自动拒绝'],
+  abandoned: ['◐', 'handled elsewhere', '已在别处处理', '这条请求已由终端处理或会话已结束'],
+};
+
+function renderResult(a) {
+  clearInterval(ticker);
+  clearInterval(syncTimer);
+  let [icon, code, title, desc] = RESULTS[a.status] || ['◌', 'unknown', '状态未知', ''];
+  // 服务重启导致的中断，说清楚是重启而不是「别处处理了」
+  if (a.status === 'abandoned' && a.decided_by === 'restart') {
+    code = 'interrupted'; title = '服务重启时中断';
+    desc = 'Clamicro 重启了，这条请求已随之失效。Claude Code 那边已按超时处理。';
+  }
+  $('result').dataset.s = a.status;
+  $('ricon').textContent = icon;
+  $('rcode').textContent = code;
+  $('rtitle').textContent = title;
+  $('rdesc').textContent = desc;
+  show('result');
+
+  if (!BOOT.hasSession) return;
+  $('back').classList.remove('hidden');
+  let n = 2;
+  const label = () => ($('back').textContent = `← return  ${n}`);
+  label();
+  const t = setInterval(() => {
+    if (--n <= 0) { clearInterval(t); location.href = '/ui'; } else label();
+  }, 1000);
+  $('back').addEventListener('click', () => clearInterval(t), { once: true });
+}
+
+let submitting = false;
+async function decide(decision) {
+  if (submitting) return;
+  submitting = true;
+  try {
+    const res = await fetch(`/api/approvals/${BOOT.id}/decide?k=${encodeURIComponent(BOOT.key)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ decision }),
+    });
+    const data = await res.json();
+    renderResult(data.approval || { status: decision === 'allow' ? 'allowed' : 'denied' });
+  } catch {
+    submitting = false;
+    swipeHandle?.restore();
+    $('swipehint').innerHTML = '<b style="color:var(--no)">网络错误，请重试</b>';
+    $('swipehint').classList.remove('hidden');
+  }
+}
+
+/* 卡片滑动手势：与首页列表共用 ui/swipe.js，不再各留一份。 */
+let swipeHandle = null;
+function armSwipe(mode) {
+  $('swipehint').innerHTML =
+    mode === 'normal'
+      ? '<b style="color:var(--no)">←</b> 左滑拒绝 &nbsp;·&nbsp; 右滑批准 <b style="color:var(--ok)">→</b>'
+      : '<b style="color:var(--no)">←</b> 左滑拒绝 &nbsp;·&nbsp; 高风险，右滑需划得更远 <b style="color:var(--ok)">→</b>';
+  $('swipehint').classList.remove('hidden');
+  swipeHandle = attachSwipe($('card'), {
+    mode,
+    ignore: 'pre, summary, a, button',
+    onCommit: (dir) => (dir === 'deny' ? decide('deny') : showUndo()),
+  });
+}
+
+// 3 秒而不是 2 秒：手势误触发后你得先意识到发生了什么，再决定要不要拦。
+const UNDO_MS = 3000;
+let undoRaf, undoDone = false;
+
+function showUndo() {
+  undoDone = false;
+  $('undo').classList.remove('hidden');
+  const t0 = performance.now();
+  const step = () => {
+    if (undoDone) return;
+    const left = Math.max(0, UNDO_MS - (performance.now() - t0));
+    $('undoRing').style.setProperty('--p', (left / UNDO_MS) * 100 + '%');
+    $('undoNum').textContent = Math.ceil(left / 1000);
+    if (left <= 0) {
+      undoDone = true;
+      window.ccHaptic?.(24);   // 真正执行的那一刻，给一下确认反馈
+      $('undo').classList.add('hidden');
+      decide('allow');
+      return;
+    }
+    undoRaf = requestAnimationFrame(step);
+  };
+  step();
+}
+
+$('undoBtn').onclick = () => {
+  undoDone = true;
+  cancelAnimationFrame(undoRaf);
+  $('undo').classList.add('hidden');
+  swipeHandle?.restore();
+};
+
+render(BOOT);
+</script>
+</body>
+</html>
