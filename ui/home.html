@@ -258,13 +258,20 @@ function renderHome() {
   }
 
   h += '<h2>用量</h2>';
-  h += quota ? `<div class="card">
+  // statusLine 在活跃会话里每次响应更新都上报，秒级新鲜。
+  // 超过 10 分钟没动静就说明没有会话在报，此时把旧数字当成当前值展示是在骗人。
+  const stale = quota && Date.now() - quota.at > 600000;
+  h += quota ? `<div class="card${stale ? ' alert' : ''}">
       ${meter('5h', quota.five_hour?.pct)}
       <div class="reset">${until(quota.five_hour?.resets_at)}</div>
       <div style="height:10px"></div>
       ${meter('7d', quota.seven_day?.pct)}
       <div class="reset">${until(quota.seven_day?.resets_at)}</div>
       <div class="reset" style="margin-top:8px;opacity:.7">更新于 ${ago(quota.at)}</div>
+      ${stale ? `<div class="path" style="white-space:normal;color:var(--warn);margin-top:8px">
+        ⚠️ 这是 ${ago(quota.at)}的旧数据，当前没有会话在上报。
+        statusLine 是会话启动时读取的，新开一个 Claude Code 会话才会刷新。
+      </div>` : ''}
     </div>`
     : `<div class="card"><div class="path">暂无数据 — statusLine 需新开会话才生效</div></div>`;
 
