@@ -25,8 +25,9 @@ export function allowedHosts({ port, lanIp, localHost, tailscaleIp, tunnelUrl })
   return new Set(
     ['127.0.0.1', 'localhost', '[::1]', '::1', lanIp, localHost, tailscaleIp, tunnelHost]
       .filter(Boolean)
-      // 全部转小写：Host 头大小写不敏感，而 macOS 的 LocalHostName 可能是混合大小写。
-      // 曾经只把进来的 Host 转了小写而白名单里存的是原样，于是 DcMac.local 被自己拒了。
+      // 全部转小写：Host 头大小写不敏感，而 macOS 的 LocalHostName 常是混合大小写
+      //（比如 MyMac.local）。曾经只把进来的 Host 转了小写、白名单里却存的是原样，
+      // 结果服务把自己的主机名拒了。
       .flatMap((h) => [h.toLowerCase(), `${h.toLowerCase()}:${port}`]),
   )
 }
