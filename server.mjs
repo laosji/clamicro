@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url'
 import { loadConfig, saveConfig, CONFIG_FILE } from './lib/config.mjs'
 import { Store, STATE } from './lib/state.mjs'
 import { makePusher } from './lib/push.mjs'
-import { ApprovalStore } from './lib/approvals.mjs'
+import { ApprovalStore, matchKey } from './lib/approvals.mjs'
 import { Relay, encodeCommand, decodeCommand } from './lib/relay.mjs'
 import { History } from './lib/history.mjs'
 import { ControlStore, CONTROL } from './lib/control.mjs'
@@ -481,10 +481,11 @@ async function handler(req, res) {
 
       // Pause/Cancel 的拦截点。Claude Code 没有运行时暂停原语，
       // 只能在下一个工具调用前把它挂住。
-      // 同一个 tool_use_id 的工具开始执行 = 这次授权已在别处放行，
-      // 把还挂着的那条审批销掉，别让它在界面上冒充「待处理」
-      if ((event === 'pre-tool-use' || event === 'post-tool-use') && payload.tool_use_id) {
-        const gone = approvals.supersede(payload.tool_use_id)
+      // 同一次工具调用开始执行 = 这次授权已在别处放行（终端弹框、权限规则、
+      // acceptEdits 模式…），把还挂着的那条审批销掉，别让它在界面上冒充「待处理」。
+      // 对账用 matchKey 而非 tool_use_id —— PermissionRequest 的 payload 里没有它。
+      if (event === 'pre-tool-use' || event === 'post-tool-use') {
+        const gone = approvals.supersede(matchKey(payload.session_id, payload.tool_name, payload.tool_input))
         if (gone) console.log(`[approval] ${gone.id.slice(0, 8)} 已在别处放行，销掉挂起记录`)
       }
 

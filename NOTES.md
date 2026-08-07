@@ -60,6 +60,27 @@ hooks 里存的是**绝对路径**，而 `npx` 跑在会变的缓存目录、全
 
 所以改名或换安装路径之后，**已经开着的会话 statusLine 会静默失效**——表现是那个会话再也不上报额度，而且没有任何报错。只能新开会话。
 
+### PermissionRequest 的 payload 里没有 tool_use_id
+
+实测两个 hook 收到的字段（Claude Code 2.1.x）：
+
+```
+PermissionRequest  session_id transcript_path cwd prompt_id permission_mode
+                   effort hook_event_name tool_name tool_input
+                   permission_suggestions
+PreToolUse         …同上（无 permission_suggestions）+ tool_use_id
+PostToolUse        …PreToolUse 的全部 + tool_response duration_ms
+```
+
+**权限阶段还没分配 `tool_use_id`**，要到 PreToolUse 才有。所以「把挂起的审批和已经开跑的工具调用对上号」不能用它——第一版就是这么写的，结果 `supersede()` 是段永远匹配不上的死代码，幽灵条目照旧。
+
+能用的只有两边都在、且逐字相同的三元组：`session_id` + `tool_name` + `tool_input`。哈希成 `match_key` 存在审批记录上，PreToolUse/PostToolUse 拿同样的三元组算一次去销账。
+
+两个坑：
+
+- `tool_input` 要**递归排序键后再序列化**。同源对象的键顺序本该一致，但那是「碰巧成立」，不值得赌。
+- 同一会话里可能连着跑两条一模一样的命令，键会撞。一次只销**最早**的那条，剩下的留给下一次对账——否则两条挂起会被一次全销掉。
+
 ### 只能在服务端验证的东西，不代表客户端也成立
 
 曾经把 `.local` 主机名设成默认地址，理由是「换 IP 不用重扫码」，并且在 Mac 上 `curl http://<host>.local:8765/healthz` 返回了 200，以为验证通过了。
@@ -94,7 +115,7 @@ hooks 里存的是**绝对路径**，而 `npx` 跑在会变的缓存目录、全
 | 取消之后下一个工具调用也被取消 | `cancel()` 唤醒挂起的 waiter 后没复位状态，`CANCELLED` 留着被下一次消费 |
 | 额度反复变空 | 额度是纯内存的，没进 `history.json`，每次重启就清零 |
 | 卸载后残留一个 hook | 卸载用路径片段 `clamicro/bin/` 匹配，而目录结构改过（`app/bin/`）。改成按脚本文件名认 |
-| 界面显示「待审批」，可操作其实早执行完了 | 终端那边放行后，Claude Code **不会取消**已发出的 PermissionRequest 请求，连接还开着、close 事件也不触发，记录挂到超时。用 `tool_use_id` 和 PreToolUse 对账，销掉并返回 allow |
+| 界面显示「待审批」，可操作其实早执行完了 | 授权在别处放行后（终端弹框、权限规则、`acceptEdits` 模式），Claude Code **不会取消**已发出的 PermissionRequest 请求，连接还开着、close 事件也不触发，记录挂到超时。用 PreToolUse 对账销掉并返回 allow——但对账键**不能用 `tool_use_id`**，见下 |
 | 首页 tab 高亮，内容却是另一个 tab 的 | 渲染函数抛异常时 `innerHTML` 保留上一个 tab 的内容，界面看起来正常只是对不上。起因是加变量时替换没匹配上、声明漏了，赋值给未声明变量抛 ReferenceError。已加渲染兜底：出错就显式报错，不要静默留着别人的内容 |
 | `npm i` 后 CLI 报 import 失败 | `package.json` 的 `files` 白名单漏了 `install.mjs`。这种错只有真的打包安装才会暴露 |
 | 二维码和推送深链全指向一个打不开的域名 | `publicBaseUrl` **落盘持久化**，而 quick tunnel 的地址是**临时**的。隧道进程一没（重启、被杀、Cloudflare 断开），配置里那个地址就作废了，但 `baseUrl` 仍无条件用它。现在以**进程是否存在**为准（`tunnelAlive()` 读 pid 文件 + `kill(pid, 0)`），死了就回落局域网并打一行日志 |
