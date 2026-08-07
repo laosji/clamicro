@@ -13,6 +13,7 @@ import { History } from './lib/history.mjs'
 import { ControlStore, CONTROL } from './lib/control.mjs'
 import { fingerprint, isTrusted, trust } from './lib/network.mjs'
 import { Inbox } from './lib/inbox.mjs'
+import { watchNetwork } from './lib/netwatch.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const config = loadConfig()
@@ -836,14 +837,63 @@ function listenOn(host) {
   s.on('error', (err) => {
     console.error(`[clamicro] 绑定 ${host}:${config.port} 失败: ${err.message}`)
     servers.delete(host)
-    // 回环绑不上才是致命的；局域网地址绑不上通常只是网卡刚变，等下一轮巡检
+    // 回环绑不上才是致命的；局域网地址绑不上通常只是网卡刚变
     if (err.code === 'EADDRINUSE' && host === '127.0.0.1') process.exit(1)
   })
   s.listen(config.port, host, () => console.log(`[clamicro] 监听 http://${host}:${config.port}`))
   servers.set(host, s)
 }
 
+function stopListening(host) {
+  const s = servers.get(host)
+  if (!s) return
+  s.close()
+  servers.delete(host)
+  console.warn(`[clamicro] 已停止监听 ${host}:${config.port}`)
+}
+
 for (const host of bindHosts) listenOn(host)
+
+/**
+ * 网络变了就重新过一遍信任闸门。
+ *
+ * 闸门原先只在进程启动时判一次。多数情况下换网络会同时换 IP，旧套接字绑的
+ * 地址不再属于本机、暴露面自然消失，SessionStart 那边也会因为 stale 重启。
+ * 但**换到不同网络却恰好拿到相同 IP**（192.168.1.x 到处都是）时套接字依旧
+ * 有效，人就真的暴露在陌生网络上了。
+ *
+ * 这里只做收缩，不做扩张：新网络不可信就摘掉局域网监听。要重新暴露得显式
+ * `clamicro trust` 再重启——「失败即收缩」比「自动恢复」安全。
+ */
+let currentNetId = net.id
+const stopWatching = watchNetwork(() => {
+  const ip = detectLanIp()
+  const fp = fingerprint(ip)
+  if (fp.id === currentNetId) return
+  currentNetId = fp.id
+
+  if (isTrusted(config, fp)) {
+    console.log(`[clamicro] 网络变为「${fp.label}」（已信任）`)
+    if (ip !== config.lanIp) {
+      console.log(`[clamicro] 地址变了，新开一个 Claude Code 会话会自动重启到新地址`)
+      console.log(`[clamicro] 之后重新生成二维码： npx clamicro qr`)
+    }
+    return
+  }
+
+  const wasExposed = servers.has(config.lanIp)
+  if (config.lanIp) stopListening(config.lanIp)
+  console.warn(`[security] 网络变为「${fp.label}」，未被信任${wasExposed ? '，已摘掉局域网监听' : ''}`)
+  console.warn(`[security] 确认可信后执行： npx clamicro trust`)
+  if (wasExposed) {
+    push({
+      title: '🔒 Clamicro 已收缩到本机',
+      body: `换到了未信任的网络「${fp.label}」，局域网访问已关闭。确认可信后执行 npx clamicro trust`,
+      level: 'timeSensitive',
+      group: 'clamicro-net',
+    }).catch(() => {})
+  }
+})
 
 console.log(`[clamicro] 网络 ${net.label}${trusted ? ' ✓ 已信任' : ' ✗ 未信任（仅本机可用）'}`)
 console.log(`[clamicro] 配置文件 ${CONFIG_FILE}`)
@@ -859,6 +909,7 @@ for (const sig of ['SIGINT', 'SIGTERM']) {
   process.on(sig, () => {
     console.log('\n[clamicro] 退出')
     history.flushNow()
+    stopWatching()
     for (const res of sseClients) res.end()
     for (const s of servers.values()) s.close()
     setTimeout(() => process.exit(0), 500).unref()
