@@ -29,7 +29,9 @@ function usage() {
   ${c.b('autostart')}    开机自启：${c.dim('autostart on | off | status')}
   ${c.b('tunnel')}       公网隧道：${c.dim('tunnel on | off | status')}${c.dim('  ← 网络禁止设备互通时用')}
   ${c.b('trust')}        信任当前网络（陌生网络下服务只绑本机）
+  ${c.b('untrust')}      撤销信任：${c.dim('untrust [id前缀 | all]')}${c.dim('  ← 不带参数则撤当前网络')}
   ${c.b('networks')}     当前网络 + 已信任列表
+  ${c.b('rotate-token')} 换发访问令牌${c.dim('  ← 二维码被拍到 / 令牌可能泄露时用')}
   ${c.b('test-push')}    发一条测试通知
   ${c.b('logs')}         跟踪日志
 
@@ -77,6 +79,15 @@ switch (cmd) {
     break
   case 'trust':
     runApp(['--trust'])
+    break
+  case 'untrust':
+    // untrust            → 当前网络
+    // untrust <id 前缀>  → 按 networks 列出的 id
+    // untrust all        → 全部
+    runApp([rest[0] ? `--untrust=${rest[0]}` : '--untrust'])
+    break
+  case 'rotate-token':
+    runApp(['--rotate-token'])
     break
   case 'networks':
     runApp(['--networks'])

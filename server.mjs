@@ -115,6 +115,78 @@ if (process.argv.includes('--trust')) {
   process.exit(0)
 }
 
+/**
+ * 撤销信任。补上「能加不能减」这个缺口。
+ *
+ * `trust` 在安装流程里就会问一次，所以误信任比想象中容易发生——
+ * 在咖啡厅手滑点了「是」，那个网络就永久留在列表里，下次再连上会自动暴露。
+ * 只能加不能减的权限列表本身就是个设计缺陷。
+ *
+ *   --untrust            撤销当前网络
+ *   --untrust=<id 前缀>   按 networks 列出的 id 撤销
+ *   --untrust=all        全部撤销
+ */
+{
+  const arg = process.argv.find((a) => a === '--untrust' || a.startsWith('--untrust='))
+  if (arg) {
+    const which = arg.includes('=') ? arg.split('=')[1] : null
+    const all = config.trustedNetworks ?? {}
+    let removed = []
+
+    if (which === 'all') {
+      removed = Object.values(all).map((n) => n.label)
+      config.trustedNetworks = {}
+    } else if (which) {
+      for (const [id, n] of Object.entries(all)) {
+        if (id.startsWith(which)) {
+          delete all[id]
+          removed.push(n.label)
+        }
+      }
+    } else {
+      const fp = fingerprint(config.lanIp)
+      if (fp.id && all[fp.id]) {
+        removed.push(all[fp.id].label)
+        delete all[fp.id]
+      }
+    }
+
+    if (!removed.length) {
+      console.log(`\n  没有匹配的已信任网络${which ? `（${which}）` : '（当前网络本来就不在列表里）'}\n`)
+      process.exit(1)
+    }
+    saveConfig(config)
+    console.log(`\n  ✓ 已撤销信任：${removed.join('、')}`)
+    console.log(`  服务在这些网络下将只绑本机。重启服务生效：`)
+    console.log(`    npx clamicro stop  然后新开一个 Claude Code 会话\n`)
+    process.exit(0)
+  }
+}
+
+/**
+ * 轮换访问令牌。
+ *
+ * 令牌是 bearer 凭证：拿到它 = 能批准任意操作，包括 rm -rf 和读 ~/.ssh。
+ * 而它会通过明文 HTTP 传输、印在二维码上、出现在 URL 里——泄露途径不少
+ * （局域网嗅探、屏幕被拍、截图误发）。
+ *
+ * 之前泄露之后**没有任何补救手段**，只能手工编辑 config.json 再重装。
+ * 对一个这种权限的凭证，这是不可接受的缺口。
+ *
+ * 换掉之后所有旧 cookie 自动失效——sameToken 比的是新值，旧的一律不匹配。
+ */
+if (process.argv.includes('--rotate-token')) {
+  const { randomBytes } = await import('node:crypto')
+  config.token = randomBytes(32).toString('base64url')
+  saveConfig(config)
+  console.log(`\n  ✓ 已换发新令牌`)
+  console.log(`  所有设备上的登录都已失效，需要重新扫码。`)
+  console.log(`\n  重启服务让它认新令牌：`)
+  console.log(`    npx clamicro stop  然后新开一个 Claude Code 会话`)
+  console.log(`  然后重新出码： npx clamicro qr\n`)
+  process.exit(0)
+}
+
 if (process.argv.includes('--networks')) {
   // 拿不到 SSID 时 label 本身就是「网关 x.x.x.x」，别再把网关拼一遍
   const describe = (n) =>

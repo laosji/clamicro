@@ -92,7 +92,10 @@ The service is exposed on your LAN only on networks **you've explicitly trusted*
 ```bash
 npx clamicro networks   # current network + trusted list
 npx clamicro trust      # trust the current network
+npx clamicro untrust    # revoke — current network by default, or untrust <id-prefix> / untrust all
 ```
+
+Trust is **revocable.** Trusting a network by mistake (tapping "yes" at a café) shouldn't be permanent — otherwise that network stays on the list forever and re-exposes you the next time you connect.
 
 The fingerprint combines **gateway IP + gateway MAC + subnet**. SSID needs Location permission on recent macOS and is often unavailable; and `00:00:5e:00:01:xx` is a VRRP virtual MAC that is *not* unique across enterprise networks — matching on MAC alone would treat two different corporate networks as the same one.
 
@@ -107,6 +110,14 @@ The fingerprint combines **gateway IP + gateway MAC + subnet**. SSID needs Locat
 | **Constant-time comparison** | Timing side channels on the token and per-approval keys |
 | **`SameSite=Lax` + `HttpOnly`** | CSRF, while still keeping you logged in when arriving from another app (`Strict` would force a re-scan every time) |
 | **Per-approval key** | A leaked deep link can only decide that one approval, and expires with it |
+
+### In plain terms: that QR code is a key to your Mac
+
+**The token behind it grants permission to approve anything** — `rm -rf`, `sudo`, reading your `~/.ssh/id_rsa`. Treat it like a password:
+
+- Don't leave the QR on screen where someone can photograph it; don't screenshot it into a group chat
+- If you suspect it leaked, rotate immediately: `npx clamicro rotate-token` (every logged-in device is signed out at once)
+- The login cookie expires after 30 days; scan again then
 
 ### The remaining risk: plaintext HTTP
 
@@ -176,7 +187,9 @@ npx clamicro uninstall    # uninstall
 npx clamicro qr           # print the login QR code
 npx clamicro status       # service, network, version
 npx clamicro trust        # trust the current network
+npx clamicro untrust      # revoke trust (untrust <id-prefix> | untrust all)
 npx clamicro networks     # current network + trusted list
+npx clamicro rotate-token # issue a new access token (if it may have leaked)
 npx clamicro test-push    # send a test notification (local, on the Mac)
 npx clamicro logs         # tail the log
 npx clamicro stop         # stop the service

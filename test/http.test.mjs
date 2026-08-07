@@ -86,6 +86,16 @@ test('token 换 cookie：URL 里不留 token', async (t) => {
   })
   const cookie = r.headers.get('set-cookie') ?? ''
   await t.test('HttpOnly', () => assert.match(cookie, /HttpOnly/))
+  await t.test('有效期是 30 天而不是一年', () => {
+    // 这个 cookie 能批准 rm -rf 和读 ~/.ssh。一年的有效期对这种权限太长，
+    // 而重新扫码只要几秒。令牌本身可以用 clamicro rotate-token 立刻作废。
+    const m = /Max-Age=(\d+)/.exec(cookie)
+    assert.ok(m, 'cookie 必须带 Max-Age')
+    const days = Number(m[1]) / 86400
+    assert.ok(days <= 31, `有效期 ${days} 天，太长了`)
+    assert.ok(days >= 7, `有效期 ${days} 天，短到每周都要重扫，会逼用户放弃`)
+  })
+
   await t.test('SameSite=Lax 而不是 Strict', () => {
     // 从别的 App 点链接进 Safari（备忘录里存的地址、Mac 上弹的二维码）
     // 属于跨站导航，Strict 的 cookie 不会被带上，表现是每次都像没登录过。

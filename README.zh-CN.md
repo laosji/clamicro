@@ -94,7 +94,10 @@ Claude Code 要执行需授权的操作
 ```bash
 npx clamicro networks   # 看当前网络和已信任列表
 npx clamicro trust      # 信任当前网络
+npx clamicro untrust    # 撤销：不带参数撤当前网络，也可 untrust <id前缀> / untrust all
 ```
+
+信任是**可撤销**的。误信任一个网络（比如在咖啡厅手滑点了「是」）不该是不可逆的——那个网络会永久留在列表里，下次再连上就自动暴露。
 
 网络指纹用**网关 IP + 网关 MAC + 网段**。SSID 在新版 macOS 需要定位权限常常拿不到；而 `00:00:5e:00:01:xx` 是 VRRP 虚拟 MAC，企业网里并不唯一——单靠 MAC 会把不同公司的网络认成同一个，所以必须组合。
 
@@ -109,6 +112,14 @@ npx clamicro trust      # 信任当前网络
 | **常数时间比较** | token 与审批 key 的时间侧信道 |
 | **SameSite=Lax + HttpOnly** | CSRF；同时保证从别的 App 点链接进来仍是登录态（Strict 会导致每次都要重新扫码） |
 | **单条审批专属 key** | 拿到一条深链只能决定那一条，且随它过期 |
+
+### 说人话：这个二维码等于你 Mac 的钥匙
+
+**扫码得到的令牌 = 批准任意操作的权限**，包括 `rm -rf`、`sudo`、读你的 `~/.ssh/id_rsa`。请像对待密码一样对待它：
+
+- 别把二维码留在屏幕上让人路过看见，别截图发群里
+- 怀疑泄露了就立刻换发：`npx clamicro rotate-token`（所有设备上的登录当场失效）
+- 登录 cookie 30 天过期，到期重新扫一次
 
 ### 剩下的风险：HTTP 明文
 
@@ -177,7 +188,9 @@ npx clamicro uninstall    # 卸载
 npx clamicro qr           # 打印登录二维码
 npx clamicro status       # 服务、网络、版本
 npx clamicro trust        # 信任当前网络
+npx clamicro untrust      # 撤销信任（untrust <id前缀> | untrust all）
 npx clamicro networks     # 当前网络 + 已信任列表
+npx clamicro rotate-token # 换发访问令牌（令牌可能泄露时）
 npx clamicro test-push    # 发一条测试通知（Mac 本地）
 npx clamicro logs         # 跟踪日志
 npx clamicro stop         # 停止服务

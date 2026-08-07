@@ -50,7 +50,10 @@ export function makeAuth(token) {
         'HttpOnly',
         'SameSite=Lax',
         'Path=/',
-        'Max-Age=31536000',
+        // 30 天，不是一年。这个 cookie 能批准 rm -rf 和读 ~/.ssh——
+        // 一年的有效期对这种权限太长了，而重新扫码只是几秒钟的事。
+        // 令牌本身可以用 `clamicro rotate-token` 立刻作废。
+        'Max-Age=2592000',
         ...(String(baseUrl).startsWith('https:') ? ['Secure'] : []),
       ].join('; ')
     },
