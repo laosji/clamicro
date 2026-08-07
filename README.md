@@ -116,7 +116,7 @@ There's no fix that preserves the scan-and-go experience — a self-signed certi
 
 **Use Tailscale.** WireGuard end-to-end encryption, no third party ever sees plaintext, and it isn't limited to one Wi-Fi. The service detects `100.64/10` addresses and binds to them automatically, **bypassing the trust gate** — an encrypted overlay doesn't care what physical network it sits on.
 
-Every other option hands plaintext to somebody: tunneling services terminate TLS, and an ntfy relay sees the control channel.
+The other route is a tunnel (`clamicro tunnel on`), but tunneling services terminate TLS and can technically read your command text — so it's an escape hatch, not a default.
 
 ---
 
@@ -124,15 +124,16 @@ Every other option hands plaintext to somebody: tunneling services terminate TLS
 
 The control plane **never leaves your LAN**. Command text, approval decisions, timeline and quota all go straight to `http://<host>.local:8765`.
 
-Three tiers based on where you are, each adding external dependency only when needed:
+Two tiers based on where you are; only the second reaches outside:
 
 | Situation | How you're alerted | Network reach |
 |---|---|---|
 | **① At your Mac** | macOS notification + sound | **fully offline** |
 | **② Same Wi-Fi, away from the Mac** | phone push (Bark) | only "there's an approval" leaves your network |
-| **③ Different network** | ntfy notification action buttons | control plane goes through a third party |
 
-①+② are on by default; ③ is off (`relay.enabled`).
+**Notifications only summon you. Decisions always happen back on the LAN page.**
+
+An earlier version had a third tier: an ntfy relay with action buttons that let you approve straight from the lock screen. It's been removed — it handed the control plane to a third-party public server, and all it bought was saving one tap. When you're away from the device, "one fewer tap" was never worth that.
 
 **Why ② can't be Wi-Fi-only:** iOS won't let a backgrounded app hold a LAN connection open, so lock-screen-capable notifications must go through APNs. The mitigation is to minimize what leaves — `detailInPush` is off by default, so the push body only says "Bash operation (high risk)" and the command text stays on the LAN page. The push provider knows you have an approval; it doesn't know what for, and can't act on it.
 

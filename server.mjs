@@ -9,7 +9,6 @@ import { loadConfig, saveConfig, CONFIG_FILE } from './lib/config.mjs'
 import { Store, STATE } from './lib/state.mjs'
 import { makePusher } from './lib/push.mjs'
 import { ApprovalStore, matchKey } from './lib/approvals.mjs'
-import { Relay, encodeCommand, decodeCommand } from './lib/relay.mjs'
 import { History } from './lib/history.mjs'
 import { ControlStore, CONTROL } from './lib/control.mjs'
 import { fingerprint, isTrusted, trust } from './lib/network.mjs'
@@ -80,26 +79,14 @@ setInterval(() => {
 
 let lastPairAt = 0 // 配对请求限流，避免局域网上有人刷屏
 
-// ---- ntfy 中转：出站长连接接收手机的审批指令 ----
-const relay = config.relay.enabled ? new Relay(config.relay) : null
-
-relay?.on('command', (raw) => {
-  const cmd = decodeCommand(raw)
-  if (!cmd) return console.warn(`[relay] 丢弃无法解析的指令: ${String(raw).slice(0, 80)}`)
-  const ap = approvals.get(cmd.id)
-  if (!ap) return console.warn(`[relay] 审批 ${cmd.id.slice(0, 8)} 不存在或已清理`)
-  // 校验单条审批专属 key —— 光知道 topic 名批不动任何东西
-  if (cmd.key !== ap.key) return console.warn(`[relay] 审批 ${cmd.id.slice(0, 8)} 的 key 不匹配，已拒绝处理`)
-
-  const out = approvals.decide(cmd.id, cmd.decision, 'phone')
-  console.log(
-    out.ok
-      ? `[relay] 审批 ${cmd.id.slice(0, 8)} → ${cmd.decision}`
-      : `[relay] 审批 ${cmd.id.slice(0, 8)} 已是终态（${ap.status}），忽略重复指令`,
-  )
-})
-
-/** 发出一条审批请求通知。走 relay 时带通知内按钮，可锁屏 0-tap 决策。 */
+/**
+ * 发出一条审批请求通知。
+ *
+ * 只发通知，不带决策按钮 —— 决策一律回到局域网页面上做。
+ * 曾经有过一条 ntfy 双 topic 中转，能在锁屏通知里直接批准；删掉了，理由是：
+ * 它把控制面交给了第三方公网服务器，而换来的只是省掉一次点击。
+ * 人不在设备边上时，"少点一下"本来就没有价值。
+ */
 async function notifyApproval(ap, label) {
   // 用 config.baseUrl —— 它已回落到自动探测的局域网 IP；publicBaseUrl 通常是空的
   const detailUrl = `${config.baseUrl}/ui/a/${ap.id}?k=${encodeURIComponent(ap.key)}`
@@ -109,29 +96,6 @@ async function notifyApproval(ap, label) {
     ? `${ap.tool_name}: ${ap.summary}`.slice(0, 400)
     : `${ap.tool_name} 操作${ap.risk.level === 'high' ? '（高风险）' : ''}，点开查看详情`
 
-  if (relay) {
-    const mk = (label, decision) => ({
-      action: 'http',
-      label,
-      url: relay.commandUrl,
-      method: 'POST',
-      body: encodeCommand(ap.id, decision, ap.key),
-      clear: true,
-    })
-    try {
-      await relay.publish({
-        title,
-        body,
-        priority: 5, // 突破专注模式
-        click: detailUrl,
-        actions: [mk('✅ 批准', 'allow'), mk('❌ 拒绝', 'deny')],
-      })
-      console.log(`[relay] 已推送审批 ${ap.id.slice(0, 8)}（${ap.risk.level}）`)
-    } catch (err) {
-      console.error(`[relay] 推送失败: ${err.message}`)
-    }
-  }
-  // 附加通道（Bark 没有按钮，只能点开详情页）
   // 日志文件默认非 600，别把单条审批的 key 写进去
   console.log(`[approval] ${ap.id.slice(0, 8)} 深链 ${detailUrl.replace(/k=[^&]*/, 'k=***')}`)
   await push({ title, body, url: detailUrl, level: 'timeSensitive', group: 'clamicro-approval' })
@@ -181,22 +145,9 @@ if (process.argv.includes('--qr')) {
 
 // ---- 手动测试推送：node server.mjs --test-push ----
 if (process.argv.includes('--test-push')) {
-  if (config.relay.enabled) {
-    const r = new Relay(config.relay)
-    await r.publish({
-      title: '🔔 Clamicro 测试',
-      body: '看到这条 + 下面两个按钮，说明双向链路都通了。',
-      priority: 5,
-      actions: [
-        { action: 'http', label: '✅ 批准', url: r.commandUrl, method: 'POST', body: 'test|allow|test', clear: true },
-        { action: 'http', label: '❌ 拒绝', url: r.commandUrl, method: 'POST', body: 'test|deny|test', clear: true },
-      ],
-    })
-    console.log(`[relay] 测试通知已发往 ${r.notifyUrl}`)
-  }
   await push({
     title: '🔔 Clamicro 测试',
-    body: '如果你在锁屏上看到这条，附加推送通道也通了。',
+    body: '在锁屏上看到这条，说明推送通道是通的。',
     level: 'active',
     group: 'clamicro',
   })
@@ -714,7 +665,6 @@ async function handler(req, res) {
           detailInPush: config.notify.detailInPush,
           onStop: config.notify.onStop,
           minTurnMs: config.notify.minTurnMs,
-          relayEnabled: config.relay.enabled,
           lanIp: config.lanIp,
           autoApproveMs: config.approval.autoApproveMs,
           timeoutMs: config.approval.timeoutMs,
@@ -877,15 +827,8 @@ const servers = bindHosts.map((host) => {
   return s
 })
 
-relay?.start()
-
 console.log(`[clamicro] 网络 ${net.label}${trusted ? ' ✓ 已信任' : ' ✗ 未信任（仅本机可用）'}`)
 console.log(`[clamicro] 配置文件 ${CONFIG_FILE}`)
-console.log(
-  relay
-    ? `[clamicro] 中转 ${config.relay.server}（手机订阅 topic: ${config.relay.notifyTopic}）`
-    : `[clamicro] 中转 已关闭`,
-)
 if (config.push.provider !== 'none') console.log(`[clamicro] 推送 ${config.push.provider}`)
 console.log(
   config.lanIp
@@ -898,7 +841,6 @@ for (const sig of ['SIGINT', 'SIGTERM']) {
   process.on(sig, () => {
     console.log('\n[clamicro] 退出')
     history.flushNow()
-    relay?.stop()
     for (const res of sseClients) res.end()
     for (const s of servers) s.close()
     setTimeout(() => process.exit(0), 500).unref()
