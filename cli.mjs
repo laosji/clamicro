@@ -201,7 +201,14 @@ switch (cmd) {
       const pid = tunnelPid()
       const cfg = loadConfig()
       console.log(`\n  隧道      ${pid ? c.g('运行中') + c.dim(` pid ${pid}`) : c.y('未运行')}`)
-      console.log(`  公网地址  ${cfg.publicBaseUrl ?? c.dim('无')}`)
+      if (cfg.publicBaseUrl && !pid) {
+        // 配置里留着地址但进程没了 —— 这个地址已经作废，别让它看起来还能用
+        console.log(`  公网地址  ${c.y('已失效')} ${c.dim(cfg.publicBaseUrl)}`)
+        console.log(c.dim('            地址随隧道进程消失，服务已自动回落到局域网。'))
+        console.log(c.dim('            需要的话重新开： npx clamicro tunnel on'))
+      } else {
+        console.log(`  公网地址  ${cfg.publicBaseUrl ?? c.dim('无')}`)
+      }
       console.log(c.dim(`  日志      ${TUNNEL_LOG}\n`))
       break
     }

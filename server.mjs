@@ -36,7 +36,10 @@ history.bind(() => ({
   const { restored, orphaned } = approvals.restore(loaded.approvals)
   store.restoreEvents(loaded.events, loaded.nextEventId)
   store.restoreLimits(loaded.limits)
-  if (restored || loaded.events.length) {
+  // 一次性查询命令（status / networks / qr）只是借这个进程读数据，
+  // 不该把服务端的启动日志混进它们的输出里
+  const quiet = process.argv.some((a) => a.startsWith('--'))
+  if (!quiet && (restored || loaded.events.length)) {
     console.log(
       `[history] 恢复 ${restored} 条审批、${loaded.events.length} 条事件` +
         (orphaned ? `（其中 ${orphaned} 条重启时仍挂起，已标记为已放弃）` : ''),
@@ -149,11 +152,14 @@ if (process.argv.includes('--trust')) {
 }
 
 if (process.argv.includes('--networks')) {
+  // 拿不到 SSID 时 label 本身就是「网关 x.x.x.x」，别再把网关拼一遍
+  const describe = (n) =>
+    n.label === `网关 ${n.gateway}` ? n.label : `${n.label}  网关 ${n.gateway ?? '—'}`
   const fp = fingerprint(config.lanIp)
-  console.log(`\n  当前：${fp.label}  网关 ${fp.gateway ?? '—'}  ${isTrusted(config, fp) ? '✓ 已信任' : '✗ 未信任'}`)
+  console.log(`\n  当前：${describe(fp)}  ${isTrusted(config, fp) ? '✓ 已信任' : '✗ 未信任'}`)
   console.log('\n  已信任的网络：')
   for (const [id, n] of Object.entries(config.trustedNetworks ?? {})) {
-    console.log(`    ${n.label}  网关 ${n.gateway ?? '—'}  ${id.slice(0, 8)}`)
+    console.log(`    ${describe(n)}  ${id.slice(0, 8)}`)
   }
   console.log()
   process.exit(0)
@@ -343,7 +349,8 @@ const ALLOWED_HOSTS = new Set(
   [
     '127.0.0.1', 'localhost', '[::1]', '::1',
     config.lanIp, config.localHost, config.tailscaleIp,
-    (() => { try { return new URL(config.publicBaseUrl).hostname } catch { return null } })(),
+    // tunnelUrl 而非 publicBaseUrl：隧道没在跑时那个域名不该进白名单
+    (() => { try { return new URL(config.tunnelUrl).hostname } catch { return null } })(),
   ]
     .filter(Boolean)
     // 全部转小写：Host 头大小写不敏感，而 LocalHostName 可能是大小写混合
