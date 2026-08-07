@@ -169,6 +169,16 @@ npx clamicro install
 
 解决：**新开一个 Claude Code 会话**。
 
+### 换了 Wi-Fi，或者 IP 变了
+
+**新开一个 Claude Code 会话就行。** 服务会检测到绑的地址已经失效并自动重启到新地址，同时重新判断当前网络可不可信。
+
+然后重新生成二维码（地址变了，旧链接失效）：
+
+```bash
+npx clamicro qr
+```
+
 ### 换手机 / 清了浏览器数据
 
 ```bash

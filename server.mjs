@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
-import { loadConfig, saveConfig, CONFIG_FILE } from './lib/config.mjs'
+import { loadConfig, saveConfig, detectLanIp, CONFIG_FILE } from './lib/config.mjs'
 import { Store, STATE } from './lib/state.mjs'
 import { makePusher } from './lib/push.mjs'
 import { ApprovalStore, matchKey } from './lib/approvals.mjs'
@@ -316,6 +316,9 @@ function hostAllowed(req) {
   return ALLOWED_HOSTS.has(h.toLowerCase())
 }
 
+// IP 变化不在这里处理：套接字绑在旧地址上，请求根本到不了这个函数。
+// 由下面的网络巡检负责重新绑定，见 NET_POLL_MS 那一段。
+
 /** 常数时间比较，避免给出可测的时间差 */
 function safeEq(a, b) {
   const x = Buffer.from(String(a ?? ''))
@@ -357,6 +360,15 @@ async function handler(req, res) {
 
   try {
     if (!hostAllowed(req)) {
+      if (looksLikeIpChanged(req)) {
+        warnIpChanged()
+        // 仍然拒绝——白名单是防 DNS rebinding 的，不能因为「看起来像 IP 变了」
+        // 就放行。但要告诉对面这是怎么回事，而不是含混的 bad host。
+        return json(res, 421, {
+          error: 'address_changed',
+          message: `这台 Mac 的局域网 IP 已经变了。请在终端重启服务后重新扫码：npx clamicro qr`,
+        })
+      }
       console.warn(`[security] 拒绝 Host: ${req.headers.host}（疑似 DNS rebinding）`)
       return json(res, 403, { error: 'bad host' })
     }
@@ -372,8 +384,14 @@ async function handler(req, res) {
     )
 
     if (path === '/healthz') {
-      // 不泄露会话数——未认证的探测者不需要知道你在跑几个任务
-      return json(res, 200, { ok: true })
+      // 不泄露会话数——未认证的探测者不需要知道你在跑几个任务。
+      //
+      // stale：进程启动时绑的局域网地址还成立吗。
+      // 监听套接字绑在启动那一刻的 IP 上，DHCP 续租或换 Wi-Fi 之后那个地址
+      // 就不属于本机了——手机连过来是超时而不是报错，终端里一片安静，
+      // 典型的静默失败。这里现场重新探测一次，让 SessionStart hook 据此决定
+      // 要不要重启（服务本来就跟着 Claude Code 的生命周期走，不另开巡检）。
+      return json(res, 200, { ok: true, stale: detectLanIp() !== config.lanIp })
     }
 
     // hooks / statusLine 一律只认本机来源，见 isLoopback 的说明
@@ -819,15 +837,22 @@ if (!trusted && config.lanIp) {
 }
 
 // ---- 启动：每个绑定地址一个 server 实例，共享同一 handler ----
-const servers = bindHosts.map((host) => {
+const servers = new Map() // host -> http.Server
+
+function listenOn(host) {
+  if (!host || servers.has(host)) return
   const s = createServer(handler)
   s.on('error', (err) => {
     console.error(`[clamicro] 绑定 ${host}:${config.port} 失败: ${err.message}`)
-    if (err.code === 'EADDRINUSE') process.exit(1)
+    servers.delete(host)
+    // 回环绑不上才是致命的；局域网地址绑不上通常只是网卡刚变，等下一轮巡检
+    if (err.code === 'EADDRINUSE' && host === '127.0.0.1') process.exit(1)
   })
   s.listen(config.port, host, () => console.log(`[clamicro] 监听 http://${host}:${config.port}`))
-  return s
-})
+  servers.set(host, s)
+}
+
+for (const host of bindHosts) listenOn(host)
 
 console.log(`[clamicro] 网络 ${net.label}${trusted ? ' ✓ 已信任' : ' ✗ 未信任（仅本机可用）'}`)
 console.log(`[clamicro] 配置文件 ${CONFIG_FILE}`)
@@ -844,7 +869,7 @@ for (const sig of ['SIGINT', 'SIGTERM']) {
     console.log('\n[clamicro] 退出')
     history.flushNow()
     for (const res of sseClients) res.end()
-    for (const s of servers) s.close()
+    for (const s of servers.values()) s.close()
     setTimeout(() => process.exit(0), 500).unref()
   })
 }

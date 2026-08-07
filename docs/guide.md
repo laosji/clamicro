@@ -169,6 +169,16 @@ Why: statusLine is read **when a session starts**. Sessions you had open before 
 
 Fix: **open a new Claude Code session**.
 
+### Switched Wi-Fi, or your IP changed
+
+**Just start a new Claude Code session.** The service notices its bound address is stale, restarts onto the new one, and re-evaluates whether the current network is trusted.
+
+Then regenerate the QR — the address changed, so old links are dead:
+
+```bash
+npx clamicro qr
+```
+
 ### New phone / cleared browser data
 
 ```bash
