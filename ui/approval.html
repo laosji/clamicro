@@ -155,14 +155,38 @@
   .tag.danger{background:var(--warnbg); color:var(--no); font-weight:600}
   .tag.calm{color:var(--calm)}
 
-  /* 主角：一句人话 */
-  h1{font-size:21px; line-height:1.4; margin:0 0 14px; font-weight:600; overflow-wrap:anywhere}
+  /* 模型写的那句话。它在命令**下面**且明显更轻——
+     description 由被审查方生成，不该占据主视觉。 */
+  .says{
+    margin:12px 0 4px; font-size:14px; line-height:1.5; color:var(--dim);
+    overflow-wrap:anywhere;
+  }
+  .says::before{
+    content:'模型的描述'; display:block; font-size:11px; letter-spacing:.06em;
+    text-transform:uppercase; opacity:.6; margin-bottom:3px;
+  }
 
   .risk{
     background:var(--warnbg); border:1px solid color-mix(in srgb,var(--warn) 35%,transparent);
     color:var(--warn); border-radius:10px; padding:11px 13px; margin-bottom:14px; font-size:14px;
   }
   .risk b{display:block; margin-bottom:3px}
+
+  /* 描述与命令不符——比高风险更值得警惕，因为它意味着那句人话在骗你 */
+  .mismatch{
+    background:color-mix(in srgb,var(--no) 12%,transparent);
+    border:1px solid color-mix(in srgb,var(--no) 45%,transparent);
+    color:var(--no); border-radius:10px; padding:11px 13px; margin-bottom:14px;
+    font-size:14px; line-height:1.5;
+  }
+  .mismatch b{display:block; margin-bottom:3px}
+
+  /* 命令里命中风险规则的片段 */
+  mark{
+    background:color-mix(in srgb,var(--no) 26%,transparent);
+    color:inherit; border-radius:3px; padding:1px 2px;
+    box-shadow:inset 0 -1px 0 color-mix(in srgb,var(--no) 60%,transparent);
+  }
 
   details{margin-bottom:8px}
   summary{
@@ -296,9 +320,12 @@
 <main id="detail">
   <div class="swipe" id="card">
     <div class="tags" id="tags"></div>
-    <h1 id="headline">…</h1>
     <div class="risk hidden" id="risk"></div>
+    <div class="mismatch hidden" id="mismatch"></div>
+    <!-- 命令原文在描述之前：description 是模型自己写的，是这条链路里
+         唯一不可信的部分，不该占据主视觉。 -->
     <div id="cmdbox"></div>
+    <p class="says" id="headline">…</p>
     <div class="swipehint hidden" id="swipehint">
       <b style="color:var(--no)">←</b> 左滑拒绝 &nbsp;·&nbsp; 右滑批准 <b style="color:var(--ok)">→</b>
     </div>
@@ -371,6 +398,14 @@ function render(a) {
     armSwipe('normal');
   }
 
+  // 描述声称无害而命令并非如此。这条比「高风险」更需要显眼——
+  // 高风险只是说这事危险，不符是说那句人话在骗你。
+  if (a.mismatch) {
+    $('mismatch').innerHTML = `<b>⚠️ 描述与命令不符</b>${esc(a.mismatch)}<br><small>以下面的命令原文为准。</small>`;
+    $('mismatch').classList.remove('hidden');
+    armSwipe('high'); // 不符一律按高风险的手势重量处理
+  }
+
   renderCommand(a);
   tick();
   ticker = setInterval(tick, 1000);
@@ -382,16 +417,46 @@ function render(a) {
   show('detail');
 }
 
-// 短命令直接摊开，长脚本折叠——一行 rm -rf 没必要藏，14 行脚本没必要霸屏
+/**
+ * 按 detail_spans 给命令里命中风险规则的片段套 <mark>。
+ *
+ * 服务端给的是**下标区间**而不是要高亮的字符串。必须如此：先转义再按字符串
+ * 替换的话，`>` 已经变成 `&gt;`，下标和内容都对不上；先替换再转义则会把
+ * 自己插入的标签一起转义掉。按区间切片、逐段转义、再拼装，是唯一不会
+ * 把用户数据当标记解释的顺序。
+ */
+function highlight(text, spans) {
+  if (!spans || !spans.length) return esc(text);
+  let out = '';
+  let at = 0;
+  for (const { start, end, why } of spans) {
+    if (start < at || start > text.length) continue; // 越界或重叠的区间直接跳过
+    out += esc(text.slice(at, start));
+    out += `<mark title="${esc(why || '')}">${esc(text.slice(start, Math.min(end, text.length)))}</mark>`;
+    at = Math.min(end, text.length);
+  }
+  return out + esc(text.slice(at));
+}
+
+/**
+ * 命令是主视觉，默认摊开。
+ *
+ * 以前长命令是折叠的（<details>），配合「description 当标题」，等于让人
+ * 对着模型自己写的一句话做决定，而真正要批的东西藏在一次点击之后。
+ * 现在只有超长脚本才折叠，且折叠标题会写明命中了什么风险。
+ */
 function renderCommand(a) {
   const d = a.detail || '';
   if (!d) return;
   const lines = a.detail_lines || 1;
-  const short = lines <= 2 && d.length <= 120;
-  const code = `<div class="codewrap${short ? ' short' : ''}"><pre>${esc(d)}</pre></div>`;
-  $('cmdbox').innerHTML = short
-    ? code
-    : `<details><summary>查看完整命令（${lines} 行）</summary>${code}</details>`;
+  const body = highlight(d, a.detail_spans);
+  const veryLong = lines > 24;
+  const code = `<div class="codewrap${veryLong ? '' : ' short'}"><pre>${body}</pre></div>`;
+  if (!veryLong) { $('cmdbox').innerHTML = code; return; }
+  const flagged = (a.detail_spans || []).length;
+  const note = flagged ? `，其中 ${flagged} 处命中风险规则` : '';
+  $('cmdbox').innerHTML =
+    `<details open><summary>完整命令（${lines} 行${note}）</summary>${code}</details>`;
 }
 
 function tick() {
