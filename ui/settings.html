@@ -91,42 +91,20 @@
 <body>
 <div class="nav"><a href="/ui">‹ 返回</a><h1>设置</h1></div>
 
-<h2>手机推送（可选）</h2>
+<h2>提醒</h2>
 <p class="hint" style="margin:0 2px 10px">
-  不填也能用——需要审批时 Mac 会弹通知并响一声，终端状态栏也会显示待审批数。
-  只有当你想<b>人不在电脑边也能被叫醒</b>时才需要配置。
+  只有 Mac 本地通知这一条，<b>完全不联网</b>。
+  远程推送已经去掉了——锁屏可达必须经第三方服务器，而这个工具的前提是你人在附近。
+  <b>离开电脑后不会有任何东西叫你</b>：高风险操作会等到超时被自动拒绝，那一轮任务失败。
+  这是有意的默认，人不在就不该放行 <code>rm -rf</code>。
 </p>
 <div class="card">
-  <div class="row" style="display:block">
-    <div class="lbl" style="margin-bottom:9px">
-      <b>Bark Key</b>
-      <span>
-        打开 Bark App，复制首页那串 key 粘贴到这里
-        <a class="getapp" href="https://apps.apple.com/app/id1403753865" target="_blank" rel="noopener">
-          还没装？去 App Store ↗
-        </a>
-      </span>
-    </div>
-    <input type="text" id="barkKey" placeholder="粘贴 Bark App 首页那串 key" autocapitalize="off" autocorrect="off" spellcheck="false">
-  </div>
   <div class="row">
-    <div class="lbl"><b>启用手机推送</b><span>锁屏通知需要走 APNs，无法只用 Wi-Fi</span></div>
-    <input type="checkbox" id="pushEnabled">
-  </div>
-  <div class="row">
-    <div class="lbl"><b>推送里显示命令全文</b><span>关闭时公网只看到「Bash 操作」，命令只在局域网页面显示</span></div>
-    <input type="checkbox" id="detailInPush">
-  </div>
-</div>
-<button id="testPush">发一条测试通知</button>
-
-<h2>Mac 本地提醒</h2>
-<div class="card">
-  <div class="row">
-    <div class="lbl"><b>macOS 通知</b><span>人在电脑边时由 Mac 自己出声，完全不联网</span></div>
+    <div class="lbl"><b>macOS 通知</b><span>需要审批、任务完成、出错时弹通知并响一声</span></div>
     <input type="checkbox" id="macNotify">
   </div>
 </div>
+<button id="testNotify">发一条测试通知</button>
 
 <h2>任务完成通知</h2>
 <div class="card">
@@ -208,11 +186,6 @@ function toast(msg) {
 
 async function load() {
   const c = await fetch('/api/config').then((r) => r.json());
-  $('barkKey').value = c.barkKey;
-  $('barkKey').dataset.masked = c.barkConfigured ? '1' : '';
-  $('pushEnabled').checked = c.pushEnabled;
-  $('pushEnabled').disabled = !c.barkConfigured;
-  $('detailInPush').checked = c.detailInPush;
   $('macNotify').checked = c.macNotify;
   $('onStop').checked = c.onStop;
   $('minTurnMs').value = Math.round(c.minTurnMs / 1000);
@@ -245,20 +218,9 @@ async function save(patch, note = '已保存') {
   await load();
 }
 
-// 掩码值不回传，避免把 "rNJf••••" 当成新 key 存进去
-$('barkKey').addEventListener('focus', function () {
-  if (this.dataset.masked) { this.value = ''; this.dataset.masked = ''; }
-});
-$('barkKey').addEventListener('change', function () {
-  const v = this.value.trim();
-  // 空串不再当作「清除」——聚焦时掩码被清空、直接失焦也会走到这里，
-  // 那样会把已配置的 key 误删。真要清除请长按下面的开关说明。
-  if (!v) return load();
-  save({ barkKey: v, pushEnabled: true }, 'Key 已保存，推送已开启');
-});
 
-for (const [id, key] of [['pushEnabled','pushEnabled'],['detailInPush','detailInPush'],['macNotify','macNotify'],['onStop','onStop']]) {
-  $(id).addEventListener('change', function () { save({ [key]: this.checked }); });
+for (const id of ['macNotify', 'onStop']) {
+  $(id).addEventListener('change', function () { save({ [id]: this.checked }); });
 }
 $('minTurnMs').addEventListener('change', function () {
   save({ minTurnMs: Math.max(0, Number(this.value) || 0) * 1000 });
@@ -309,10 +271,10 @@ for (const b of document.querySelectorAll('.seg')) {
   b.onclick = () => save({ hostMode: b.dataset.mode }, '已保存，重启服务后生效');
 }
 
-$('testPush').onclick = async function () {
+$('testNotify').onclick = async function () {
   this.disabled = true;
-  await fetch('/api/selftest/push', { method: 'POST' });
-  toast('已发出，看看锁屏');
+  await fetch('/api/selftest/notify', { method: 'POST' });
+  toast('已发出，看看 Mac 右上角');
   this.disabled = false;
 };
 

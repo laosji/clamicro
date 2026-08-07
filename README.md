@@ -4,7 +4,7 @@
 
 Watch Claude Code from your phone, and approve what it wants to run.
 
-Stop babysitting the terminal. When Claude Code needs permission, your phone buzzes. Open it, read one plain-English line describing the operation, swipe to approve or reject — Claude Code continues immediately.
+Stop babysitting the terminal. When Claude Code needs permission, your Mac notifies you; open the page on your phone, read the command and a one-line summary, swipe to approve or reject — Claude Code continues immediately.
 
 **Zero dependencies.** Node ≥ 18 and `curl` (built into macOS). Nothing in `node_modules` at runtime.
 
@@ -25,7 +25,7 @@ Two steps:
 
 It works immediately after install: when approval is needed your Mac shows a notification and plays a sound, the terminal status line shows `⏳ N pending`, and the web UI is reachable from your phone.
 
-**Optional:** to be reachable when you're *away* from the Mac, add a [Bark](https://apps.apple.com/app/id1403753865) key in Settings. That's the only thing that ever tells an outside server anything, and it isn't required.
+**No remote push:** the only alert channel is a macOS local notification — fully offline. Nothing will reach you once you walk away from the Mac; high-risk operations sit until they time out and get rejected. See "Near-field means Wi-Fi only" below.
 
 > The installer **appends, never replaces.** Your existing hook config is preserved intact; if `statusLine` is already taken by another tool it's left alone with a warning. Everything is backed up first.
 
@@ -54,7 +54,7 @@ To upgrade, run `npx clamicro install` again.
 | Session state and sub-state (Thinking / Searching / Editing) | hook event stream |
 | 5-hour and 7-day usage, context window, session cost | `statusLine` |
 | Pending approvals with a plain-English summary and impact tags | `PermissionRequest` |
-| Task finished / errored notifications | `Stop` / `StopFailure` |
+| Task finished / errored alerts | `Stop` / `StopFailure` |
 | Full event timeline per session | all hooks |
 | Pause / Resume / Cancel the current turn | `PreToolUse` gate |
 | Quota-nearly-exhausted warning | `statusLine` |
@@ -74,7 +74,7 @@ Claude Code has no runtime-freeze primitive — nothing can stop it mid-step. "P
 ```
 Claude Code wants to run something that needs permission
   → PermissionRequest hook (HTTP, timeout 600)
-  → service records it, notifies your phone, then blocks
+  → service records it, your Mac notifies you, then it blocks
   → you approve or reject on your phone
   → hook returns the decision → Claude Code proceeds or is denied
 ```
@@ -105,7 +105,7 @@ The fingerprint combines **gateway IP + gateway MAC + subnet**. SSID needs Locat
 | **`/api/pair` requires a custom header** | CSRF. Cross-site "simple requests" are sent by the browser regardless — the side effect already happened — meaning any site you visit could make your Mac pop up a QR code |
 | **CSP `frame-ancestors 'none'`** | Clickjacking: a malicious page framing the approval screen and tricking you into swiping |
 | **Constant-time comparison** | Timing side channels on the token and per-approval keys |
-| **`SameSite=Lax` + `HttpOnly`** | CSRF, while still keeping you logged in when arriving from a push notification (`Strict` would force a re-scan every time) |
+| **`SameSite=Lax` + `HttpOnly`** | CSRF, while still keeping you logged in when arriving from another app (`Strict` would force a re-scan every time) |
 | **Per-approval key** | A leaked deep link can only decide that one approval, and expires with it |
 
 ### The remaining risk: plaintext HTTP
@@ -124,19 +124,18 @@ The other route is a tunnel (`clamicro tunnel on`), but tunneling services termi
 
 The control plane **never leaves your LAN**. Command text, approval decisions, timeline and quota all go straight to `http://<host>.local:8765`.
 
-Two tiers based on where you are; only the second reaches outside:
+Two tiers based on where you are — neither reaches outside:
 
 | Situation | How you're alerted | Network reach |
 |---|---|---|
 | **① At your Mac** | macOS notification + sound | **fully offline** |
-| **② Same Wi-Fi, away from the Mac** | phone push (Bark) | only "there's an approval" leaves your network |
+| **② Away from the Mac** | **no alert** | — |
 
-**Notifications only summon you. Decisions always happen back on the LAN page.**
+**Why ② has no alert:** lock-screen-capable notifications must go through APNs, which necessarily means a third-party server.
 
-An earlier version had a third tier: an ntfy relay with action buttons that let you approve straight from the lock screen. It's been removed — it handed the control plane to a third-party public server, and all it bought was saving one tap. When you're away from the device, "one fewer tap" was never worth that.
+Two channels were tried and both removed: an ntfy relay with action buttons (approve straight from the lock screen — that hands the *control plane* to a third party), and Bark (one line saying "there's an approval", control plane staying on the LAN). The latter was about as restrained as it gets, and it still only bought "something can page you while you're away" — but this tool assumes you're nearby to begin with. Continuously telling an outside server that an operation is waiting for approval isn't worth that.
 
-**Why ② can't be Wi-Fi-only:** iOS won't let a backgrounded app hold a LAN connection open, so lock-screen-capable notifications must go through APNs. The mitigation is to minimize what leaves — `detailInPush` is off by default, so the push body only says "Bash operation (high risk)" and the command text stays on the LAN page. The push provider knows you have an approval; it doesn't know what for, and can't act on it.
-
+**Be clear about the cost:** once you leave the Mac, *nothing* alerts you. High-risk operations wait out the timeout (570s by default) and get auto-rejected, failing that turn. That is the intended default — nobody should be approving `rm -rf` while away. You can still open the dashboard from your phone whenever you want to look.
 ---
 
 ## Design notes
@@ -159,7 +158,7 @@ An earlier version had a third tier: an ntfy relay with action buttons that let 
 
 **The address is a Bonjour hostname, not an IP.** macOS already broadcasts `<LocalHostName>.local`; using it means old links survive DHCP changes and you never re-scan. If your router blocks multicast, set the address mode to IP in Settings.
 
-**The login cookie must be `SameSite=Lax`, not `Strict`.** Arriving from a push notification is a cross-site navigation; `Strict` cookies aren't sent, so every notification tap would look like a fresh login.
+**The login cookie must be `SameSite=Lax`, not `Strict`.** Arriving from another app (a saved link, the QR shown on the Mac) is a cross-site navigation; `Strict` cookies aren't sent, so every notification tap would look like a fresh login.
 
 **Quota is account-level, not per-session.** Storing it per session lets a stale session's numbers override the newest reading. Only the latest observation counts, and the UI shows when it was taken and from which session.
 
@@ -178,7 +177,7 @@ npx clamicro qr           # print the login QR code
 npx clamicro status       # service, network, version
 npx clamicro trust        # trust the current network
 npx clamicro networks     # current network + trusted list
-npx clamicro test-push    # send a test notification
+npx clamicro test-push    # send a test notification (local, on the Mac)
 npx clamicro logs         # tail the log
 npx clamicro stop         # stop the service
 ```

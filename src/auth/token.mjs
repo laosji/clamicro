@@ -39,9 +39,10 @@ export function makeAuth(token) {
     /**
      * 登录 cookie 的属性。
      *
-     * SameSite 必须是 Lax 不能是 Strict：从 Bark 通知点进 Safari 属于跨站导航，
-     * Strict 的 cookie 不会被带上，表现是每次从通知进来都像没登录过、要重新扫码。
-     * Lax 放行顶层 GET 导航，跨站 POST 仍然拦住。
+     * SameSite 必须是 Lax 不能是 Strict。从别的 App 点链接进来（备忘录里存的地址、
+     * 别人发来的消息、Mac 上弹出的二维码）都算跨站导航，Strict 的 cookie 不会被
+     * 带上，表现是每次都像没登录过、要重新扫码。Lax 放行顶层 GET 导航，
+     * 跨站 POST 仍然拦住。
      */
     loginCookie(baseUrl) {
       return [

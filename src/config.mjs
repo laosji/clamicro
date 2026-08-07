@@ -47,27 +47,17 @@ const DEFAULTS = {
   // 结果就是二维码扫了打不开，而这是硬故障；IP 变了要重扫只是麻烦。
   // 想用 .local 的话，登录后由手机自己探测，通了再在设置页切过去。
   hostMode: 'ip',
-  // 通知通道。**只负责把你叫过来，决策一律回到局域网页面上做。**
-  // 曾经有过一条 ntfy 双 topic 中转，能在锁屏通知里直接批准，已删除：
-  // 它把控制面交给第三方公网服务器，换来的只是省掉一次点击。
-  push: {
-    // macOS 本地通知。完全不联网，「近场」场景的零依赖提醒方式。
-    macNotify: true,
-    // 远程推送。锁屏可达必须走 APNs，这一块无法只用 Wi-Fi。
-    // 人在电脑边时可以设成 'none'，只靠 macNotify。
-    provider: 'none', // 'bark' | 'none'
-    bark: { server: 'https://api.day.app', key: '' },
-  },
   notify: {
+    // macOS 本地通知，是现在**唯一**的提醒通道。完全不联网。
+    // 远程推送（ntfy 中转、Bark）都删掉了，理由见 src/notify.mjs 的注释：
+    // 锁屏可达必须经第三方，而这个产品的前提是近场。
+    macNotify: true,
     // Stop 在每一轮助手回复结束时都触发，包括 2 秒就结束的对话。
-    // 低于这个时长的 turn 不推送，否则每问一句都响一次。
+    // 低于这个时长的 turn 不提醒，否则每问一句都响一次。
     minTurnMs: 30_000,
     onStop: true,
     onError: true,
-    // 推送正文是否带命令全文。false = 公网上只出现「Bash 操作需要审批」，
-    // 命令内容只在局域网的审批页上显示。
-    detailInPush: false,
-    // 会自动通过的操作是否也推送。默认否——推了也来不及看，只是噪音。
+    // 会自动通过的操作是否也提醒。默认否——提醒了也来不及看，只是噪音。
     notifyAutoApproved: false,
     // 5 小时窗口用量达到这个百分比时提醒一次。0 = 关闭。
     // 目的是别让长任务跑到一半突然被限流卡住。
@@ -92,7 +82,7 @@ const DEFAULTS = {
 
 /**
  * 项目早期叫 cc-monitor，配置放在 ~/.claude/cc-monitor。
- * 直接换目录会让人丢掉 token、Bark key 和已信任网络列表——
+ * 直接换目录会让人丢掉 token 和已信任网络列表——
  * 表现是「装完发现要重新扫码、推送也没了」，而且看不出原因。整个搬过来。
  */
 function migrateLegacyDir() {
@@ -100,7 +90,7 @@ function migrateLegacyDir() {
   if (!existsSync(legacy)) return
   // 判断依据必须是「配置文件」而不是「目录」：安装器会先把运行时同步到
   // <CONFIG_DIR>/app，目录因此提前存在，用目录判断会直接跳过迁移，
-  // 表现就是 token 重新生成、Bark key 丢失，而且没有任何报错。
+  // 表现就是 token 重新生成、已信任网络丢失，而且没有任何报错。
   mkdirSync(CONFIG_DIR, { recursive: true })
   for (const name of ['config.json', 'history.json']) {
     const from = join(legacy, name)
@@ -145,16 +135,29 @@ export function loadConfig() {
     config.token = randomBytes(32).toString('base64url')
     dirty = true
   }
-  // ntfy 中转已删除。老配置里可能还留着 relay 段（含 topic 名，那是凭证），
-  // 清掉——留着既没人读，又让人以为这条通路还在。
+  // 远程推送已全部删除（ntfy 中转、Bark）。老配置里的 relay / push 段都是
+  // 死配置，而且**里面装着凭证**——relay 的 topic 名、Bark 的 device key。
+  // 留着既没人读，又让人以为这条通路还在，还多一份泄漏面。
   if ('relay' in config) {
     delete config.relay
     dirty = true
     console.log('[config] 已移除废弃的 relay 配置（ntfy 中转已下线）')
   }
+  if ('push' in config) {
+    // macNotify 是唯一还有意义的字段，搬进 notify 段
+    if (typeof config.push?.macNotify === 'boolean') config.notify.macNotify = config.push.macNotify
+    delete config.push
+    dirty = true
+    console.log('[config] 已移除废弃的 push 配置（远程推送已下线，含其中的 Bark key）')
+  }
+  // detailInPush 只对远程推送有意义——本地通知就在你自己电脑上
+  if ('detailInPush' in (config.notify ?? {})) {
+    delete config.notify.detailInPush
+    dirty = true
+  }
   if (dirty) {
     writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2))
-    chmodSync(CONFIG_FILE, 0o600) // 含 token、Bark key
+    chmodSync(CONFIG_FILE, 0o600) // 含访问 token
     console.log(`[config] 已写入 ${CONFIG_FILE}`)
   }
 

@@ -86,10 +86,10 @@ test('saveConfig 不把派生字段写回磁盘', () => {
   }
 })
 
-test('废弃的 relay 配置会被清掉（topic 名是凭证）', () => {
+test('废弃的 relay / push 配置会被清掉（里面装着凭证）', () => {
   writeConfig({
     relay: { enabled: true, notifyTopic: 'ccm-n-SECRET', commandTopic: 'ccm-c-SECRET' },
-    push: { macNotify: true, provider: 'bark', bark: { server: 'https://api.day.app', key: 'KEEPME' } },
+    push: { macNotify: false, provider: 'bark', bark: { server: 'https://api.day.app', key: 'SECRET-KEY' } },
   })
   const un = silence()
   const c = loadConfig()
@@ -98,7 +98,9 @@ test('废弃的 relay 配置会被清掉（topic 名是凭证）', () => {
   const disk = JSON.parse(readFileSync(CONFIG_FILE, 'utf8'))
   assert.ok(!('relay' in disk), '盘上不该还有 relay')
   assert.ok(!JSON.stringify(disk).includes('SECRET'), 'topic 名是凭证，必须一起清掉')
-  assert.equal(disk.push.bark.key, 'KEEPME', '清理不得误伤 Bark key')
+  assert.ok(!('push' in disk), '废弃的 push 段该被清掉')
+  assert.ok(!JSON.stringify(disk).includes('SECRET-KEY'), 'Bark key 是凭证，必须一起清掉')
+  assert.equal(disk.notify.macNotify, false, 'macNotify 应被搬进 notify 段')
   assert.equal(disk.token.length, 43, '清理不得误伤 token')
 })
 

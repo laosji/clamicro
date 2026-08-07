@@ -244,23 +244,19 @@ function renderHome() {
 
   let h = '';
 
-  // 推送悄悄关掉了你是看不出来的——只有 Mac 会响，人一走开就彻底静默。
-  // 这个状态必须在首页明说。
-  // 配过 key 却被关掉 = 大概率是失手，用告警样式；
-  // 从没配过 = 可能是主动选择，用普通样式。
-  // 无论哪种都可以手动关掉——你要是故意关的推送，每次进来被念一遍就是纯噪音。
-  // 但状态一变（比如开了又关）就重新出现，因为那可能是一次新的失手。
-  if (cfg && !cfg.pushEnabled) {
-    const oops = cfg.barkConfigured;
-    const sig = 'push-off-' + (oops ? 'configured' : 'never');
+  // Mac 本地通知是**唯一**的提醒通道，关掉就是彻底静默——而这件事你是
+  // 看不出来的：界面一切正常，只是再也不会有东西叫你，高风险操作全都
+  // 静静等到超时被拒。必须在首页明说。
+  // 可以手动关掉这条横幅——故意关的人每次进来被念一遍就是纯噪音；
+  // 但状态一变（关了又开又关）就重新出现，因为那可能是一次新的失手。
+  if (cfg && !cfg.macNotify) {
+    const sig = 'notify-off';
     if (localStorage.getItem('ccm-dismissed') !== sig) {
-      h += `<div class="card${oops ? ' alert' : ''} notice" data-sig="${sig}">
+      h += `<div class="card alert notice" data-sig="${sig}">
         <button class="x" aria-label="关闭">×</button>
         <a href="/ui/settings" style="display:block;color:inherit;text-decoration:none">
-          <div class="top"><span class="name">🔕 手机推送已关闭</span></div>
-          <div class="path" style="white-space:normal">${oops
-            ? '通道被关掉了，现在只有 Mac 会提醒你。点此开启'
-            : '只有 Mac 会提醒你。高风险操作在你离开电脑时会等到超时被拒绝'}</div>
+          <div class="top"><span class="name">🔕 提醒已全部关闭</span></div>
+          <div class="path" style="white-space:normal">现在没有任何东西会通知你。高风险操作会一直等到超时被自动拒绝。点此开启</div>
         </a>
       </div>`;
     }

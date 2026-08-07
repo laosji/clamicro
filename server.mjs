@@ -5,7 +5,7 @@ import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { loadConfig, saveConfig, detectLanIp, CONFIG_FILE } from './src/config.mjs'
 import { Store, STATE } from './src/state.mjs'
-import { makePusher } from './src/push.mjs'
+import { makeNotifier } from './src/notify.mjs'
 import { ApprovalStore } from './src/approvals.mjs'
 import { History } from './src/history.mjs'
 import { ControlStore, CONTROL } from './src/control.mjs'
@@ -25,7 +25,7 @@ const store = new Store()
 const approvals = new ApprovalStore()
 const control = new ControlStore()
 const inbox = new Inbox()
-const push = makePusher(config)
+const notify = makeNotifier(config)
 
 // ---- 历史落盘：重启后旧通知点开不再是「已失效」 ----
 const history = new History()
@@ -94,14 +94,11 @@ async function notifyApproval(ap, label) {
   // 用 config.baseUrl —— 它已回落到自动探测的局域网 IP；publicBaseUrl 通常是空的
   const detailUrl = `${config.baseUrl}/ui/a/${ap.id}?k=${encodeURIComponent(ap.key)}`
   const title = `${ap.risk.level === 'high' ? '⚠️' : '🔐'} ${label} 需要审批`
-  // 默认不把命令全文发上公网——正文只说是什么工具，内容在局域网的审批页上看
-  const body = config.notify.detailInPush
-    ? `${ap.tool_name}: ${ap.summary}`.slice(0, 400)
-    : `${ap.tool_name} 操作${ap.risk.level === 'high' ? '（高风险）' : ''}，点开查看详情`
+  const body = `${ap.summary}`.slice(0, 200)
 
   // 日志文件默认非 600，别把单条审批的 key 写进去
   console.log(`[approval] ${ap.id.slice(0, 8)} 深链 ${detailUrl.replace(/k=[^&]*/, 'k=***')}`)
-  await push({ title, body, url: detailUrl, level: 'timeSensitive', group: 'clamicro-approval' })
+  await notify({ title, body })
 }
 
 // ---- 信任当前网络：node server.mjs --trust ----
@@ -146,14 +143,9 @@ if (process.argv.includes('--qr')) {
   process.exit(0)
 }
 
-// ---- 手动测试推送：node server.mjs --test-push ----
+// ---- 手动测试提醒：node server.mjs --test-push ----
 if (process.argv.includes('--test-push')) {
-  await push({
-    title: '🔔 Clamicro 测试',
-    body: '在锁屏上看到这条，说明推送通道是通的。',
-    level: 'active',
-    group: 'clamicro',
-  })
+  await notify({ title: '🔔 Clamicro 测试', body: '看到这条通知，说明提醒通道是通的。' })
   process.exit(0)
 }
 
@@ -213,11 +205,11 @@ const { sameToken, authorized, loginCookie } = makeAuth(config.token)
 
 const auth = { sameToken, authorized, loginCookie }
 const handleHooks = hookRoutes({
-  config, store, approvals, control, inbox, history, push, notifyApproval,
+  config, store, approvals, control, inbox, history, notify, notifyApproval,
 })
-const handlePages = pageRoutes({ config, approvals, push, auth, publicApproval, HERE })
+const handlePages = pageRoutes({ config, approvals, auth, publicApproval, HERE })
 const handleApi = apiRoutes({
-  config, store, approvals, control, inbox, push, saveConfig,
+  config, store, approvals, control, inbox, notify, saveConfig,
   auth, publicApproval, notifyApproval, sseClients, HERE,
   // 惰性：net / trusted 在下面的「网络信任闸门」一节才求值，
   // 这里直接传值会撞上 TDZ。闭包体到请求进来时才执行，那时早就有值了。
@@ -283,7 +275,7 @@ const bindHosts = trusted
 if (!trusted && config.lanIp) {
   console.warn(`[security] 当前网络「${net.label}」未被信任，只绑回环，手机暂时连不上`)
   console.warn(`[security] 确认这是可信网络后执行： node ${join(HERE, 'server.mjs')} --trust`)
-  push({
+  notify({
     title: '🔒 Clamicro 已收缩到本机',
     body: `检测到新网络「${net.label}」。确认可信后在终端执行 server.mjs --trust`,
     level: 'timeSensitive',
@@ -349,7 +341,7 @@ const stopWatching = watchNetwork(() => {
   console.warn(`[security] 网络变为「${fp.label}」，未被信任${wasExposed ? '，已摘掉局域网监听' : ''}`)
   console.warn(`[security] 确认可信后执行： npx clamicro trust`)
   if (wasExposed) {
-    push({
+    notify({
       title: '🔒 Clamicro 已收缩到本机',
       body: `换到了未信任的网络「${fp.label}」，局域网访问已关闭。确认可信后执行 npx clamicro trust`,
       level: 'timeSensitive',
@@ -360,7 +352,6 @@ const stopWatching = watchNetwork(() => {
 
 console.log(`[clamicro] 网络 ${net.label}${trusted ? ' ✓ 已信任' : ' ✗ 未信任（仅本机可用）'}`)
 console.log(`[clamicro] 配置文件 ${CONFIG_FILE}`)
-if (config.push.provider !== 'none') console.log(`[clamicro] 推送 ${config.push.provider}`)
 console.log(
   config.lanIp
     ? `[clamicro] 深链基址 ${config.baseUrl}（手机需在同一 Wi-Fi）${config.altUrl ? ` · 备用 ${config.altUrl}` : ''}`

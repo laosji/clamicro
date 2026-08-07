@@ -56,15 +56,18 @@ Nothing to configure. When permission is needed:
 
 Ordinary operations (`npm run build` and friends) **auto-approve after 10 seconds** — you never have to deal with them. Only high-risk operations wait for you.
 
-### You've left the Mac, still on the same Wi-Fi
+### You've left the Mac
 
-You need Bark for this, otherwise nothing can reach you.
+**Nothing will alert you.** That's deliberate — the only channel is a macOS local notification, and it doesn't leave your machine.
 
-Settings → Phone push → tap "Don't have it? Get it on the App Store" → install Bark → copy the key from its home screen → paste it back.
+So:
 
-After that, high-risk operations ring your phone. Tapping the notification opens the approval screen.
+- you have to remember to open the page on your phone yourself
+- high-risk operations wait out the timeout (~9.5 min) and are **auto-rejected**, failing that turn
 
-> It works without Bark too — you just have to remember to open the page yourself. And high-risk operations will sit until they time out and get rejected, failing the task.
+The second one sounds harsh, but the direction is right: while you're away, `rm -rf` should not get through.
+
+> Earlier versions had remote push (ntfy, then Bark). Both were removed. Lock-screen-capable notifications must go through APNs, which necessarily means a third-party server — and all it bought was "something can page you while you're away", when this tool assumes you're nearby to begin with.
 
 ### You're on a different network
 
@@ -80,24 +83,33 @@ The one screen that matters, top to bottom:
 ┌──────────────────────────────────┐
 │ my-project  …/dev/my-project 8:42│  ← which session, time left
 ├──────────────────────────────────┤
-│                                  │
-│  [Bash] [writes files] [rule Bash]│ ← tool + impact + matched rule
-│                                  │
-│  Clean build output and force-push│ ← one plain sentence — the star
+│  [Bash] [reads secrets] [writes] │  ← tool + impact tags
 │                                  │
 │  ⚠️ High-risk operation           │  ← only shown for high risk
-│  recursive delete · force push    │
+│  recursive delete · touches keys  │
 │                                  │
-│  ▸ View full command (3 lines)   │  ← raw text collapsed by default
+│  ⚠️ Description doesn't match     │  ← claims read-only, isn't
+│  Says "check build output", but   │
+│  the command deletes recursively  │
+│                                  │
+│  cat ~/[.ssh/id_rsa] > /tmp/x    │  ← the command. Primary. Risky
+│  && [rm -rf] ~/proj/build        │    fragments highlighted
+│                                  │
+│  MODEL'S DESCRIPTION              │  ← small and grey: whose words
+│  check build output               │
 │                                  │
 │  ← swipe to reject · high risk, swipe further to approve → │
 │  ━━━━━━━━━━━━━  auto-reject in 8:42│ ← what happens if you do nothing
 └──────────────────────────────────┘
 ```
 
-**Read the plain sentence, not the raw command.** It comes from Claude Code's own description of what it's doing.
+**Read the command.** It's at the top and expanded by default.
 
-**Impact tags** (read-only / writes files / network / sudo) are extracted from the command. You can judge without expanding the raw text — `ls` and `rm -rf /` no longer look alike.
+**The model's description sits below it, in smaller grey type** — deliberately. That sentence is written by Claude Code itself: the one piece of text in this whole chain authored by the thing being reviewed. It can disagree with the command, so it doesn't get the primary slot. When it genuinely disagrees, the page says so outright (the red box above).
+
+**Risky fragments are highlighted** inside the command (`rm -rf`, `.ssh/id_rsa`), so you don't have to read it character by character.
+
+**Impact tags** (read-only / reads secrets / writes files / network / sudo) are extracted from the command. When it can't tell, it says "impact unknown" — it will **not** pretend something is read-only.
 
 **The countdown at the bottom** answers "what if I ignore this":
 
@@ -148,10 +160,13 @@ In order:
 
 ### No notifications
 
-- Does the home screen show "🔕 Phone push is off"?
-- Is "Enable phone push" on, and is the Bark key filled in?
-- Tap "Send a test notification" to check directly
-- **Note**: operations that will auto-approve **deliberately don't notify** — 10 seconds is gone before you could look
+There's only one channel — the macOS local notification — so there are only a couple of things to check:
+
+- Does the home screen show a "🔕 All alerts are off" banner? Then it's switched off
+- Settings → is "macOS notification" on? Tap "Send a test notification" to check directly
+- In macOS System Settings → Notifications, is "Script Editor" / `osascript` allowed?
+
+**Note**: operations that will auto-approve **deliberately don't notify** — 10 seconds is gone before you could look.
 
 ### Claude Code is stuck
 
@@ -193,9 +208,7 @@ Scan again.
 
 | Setting | Meaning |
 |---|---|
-| **Bark Key** | Push credential. Optional — without it you just won't be alerted away from the Mac |
-| **Show full command in push** | Off by default. When off, the outside world only sees "Bash operation (high risk)"; the command text stays on the LAN page |
-| **macOS notification** | Your Mac makes the noise when you're near it. Fully offline |
+| **macOS notification** | The only alert channel, fully offline. Turning it off means total silence |
 | **Notify on task completion** + minimum duration | `Stop` fires every turn, including two-second exchanges. Default: only tasks over 30 seconds |
 | **Auto-approve ordinary operations** + wait time | 10 seconds by default. You can reject at any point during it |
 | **Auto-approve high-risk too** | ⚠️ Off by default. Turning it on means `rm -rf` gets released while you aren't looking — exactly what approval exists to prevent |

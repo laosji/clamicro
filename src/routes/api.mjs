@@ -17,7 +17,7 @@ import { safeEq } from '../auth/token.mjs'
  */
 export function apiRoutes(ctx) {
   const {
-    config, store, approvals, control, inbox, push, saveConfig,
+    config, store, approvals, control, inbox, notify, saveConfig,
     auth, publicApproval, notifyApproval, sseClients, network, HERE,
   } = ctx
   const { authorized } = auth
@@ -100,14 +100,10 @@ export function apiRoutes(ctx) {
       return true
     }
 
-    // ---- 设置：Bark key 存在手机上，就该在手机网页里填，而不是让人回终端敲命令 ----
+    // ---- 设置：能在手机网页里改的，就别让人回终端敲命令 ----
     if (path === '/api/config' && req.method === 'GET') {
       json(res, 200, {
-        barkKey: config.push.bark.key ? `${config.push.bark.key.slice(0, 4)}••••` : '',
-        barkConfigured: Boolean(config.push.bark.key),
-        pushEnabled: config.push.provider === 'bark',
-        macNotify: config.push.macNotify,
-        detailInPush: config.notify.detailInPush,
+        macNotify: config.notify.macNotify,
         onStop: config.notify.onStop,
         minTurnMs: config.notify.minTurnMs,
         lanIp: config.lanIp,
@@ -125,23 +121,8 @@ export function apiRoutes(ctx) {
 
     if (path === '/api/config' && req.method === 'POST') {
       const body = await readBody(req)
-      const before = config.push.provider
-      // 只有显式传了非掩码、非空的 key 才动它。空串一律忽略——
-      // 输入框在聚焦时会清空掩码值，失焦时会带着空串触发 change，
-      // 那种情况下不该把已配置的 key 抹掉。要清除得显式传 clearKey。
-      if (typeof body.barkKey === 'string' && body.barkKey.trim() && !body.barkKey.includes('•')) {
-        config.push.bark.key = body.barkKey.trim()
-        config.push.provider = 'bark'
-      }
-      if (body.clearKey === true) {
-        config.push.bark.key = ''
-        config.push.provider = 'none'
-      }
-      if (typeof body.pushEnabled === 'boolean') {
-        config.push.provider = body.pushEnabled && config.push.bark.key ? 'bark' : 'none'
-      }
-      if (typeof body.macNotify === 'boolean') config.push.macNotify = body.macNotify
-      for (const k of ['detailInPush', 'onStop']) if (typeof body[k] === 'boolean') config.notify[k] = body[k]
+      const before = config.notify.macNotify
+      for (const k of ['macNotify', 'onStop']) if (typeof body[k] === 'boolean') config.notify[k] = body[k]
       if (Number.isFinite(body.minTurnMs)) config.notify.minTurnMs = Math.max(0, body.minTurnMs)
       if (Number.isFinite(body.autoApproveMs)) config.approval.autoApproveMs = Math.max(0, body.autoApproveMs)
       if (['auto', 'hostname', 'ip'].includes(body.hostMode)) {
@@ -153,19 +134,19 @@ export function apiRoutes(ctx) {
         if (body.autoApproveHighRisk) console.warn('[config] ⚠️ 高风险操作已设为自动通过')
       }
       saveConfig(config)
-      // 推送通道被悄悄关掉是最难排查的故障：手机一声不响，你以为它在守着。
+      // 提醒被悄悄关掉是最难排查的故障：一声不响，你以为它在守着。
       // 每次变更都留痕，下次再出问题能直接对时间。
       console.log(
-        before !== config.push.provider
-          ? `[config] ⚠️ 推送通道 ${before} → ${config.push.provider}（来自网页设置）`
+        before !== config.notify.macNotify
+          ? `[config] ⚠️ 本机通知 ${before ? '开' : '关'} → ${config.notify.macNotify ? '开' : '关'}（来自网页设置）`
           : `[config] 已从网页更新设置`,
       )
       json(res, 200, { ok: true })
       return true
     }
 
-    if (path === '/api/selftest/push' && req.method === 'POST') {
-      await push({ title: '🔔 测试通知', body: '收到这条就说明推送通了', level: 'active', group: 'clamicro' })
+    if (path === '/api/selftest/notify' && req.method === 'POST') {
+      await notify({ title: '🔔 测试通知', body: '看到这条就说明提醒是通的' })
       json(res, 200, { ok: true })
       return true
     }

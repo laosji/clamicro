@@ -37,7 +37,7 @@ function renderStatusLine(d, approvals) {
 }
 
 export function hookRoutes(ctx) {
-  const { config, store, approvals, control, inbox, history, push, notifyApproval } = ctx
+  const { config, store, approvals, control, inbox, history, notify, notifyApproval } = ctx
 
   return async function handleHooks(req, res, url, path) {
     // ---- 核心：阻塞式审批 ----
@@ -133,13 +133,12 @@ export function hookRoutes(ctx) {
         }
       }
 
-      const { body, notify } = store.applyHook(event, payload, config.notify)
+      // 别把它也叫 notify —— 会遮蔽上面注入的通知函数
+      const { body, notify: alert } = store.applyHook(event, payload, config.notify)
 
-      // 关键：HTTP hook 不支持 async:true，会阻塞工具调用，所以先回包再推送
+      // 关键：HTTP hook 不支持 async:true，会阻塞工具调用，所以先回包再提醒
       json(res, 200, body)
-      if (notify) {
-        push({ ...notify, url: notify.url ?? `${config.baseUrl}/ui` }).catch(() => {})
-      }
+      if (alert) notify(alert).catch(() => {})
       return true
     }
 
@@ -147,7 +146,7 @@ export function hookRoutes(ctx) {
       const payload = await readBody(req)
       const warn = store.applyStatusLine(payload, { quotaWarnPct: config.notify.quotaWarnPct })
       history.touch()
-      if (warn) push(warn).catch(() => {})
+      if (warn) notify(warn).catch(() => {})
       // ?render=1：把状态栏文本渲染好回给中继脚本
       if (url.searchParams.get('render')) {
         text(res, 200, renderStatusLine(payload, approvals))

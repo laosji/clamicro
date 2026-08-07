@@ -10,11 +10,12 @@ import { safeEq, cookieToken } from '../auth/token.mjs'
  * 权限分两级，别混：
  *   · 登录 token（cookie 或 Bearer）—— 开整个看板
  *   · 单条审批的 ?k= —— 只开那一条审批的详情页
- * 后者经过了推送服务商，所以不足以授权看板。审批页里的 hasSession 就是
- * 用来区分这两者的：只有真的持有登录 cookie，决策后才跳回首页。
+ * 后者是明文写在 URL 里的（会进浏览器历史、会被转发），所以作用域严格
+ * 限制在一条审批上，不足以授权看板。审批页里的 hasSession 就是用来区分
+ * 这两者的：只有真的持有登录 cookie，决策后才跳回首页。
  */
 export function pageRoutes(ctx) {
-  const { config, approvals, push, auth, publicApproval, HERE } = ctx
+  const { config, approvals, notify, auth, publicApproval, HERE } = ctx
   const { sameToken, authorized, loginCookie } = auth
 
   // 配对请求限流，避免局域网上有人刷屏
@@ -49,7 +50,7 @@ export function pageRoutes(ctx) {
       const png = join(tmpdir(), 'clamicro-pair.png')
       const q = spawnSync('qrencode', ['-o', png, '-s', '10', '-m', '3', loginUrl])
       if (q.status === 0) spawn('open', [png], { detached: true, stdio: 'ignore' }).unref()
-      await push({
+      await notify({
         title: '📱 Clamicro 配对',
         body: q.status === 0 ? '扫描屏幕上的二维码即可登录' : loginUrl,
       })
