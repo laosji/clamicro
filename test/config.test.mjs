@@ -21,7 +21,7 @@ mkdirSync(join(HOME, '.claude', 'clamicro'), { recursive: true })
 const CONFIG_FILE = join(HOME, '.claude', 'clamicro', 'config.json')
 const PID_FILE = join(HOME, '.claude', 'clamicro', 'tunnel.pid')
 
-const { loadConfig, saveConfig } = await import('../lib/config.mjs')
+const { loadConfig, saveConfig } = await import('../src/config.mjs')
 
 const writeConfig = (o) => writeFileSync(CONFIG_FILE, JSON.stringify({ token: 't'.repeat(43), ...o }, null, 2))
 const silence = () => {

@@ -22,7 +22,7 @@
     "cli.mjs",
     "install.mjs",
     "server.mjs",
-    "lib/",
+    "src/",
     "ui/",
     "bin/",
     "docs/",

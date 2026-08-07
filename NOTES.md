@@ -46,6 +46,35 @@ grep -rl "<你的真实token>" /tmp/v/package
 
 ## 架构上不能忘的几件事
 
+### 目录约定
+
+```
+server.mjs        入口。**必须留在根目录**——已安装的 hooks 里写的是
+                  ~/.claude/clamicro/app/server.mjs 这个绝对路径，挪了就断
+cli.mjs           CLI 入口（package.json 的 bin）
+install.mjs       安装器
+bin/*.sh          hook 脚本。同样被绝对路径引用，不能挪
+src/
+  http/           收发与传输层安全（respond / security）
+  auth/           口令校验
+  risk/           风险判定。规则表与逻辑分开，见下
+  routes/         按职责分的路由（hooks / pages / api）
+  *.mjs           领域与基础设施（approvals / state / config / …）
+ui/               页面
+test/             不进 npm 包
+```
+
+路由模块统一是「工厂 + 返回 handler」：`routes(ctx)` 拿到依赖，返回
+`(req, res, url, path) => boolean`，**返回 true 表示已处理**。加新端点时
+放进对应的 routes 文件，别往 server.mjs 里塞——它现在只负责装配和启动。
+
+`src/risk/` 单独拎出来是因为它是安全核心：判定错了，上层再好的 UI、
+再稳的传输都没有意义。独立之后测试可以直接打在它身上，不必起服务。
+
+一个坑：`server.mjs` 装配路由时不能直接传 `net` / `trusted`，它们在
+下面的「网络信任闸门」一节才求值，直接传会撞 TDZ。传闭包（`network: () => …`），
+闭包体到请求进来时才执行。
+
 ### npm 包只是安装器
 
 运行时必须复制到 `~/.claude/clamicro/app/`，hooks 指向那里。
@@ -137,6 +166,9 @@ PostToolUse        …PreToolUse 的全部 + tool_response duration_ms
 | 二维码和推送深链全指向一个打不开的域名 | `publicBaseUrl` **落盘持久化**，而 quick tunnel 的地址是**临时**的。隧道进程一没（重启、被杀、Cloudflare 断开），配置里那个地址就作废了，但 `baseUrl` 仍无条件用它。现在以**进程是否存在**为准（`tunnelAlive()` 读 pid 文件 + `kill(pid, 0)`），死了就回落局域网并打一行日志 |
 | `networks` 显示「网关 10.x.x.x  网关 10.x.x.x」 | 拿不到 SSID 时 `fp.label` 本身就是 `网关 ${gateway}`，输出又拼了一次网关 |
 | 管道输入时安装程序挂死 | `printf 'y\ny\n' \| node install.mjs` 会一次性 EOF，readline 把所有行同时发完，第二行在第二次提问注册前就丢了。要自己缓冲行队列 |
+| 删了函数却没删调用点，非法 Host 抛异常走 400 而不是 403 | `node --check` 只查语法，查不出未定义引用。功能上仍然拒绝，但那是碰巧——异常路径不该是安全边界的实现方式。这类只有跑起来才暴露，所以 HTTP 层要有集成测试 |
+| 用 fetch 测 DNS rebinding，测了个寂寞 | `Host` 是 forbidden header name，规范要求实现忽略调用方设置的值。头被静默丢弃、请求带着真实 Host 发出去，于是「伪造 Host 被拒」这条断言实际测的是「合法 Host 被放行」。要用 `node:http` 原生请求 |
+| 改代码时把页面源码注入进了源文件 | 用 `String.replace` 做代码替换，而替换串里写了 `` ——就是那段注释本身在警告的事。**任何 replace 都用函数式**，替换串里的 `$` 一律不解释 |
 
 ### 反复出现的一类：静默失败伪装成正常
 

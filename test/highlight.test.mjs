@@ -7,7 +7,7 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { riskSpans } from '../lib/risk/assess.mjs'
+import { riskSpans } from '../src/risk/assess.mjs'
 
 /** 复刻 approval.html 里的 highlight()，验证区间能被安全地还原成 HTML */
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])

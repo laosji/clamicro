@@ -9,7 +9,7 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { assessRisk, impactOf, isDefinitelyReadOnly, secretExposure } from '../lib/risk/assess.mjs'
+import { assessRisk, impactOf, isDefinitelyReadOnly, secretExposure } from '../src/risk/assess.mjs'
 
 const bash = (command, cwd) => assessRisk('Bash', { command }, cwd)
 const isHigh = (cmd) => bash(cmd).level === 'high'

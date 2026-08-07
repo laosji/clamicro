@@ -22,7 +22,7 @@ export function syncApp() {
   if (existsSync(APP_DIR)) rmSync(APP_DIR, { recursive: true, force: true })
   mkdirSync(APP_DIR, { recursive: true })
 
-  for (const item of ['server.mjs', 'lib', 'ui', 'bin']) {
+  for (const item of ['server.mjs', 'src', 'ui', 'bin']) {
     const from = join(SOURCE_DIR, item)
     if (existsSync(from)) cpSync(from, join(APP_DIR, item), { recursive: true })
   }

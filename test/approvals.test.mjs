@@ -8,7 +8,7 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { ApprovalStore, matchKey, OUTCOME } from '../lib/approvals.mjs'
+import { ApprovalStore, matchKey, OUTCOME } from '../src/approvals.mjs'
 
 const NO_AUTO = { autoApproveMs: 0, timeoutMs: 60_000 }
 const mk = (st, over = {}) =>

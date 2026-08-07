@@ -3,7 +3,7 @@ import { spawn, spawnSync } from 'node:child_process'
 import { existsSync, openSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { APP_DIR, appPaths, installedInfo } from './lib/paths.mjs'
+import { APP_DIR, appPaths, installedInfo } from './src/paths.mjs'
 
 const [cmd, ...rest] = process.argv.slice(2)
 const LOG = join(homedir(), 'Library', 'Logs', 'clamicro.log')
@@ -49,7 +49,7 @@ function runApp(args, opts = {}) {
 }
 
 async function port() {
-  const { loadConfig } = await import(`file://${join(APP_DIR, 'lib', 'config.mjs')}`)
+  const { loadConfig } = await import(`file://${join(APP_DIR, 'src', 'config.mjs')}`)
   return loadConfig().port
 }
 
@@ -110,7 +110,7 @@ switch (cmd) {
       // 用量为空时区分两种情况，并且只在终端里催——「新开会话」这个动作
       // 只能在终端做，在手机上看到这句话是干着急
       try {
-        const { loadConfig } = await import(`file://${join(APP_DIR, 'lib', 'config.mjs')}`)
+        const { loadConfig } = await import(`file://${join(APP_DIR, 'src', 'config.mjs')}`)
         const token = loadConfig().token
         const r = await fetch(`http://127.0.0.1:${p}/api/sessions`, {
           headers: { Authorization: `Bearer ${token}` },
@@ -192,9 +192,9 @@ switch (cmd) {
 
   case 'tunnel': {
     const { hasCloudflared, startTunnel, stopTunnel, tunnelPid, TUNNEL_LOG } = await import(
-      `file://${join(APP_DIR, 'lib', 'tunnel.mjs')}`
+      `file://${join(APP_DIR, 'src', 'tunnel.mjs')}`
     )
-    const { loadConfig, saveConfig } = await import(`file://${join(APP_DIR, 'lib', 'config.mjs')}`)
+    const { loadConfig, saveConfig } = await import(`file://${join(APP_DIR, 'src', 'config.mjs')}`)
     const sub = rest[0] ?? 'on'
 
     if (sub === 'status') {
