@@ -87,8 +87,9 @@ test('token 换 cookie：URL 里不留 token', async (t) => {
   const cookie = r.headers.get('set-cookie') ?? ''
   await t.test('HttpOnly', () => assert.match(cookie, /HttpOnly/))
   await t.test('SameSite=Lax 而不是 Strict', () => {
-    // Strict 时从 Bark 通知点进 Safari 属于跨站导航，cookie 不会被带上，
-    // 每次从通知进来都像没登录过。Lax 放行顶层 GET 导航，跨站 POST 仍拦住。
+    // 从别的 App 点链接进 Safari（备忘录里存的地址、Mac 上弹的二维码）
+    // 属于跨站导航，Strict 的 cookie 不会被带上，表现是每次都像没登录过。
+    // Lax 放行顶层 GET 导航，跨站 POST 仍拦住。
     assert.match(cookie, /SameSite=Lax/)
     assert.ok(!/SameSite=Strict/.test(cookie))
   })
