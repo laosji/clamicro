@@ -360,15 +360,6 @@ async function handler(req, res) {
 
   try {
     if (!hostAllowed(req)) {
-      if (looksLikeIpChanged(req)) {
-        warnIpChanged()
-        // 仍然拒绝——白名单是防 DNS rebinding 的，不能因为「看起来像 IP 变了」
-        // 就放行。但要告诉对面这是怎么回事，而不是含混的 bad host。
-        return json(res, 421, {
-          error: 'address_changed',
-          message: `这台 Mac 的局域网 IP 已经变了。请在终端重启服务后重新扫码：npx clamicro qr`,
-        })
-      }
       console.warn(`[security] 拒绝 Host: ${req.headers.host}（疑似 DNS rebinding）`)
       return json(res, 403, { error: 'bad host' })
     }
