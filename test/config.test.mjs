@@ -115,3 +115,57 @@ test('CLAMICRO_PORT 是运行时覆盖，不固化到磁盘', () => {
   assert.equal(c.port, 9999, '本次运行用覆盖值')
   assert.equal(JSON.parse(readFileSync(CONFIG_FILE, 'utf8')).port, 8765, '盘上保持原值')
 })
+
+test('bind：自动探测占位符绝不能被固化成具体 IP', async (t) => {
+  // 这一条对应查了两天的 bug。saveConfig 把 loadConfig 探测出的局域网 IP
+  // 原样写回盘，换网络后那个地址不属于本机 → EADDRNOTAVAIL → 只剩回环。
+  // 触发点是 `clamicro trust`：那条**专门用来开放局域网访问**的命令，
+  // 跑一次就锁死了之后所有网络的绑定。而 status 一路显示「运行中 ✓ 已信任」。
+  await t.test('saveConfig 把探测结果还原成 null 占位符', () => {
+    writeConfig({ bind: ['127.0.0.1', null] })
+    const un = silence()
+    const c = loadConfig()
+    saveConfig(c)
+    un()
+    const disk = JSON.parse(readFileSync(CONFIG_FILE, 'utf8'))
+    assert.ok(disk.bind.includes(null), `null 占位符必须还原，实际: ${JSON.stringify(disk.bind)}`)
+    const literals = disk.bind.filter((h) => h && h !== '127.0.0.1')
+    assert.equal(literals.length, 0, `不该有具体的局域网地址: ${JSON.stringify(literals)}`)
+  })
+
+  await t.test('内存里仍然绑到真实地址（还原只影响落盘）', () => {
+    writeConfig({ bind: ['127.0.0.1', null] })
+    const un = silence()
+    const c = loadConfig()
+    un()
+    assert.ok(c.bind.includes('127.0.0.1'))
+    if (c.lanIp) assert.ok(c.bind.includes(c.lanIp), '本次运行要真的绑局域网 IP')
+  })
+
+  await t.test('自愈：盘上已经钉着的失效地址会被清掉', () => {
+    // 换网络后的真实形态——旧网络的 IP 还留在盘上，本机已经没有这个地址
+    writeConfig({ bind: ['127.0.0.1', '10.99.99.99'] })
+    const un = silence()
+    const c = loadConfig()
+    un()
+    assert.ok(!c.bind.includes('10.99.99.99'), '本机不存在的地址必须丢掉，否则 listen 会 EADDRNOTAVAIL')
+    const disk = JSON.parse(readFileSync(CONFIG_FILE, 'utf8'))
+    assert.ok(!disk.bind.includes('10.99.99.99'), '清理结果要落盘')
+    assert.ok(disk.bind.includes(null), '清理后必须补回 null 占位符，否则新网络的 IP 永远绑不上')
+  })
+
+  await t.test('用户显式指定的本机地址予以保留', () => {
+    writeConfig({ bind: ['127.0.0.1', null] })
+    const un = silence()
+    const c = loadConfig()
+    un()
+    // 本机确实拥有的地址不该被误删
+    if (c.lanIp) {
+      writeConfig({ bind: ['127.0.0.1', c.lanIp] })
+      const un2 = silence()
+      const c2 = loadConfig()
+      un2()
+      assert.ok(c2.bind.includes(c.lanIp), '本机真实拥有的地址要留着')
+    }
+  })
+})

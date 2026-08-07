@@ -155,6 +155,29 @@ export function loadConfig() {
     delete config.notify.detailInPush
     dirty = true
   }
+
+  /**
+   * 自愈：丢掉 bind 里钉着的、本机已经没有的地址。
+   *
+   * 旧版本的 saveConfig 会把探测结果写回盘（见那边的注释），于是 bind 里留下
+   * 一个具体 IP。换网络后那个地址不属于本机，listen 报 EADDRNOTAVAIL，服务
+   * 只剩回环——而且 null 占位符已经被覆盖掉，新网络的 IP 永远绑不上。
+   *
+   * saveConfig 那边的修复只防新污染，治不了已经写坏的配置，所以这里再兜一道。
+   * 必须放在写盘之前，否则清理结果落不了地。
+   */
+  if (Array.isArray(config.bind)) {
+    const local = new Set(
+      Object.values(networkInterfaces()).flat().filter(Boolean).map((a) => a.address),
+    )
+    const before = JSON.stringify(config.bind)
+    config.bind = config.bind.filter((h) => h === null || h === '127.0.0.1' || local.has(h))
+    if (!config.bind.includes(null)) config.bind.push(null)
+    if (JSON.stringify(config.bind) !== before) {
+      console.log('[config] 已清理 bind 里失效的地址，恢复自动探测')
+      dirty = true
+    }
+  }
   if (dirty) {
     writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2))
     chmodSync(CONFIG_FILE, 0o600) // 含访问 token
@@ -199,6 +222,25 @@ export function saveConfig(config) {
   const { baseUrl, altUrl, lanIp, localHost, tailscaleIp, tunnelUrl, persistedPort, ...persist } = config
   // 端口写回盘上的原值，别把环境变量的临时覆盖固化进去
   if (persistedPort != null) persist.port = persistedPort
+
+  /**
+   * bind 里的 null 是「启动时自动探测局域网 IP」的占位符，loadConfig 会把它
+   * 换成探测结果。**换完的结果绝不能落盘。**
+   *
+   * 踩过一次，代价是两天：一旦固化成具体 IP，换网络后那个地址不属于本机，
+   * listen 报 EADDRNOTAVAIL，服务只剩回环——手机连不上，而 `status` 显示
+   * 「运行中 ✓ 已信任」，看不出任何异常。
+   *
+   * 最坑的是触发点：`clamicro trust` 会调 saveConfig，于是那条**专门用来
+   * 开放局域网访问**的命令，执行一次就锁死了之后所有网络的绑定。
+   *
+   * 其他派生值（lanIp、baseUrl…）都是顶层字段，解构就剥掉了；bind 是唯一
+   * 一个把派生值藏在数组里的，所以要单独还原。
+   */
+  if (Array.isArray(persist.bind)) {
+    persist.bind = [...new Set(persist.bind.map((h) => (h && (h === lanIp || h === tailscaleIp) ? null : h)))]
+    if (!persist.bind.includes(null)) persist.bind.push(null)
+  }
   writeFileSync(CONFIG_FILE, JSON.stringify(persist, null, 2))
   chmodSync(CONFIG_FILE, 0o600)
 }

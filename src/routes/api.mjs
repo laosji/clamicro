@@ -1,5 +1,6 @@
 import { readBody, json } from '../http/respond.mjs'
 import { safeEq } from '../auth/token.mjs'
+import { requireDeps } from './deps.mjs'
 
 /**
  * JSON API。
@@ -16,6 +17,7 @@ import { safeEq } from '../auth/token.mjs'
  * 值得让一个经过第三方的凭证打开吗。
  */
 export function apiRoutes(ctx) {
+  requireDeps('apiRoutes', ctx, ['config', 'store', 'approvals', 'control', 'inbox', 'notify', 'saveConfig', 'auth', 'publicApproval', 'notifyApproval', 'sseClients', 'network', 'HERE'])
   const {
     config, store, approvals, control, inbox, notify, saveConfig,
     auth, publicApproval, notifyApproval, sseClients, network, HERE,

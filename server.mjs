@@ -207,7 +207,7 @@ const auth = { sameToken, authorized, loginCookie }
 const handleHooks = hookRoutes({
   config, store, approvals, control, inbox, history, notify, notifyApproval,
 })
-const handlePages = pageRoutes({ config, approvals, auth, publicApproval, HERE })
+const handlePages = pageRoutes({ config, approvals, notify, auth, publicApproval, HERE })
 const handleApi = apiRoutes({
   config, store, approvals, control, inbox, notify, saveConfig,
   auth, publicApproval, notifyApproval, sseClients, HERE,

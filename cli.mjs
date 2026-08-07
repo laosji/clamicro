@@ -106,6 +106,27 @@ switch (cmd) {
     console.log(`  运行时    ${c.dim(APP_DIR)}`)
     const alive = listeners(p).length > 0
     console.log(`  服务      ${alive ? c.g('运行中') : c.y('未运行')} ${c.dim(`:${p}`)}`)
+
+    // 实际监听了哪几个地址。
+    //
+    // 这一条查了两天才想到要看。「服务运行中」只说明回环起来了，而手机走的是
+    // 局域网地址——那个 socket 绑失败时，服务照常运行、status 一切正常、
+    // 只有日志里一行 EADDRNOTAVAIL 没人看，表现就是「手机连不上，查不出原因」。
+    // 所以这里不问「服务活着吗」，问「手机要连的那个地址在监听吗」。
+    if (alive) {
+      const r = spawnSync('lsof', ['-nP', `-iTCP:${p}`, '-sTCP:LISTEN'], { encoding: 'utf8' })
+      const bound = [...new Set((r.stdout ?? '').split('\n').slice(1)
+        .map((l) => l.trim().split(/\s+/)[8]).filter(Boolean)
+        .map((a) => a.replace(`:${p}`, '')))]
+      const lan = bound.filter((a) => a !== '127.0.0.1' && a !== '::1')
+      console.log(`  监听      ${bound.join('  ')}`)
+      if (!lan.length) {
+        console.log(c.r('            ⚠️ 只绑了回环，手机连不上'))
+        console.log(c.dim('            多半是换过网络。看一眼原因： npx clamicro logs'))
+        console.log(c.dim('            日志里若有 EADDRNOTAVAIL，说明配置里钉着一个已失效的地址'))
+      }
+    }
+
     if (alive) {
       // 用量为空时区分两种情况，并且只在终端里催——「新开会话」这个动作
       // 只能在终端做，在手机上看到这句话是干着急

@@ -1,5 +1,6 @@
 import { readBody, json, text } from '../http/respond.mjs'
 import { matchKey } from '../approvals.mjs'
+import { requireDeps } from './deps.mjs'
 
 /**
  * Claude Code hooks 的接收端。
@@ -37,6 +38,7 @@ function renderStatusLine(d, approvals) {
 }
 
 export function hookRoutes(ctx) {
+  requireDeps('hookRoutes', ctx, ['config', 'store', 'approvals', 'control', 'inbox', 'history', 'notify', 'notifyApproval'])
   const { config, store, approvals, control, inbox, history, notify, notifyApproval } = ctx
 
   return async function handleHooks(req, res, url, path) {

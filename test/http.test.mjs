@@ -246,3 +246,29 @@ test('未知路由 404，坏 JSON 不打崩服务', async (t) => {
     assert.equal((await S.get('/healthz', { raw: true })).status, 200)
   })
 })
+
+test('裸输 host:port 要跳到首页，不能扔一坨 JSON', async (t) => {
+  // 之前根路径落到最后的 404，返回 {"error":"not found"}。服务完全正常，
+  // 但看起来像坏了——这类「正常状态被显示成故障」最费排查时间。
+  const r = await S.raw('/')
+  await t.test('302 而不是 404', () => assert.equal(r.status, 302))
+  await t.test('跳到 /ui', () => assert.equal(r.headers.location, '/ui'))
+})
+
+test('配对端点', async (t) => {
+  await t.test('hint 未认证也能拿到（只给命令，不给口令）', async () => {
+    const r = await S.get('/api/pair/hint', { raw: true })
+    assert.equal(r.status, 200)
+    const b = await r.json()
+    assert.match(b.command, /--qr$/)
+    assert.ok(!JSON.stringify(b).includes(S.token), '绝不能把口令放进未认证响应')
+  })
+
+  await t.test('缺自定义头 → 403（CSRF：跨站简单请求带不了它）', async () => {
+    const r = await S.post('/api/pair', {}, { raw: true })
+    assert.equal(r.status, 403)
+  })
+
+  // 带头的那条会真的弹二维码窗口，不在测试里跑；
+  // 它依赖 ctx.notify，而漏传依赖已由 requireDeps 在启动时挡住（见 deps.test.mjs）
+})

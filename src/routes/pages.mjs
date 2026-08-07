@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { json, html, inlineJson } from '../http/respond.mjs'
 import { safeEq, cookieToken } from '../auth/token.mjs'
+import { requireDeps } from './deps.mjs'
 
 /**
  * 页面、静态资源、配对。
@@ -15,6 +16,7 @@ import { safeEq, cookieToken } from '../auth/token.mjs'
  * 这两者的：只有真的持有登录 cookie，决策后才跳回首页。
  */
 export function pageRoutes(ctx) {
+  requireDeps('pageRoutes', ctx, ['config', 'approvals', 'notify', 'auth', 'publicApproval', 'HERE'])
   const { config, approvals, notify, auth, publicApproval, HERE } = ctx
   const { sameToken, authorized, loginCookie } = auth
 
@@ -71,6 +73,15 @@ export function pageRoutes(ctx) {
         'Cache-Control': 'no-cache',
       })
       res.end(body)
+      return true
+    }
+
+    // 裸输 host:port 的人比想象中多——手动敲地址、从备忘录里翻出来、
+    // 或者别人念给你听。之前根路径落到最后的 404，返回一坨 {"error":"not found"}，
+    // 看起来像服务坏了，实际上服务好好的。这种「正常状态被显示成故障」最费时间。
+    if (req.method === 'GET' && path === '/') {
+      res.writeHead(302, { Location: '/ui' })
+      res.end()
       return true
     }
 

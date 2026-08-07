@@ -244,6 +244,17 @@ function renderHome() {
 
   let h = '';
 
+  // 连不上服务时，页面上的一切都是旧的。这条必须排在最前面，
+  // 否则用户会盯着一个已经结束的待审批以为系统卡死。
+  if (offlineSince !== null && Date.now() - offlineSince > 5000) {
+    h += `<div class="card alert notice">
+      <div class="top"><span class="name">⚠️ 与服务失去连接</span></div>
+      <div class="path" style="white-space:normal">下面显示的是断开前的旧状态，不是当前情况。<br>
+        常见原因：Mac 换了网络、IP 变了，这个页面连的是旧地址。<br>
+        在 Mac 上跑 <code>npx clamicro qr</code> 重新扫码。</div>
+    </div>`;
+  }
+
   // Mac 本地通知是**唯一**的提醒通道，关掉就是彻底静默——而这件事你是
   // 看不出来的：界面一切正常，只是再也不会有东西叫你，高风险操作全都
   // 静静等到超时被拒。必须在首页明说。
@@ -511,10 +522,25 @@ async function refresh() {
 }
 
 // SSE 实时更新；切后台会断，回前台先全量刷新再重连（计划附录 A.4）
+//
+// 断开必须**显式**告诉用户。原来只把一个小圆点的 live class 去掉，手机上
+// 根本看不见——页面就停在最后一帧，倒计时走到 0 还挂着待审批，看起来像
+// 服务卡死了，实际上服务好好的，只是 Mac 换了 IP、这个页面连的是旧地址。
+// 排查这种「正常状态被显示成故障」最费时间。
+let offlineSince = null;
+
 function connect() {
   const es = new EventSource('/api/stream');
-  es.onopen = () => $('dot').classList.add('live');
-  es.onerror = () => $('dot').classList.remove('live');
+  es.onopen = () => {
+    if (offlineSince !== null) { offlineSince = null; refresh(); }
+    $('dot').classList.add('live');
+  };
+  es.onerror = () => {
+    $('dot').classList.remove('live');
+    // EventSource 会自己重连，短暂抖动不该报警——超过几秒才算真断
+    if (offlineSince === null) { offlineSince = Date.now(); setTimeout(render, 5000); }
+    else if (Date.now() - offlineSince > 5000) render();
+  };
   es.addEventListener('session', refresh);
   es.addEventListener('approval', refresh);
 }
