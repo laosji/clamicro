@@ -57,12 +57,23 @@ bin/*.sh          hook 脚本。同样被绝对路径引用，不能挪
 src/
   http/           收发与传输层安全（respond / security）
   auth/           口令校验
-  risk/           风险判定。规则表与逻辑分开，见下
+  risk/           风险判定：危不危险。规则表与逻辑分开
+  view/           展示：怎么说清楚。(toolName, toolInput) → 展示结构的纯函数
   routes/         按职责分的路由（hooks / pages / api）
   *.mjs           领域与基础设施（approvals / state / config / …）
 ui/               页面
 test/             不进 npm 包
 ```
+
+`risk/` 和 `view/` 是一对：前者判「危不危险」，后者管「怎么说清楚」。
+分开的好处在 `view/describe.mjs` 上很明显——它原本埋在 ApprovalStore 里，
+只能通过 `create()` 间接测；拆出来之后边界情况（空输入、坏 URL、
+超长描述、截断上限）才有人管。
+
+**`state.mjs` 没有拆，是有意的。** 它 337 行主要是 `applyHook` 那个大 switch，
+而 switch 全程在动 `#sessions` / `#log` / `#touch` 这些私有字段——抽出去就得
+把内部状态暴露成公开 API，那是拿封装换行数，更差。行数大不等于该拆，
+要看有没有真的接缝。
 
 路由模块统一是「工厂 + 返回 handler」：`routes(ctx)` 拿到依赖，返回
 `(req, res, url, path) => boolean`，**返回 true 表示已处理**。加新端点时
