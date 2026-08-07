@@ -781,7 +781,7 @@ async function handler(req, res) {
       }
 
       if (path === '/api/sessions') {
-        return json(res, 200, { sessions: store.sessions(), limits: store.accountLimits() })
+        return json(res, 200, { sessions: store.sessions(), limits: store.accountLimits(), statusLineSeenAt: store.statusLineSeenAt() })
       }
 
       const apiSess = path.match(/^\/api\/sessions\/([\w-]+)$/)

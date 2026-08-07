@@ -31,6 +31,11 @@
     display:flex; flex-direction:column;
     padding:env(safe-area-inset-top) 0 0;
   }
+  /* 页面是按手机设计的。桌面上不限宽会被拉成又宽又空的一条。
+     限宽要加在**容器**上——加在 main > * 上会和子元素自己的
+     margin 打架（h2 有 margin:20px 2px，会覆盖掉 margin:auto，
+     结果标题贴左、卡片居中）。 */
+  header, main{width:100%; max-width:592px; margin-left:auto; margin-right:auto}
   header{
     display:flex; align-items:center; gap:8px; padding:16px 18px 10px; flex:0 0 auto;
   }
@@ -51,6 +56,14 @@
     padding:14px; margin-bottom:10px; display:block; color:inherit; text-decoration:none;
   }
   .card.alert{border-color:color-mix(in srgb,var(--warn) 55%,transparent)}
+  .notice{position:relative}
+  .notice .x{
+    position:absolute; top:8px; right:8px; width:30px; height:30px; padding:0;
+    border:none; background:none; color:var(--dim); font:300 22px/1 -apple-system,sans-serif;
+    cursor:pointer; border-radius:8px;
+  }
+  .notice .x:active{background:var(--monobg)}
+  .notice .name{padding-right:26px}
   .top{display:flex; align-items:center; gap:8px; margin-bottom:6px}
   .name{font-weight:600; font-size:16px; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
   .state{font-size:12px; padding:3px 9px; border-radius:20px; background:var(--monobg); color:var(--dim); flex:0 0 auto}
@@ -80,9 +93,10 @@
     display:flex; border-top:1px solid var(--line);
     background:var(--tabbg); backdrop-filter:saturate(180%) blur(20px);
     padding-bottom:env(safe-area-inset-bottom);
+    justify-content:center;
   }
   nav button{
-    flex:1; border:none; background:none; cursor:pointer; color:var(--dim);
+    flex:1; max-width:296px; border:none; background:none; cursor:pointer; color:var(--dim);
     padding:9px 0 8px; display:flex; flex-direction:column; align-items:center; gap:3px;
     font:500 11px -apple-system,"PingFang SC",sans-serif;
   }
@@ -191,7 +205,7 @@ const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 
 let tab = sessionStorage.getItem('ccm-tab') || 'home';
-let sessions = [], pending = [], cfg = null, quota = null, inbox = {};
+let sessions = [], pending = [], cfg = null, quota = null, inbox = {}, slSeen = null;
 
 function meter(label, pct) {
   const v = Math.min(100, Math.max(0, pct ?? 0));
@@ -224,16 +238,24 @@ function renderHome() {
 
   // 推送悄悄关掉了你是看不出来的——只有 Mac 会响，人一走开就彻底静默。
   // 这个状态必须在首页明说。
+  // 配过 key 却被关掉 = 大概率是失手，用告警样式；
+  // 从没配过 = 可能是主动选择，用普通样式。
+  // 无论哪种都可以手动关掉——你要是故意关的推送，每次进来被念一遍就是纯噪音。
+  // 但状态一变（比如开了又关）就重新出现，因为那可能是一次新的失手。
   if (cfg && !cfg.pushEnabled) {
-    // 配过 key 却被关掉 = 大概率是失手，用告警样式；
-    // 从没配过 = 可能是主动选择，用普通样式，别一直唠叨
     const oops = cfg.barkConfigured;
-    h += `<a class="card${oops ? ' alert' : ''}" href="/ui/settings" style="display:block">
-      <div class="top"><span class="name">🔕 手机推送已关闭</span></div>
-      <div class="path" style="white-space:normal">${oops
-        ? '通道被关掉了，现在只有 Mac 会提醒你。点此开启'
-        : '只有 Mac 会提醒你。高风险操作在你离开电脑时会等到超时被拒绝'}</div>
-    </a>`;
+    const sig = 'push-off-' + (oops ? 'configured' : 'never');
+    if (localStorage.getItem('ccm-dismissed') !== sig) {
+      h += `<div class="card${oops ? ' alert' : ''} notice" data-sig="${sig}">
+        <button class="x" aria-label="关闭">×</button>
+        <a href="/ui/settings" style="display:block;color:inherit;text-decoration:none">
+          <div class="top"><span class="name">🔕 手机推送已关闭</span></div>
+          <div class="path" style="white-space:normal">${oops
+            ? '通道被关掉了，现在只有 Mac 会提醒你。点此开启'
+            : '只有 Mac 会提醒你。高风险操作在你离开电脑时会等到超时被拒绝'}</div>
+        </a>
+      </div>`;
+    }
   }
 
   if (pending.length) {
@@ -273,7 +295,9 @@ function renderHome() {
         statusLine 是会话启动时读取的，新开一个 Claude Code 会话才会刷新。
       </div>` : ''}
     </div>`
-    : `<div class="card"><div class="path">暂无数据 — statusLine 需新开会话才生效</div></div>`;
+    : `<div class="card"><div class="path" style="white-space:normal">${slSeen
+        ? '暂无数据 — 已收到过上报，但这次没有额度字段'
+        : 'Claude Code 只在会话<b>启动时</b>读取 statusLine 配置，所以装 Clamicro 之前就开着的会话不会上报用量。下次新开会话时这里会自动出现数字。'}</div></div>`;
 
   h += '<h2>状态</h2>';
   h += `<div class="card"><div class="top">
@@ -438,8 +462,22 @@ function render() {
   const qn = Object.values(inbox).reduce((a, v) => a + v.length, 0);
   $('qbadge').textContent = qn;
   $('qbadge').classList.toggle('hidden', !qn);
-  ({ home: renderHome, sess: renderSessions, say: renderSay }[tab])();
+  try {
+    ;({ home: renderHome, sess: renderSessions, say: renderSay }[tab])();
+  } catch (err) {
+    // 渲染抛异常时，$('view') 会保留上一个 tab 的内容——界面看起来
+    // 「首页高亮却显示着发消息的内容」，极难排查。宁可显式报错。
+    $('view').innerHTML = `<div class="empty"><b>页面渲染出错</b>${String(err && err.message || err)}</div>`;
+    console.error(err);
+  }
   if (tab === 'home') { attachListSwipes(); tickDeadlines(); }
+  for (const b of document.querySelectorAll('.notice .x')) {
+    b.onclick = (e) => {
+      e.preventDefault();
+      localStorage.setItem('ccm-dismissed', b.closest('.notice').dataset.sig);
+      render();
+    };
+  }
 }
 
 for (const b of document.querySelectorAll('nav button')) {
@@ -460,6 +498,7 @@ async function refresh() {
   ]);
   sessions = s.sessions;
   quota = s.limits;
+  slSeen = s.statusLineSeenAt;
   pending = a.approvals;
   cfg = c;
   inbox = i.inbox || {};

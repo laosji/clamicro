@@ -27,6 +27,8 @@
     font:16px/1.5 -apple-system,BlinkMacSystemFont,"PingFang SC","Helvetica Neue",sans-serif;
     padding:env(safe-area-inset-top) 16px calc(32px + env(safe-area-inset-bottom));
   }
+  /* 桌面上限宽居中。用 body 自身限宽，不要逐个限宽子元素 */
+  body{max-width:592px; margin-left:auto; margin-right:auto}
   .nav{display:flex; align-items:center; gap:10px; padding:16px 2px 6px}
   .nav a{color:var(--accent); text-decoration:none; font-size:15px}
   h1{font-size:19px; margin:0}

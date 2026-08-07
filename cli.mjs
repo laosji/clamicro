@@ -27,6 +27,7 @@ function usage() {
   ${c.b('start')}        前台启动服务（调试用；平时由 SessionStart hook 自动拉起）
   ${c.b('stop')}         停止服务
   ${c.b('autostart')}    开机自启：${c.dim('autostart on | off | status')}
+  ${c.b('tunnel')}       公网隧道：${c.dim('tunnel on | off | status')}${c.dim('  ← 网络禁止设备互通时用')}
   ${c.b('trust')}        信任当前网络（陌生网络下服务只绑本机）
   ${c.b('networks')}     当前网络 + 已信任列表
   ${c.b('test-push')}    发一条测试通知
@@ -106,12 +107,33 @@ switch (cmd) {
     const alive = listeners(p).length > 0
     console.log(`  服务      ${alive ? c.g('运行中') : c.y('未运行')} ${c.dim(`:${p}`)}`)
     if (alive) {
+      // 用量为空时区分两种情况，并且只在终端里催——「新开会话」这个动作
+      // 只能在终端做，在手机上看到这句话是干着急
       try {
-        const cfg = await fetch(`http://127.0.0.1:${p}/healthz`, { signal: AbortSignal.timeout(1000) })
-        if (cfg.ok) runApp(['--networks'])
+        const { loadConfig } = await import(`file://${join(APP_DIR, 'lib', 'config.mjs')}`)
+        const token = loadConfig().token
+        const r = await fetch(`http://127.0.0.1:${p}/api/sessions`, {
+          headers: { Authorization: `Bearer ${token}` },
+          signal: AbortSignal.timeout(1500),
+        })
+        const d = await r.json()
+        if (d.limits) {
+          const age = Math.round((Date.now() - d.limits.at) / 60000)
+          console.log(
+            `  用量      5h ${Math.round(d.limits.five_hour.pct)}%  ·  7d ${Math.round(d.limits.seven_day.pct)}%` +
+              c.dim(`  (${age} 分钟前)`),
+          )
+        } else if (!d.statusLineSeenAt) {
+          console.log(`  用量      ${c.y('无数据')}`)
+          console.log(c.dim('            statusLine 是会话启动时读取的，已开着的会话不会上报。'))
+          console.log(c.dim('            新开一个 Claude Code 会话即可。'))
+        } else {
+          console.log(`  用量      ${c.y('上报中但无额度字段')}`)
+        }
       } catch {
         console.log(c.y('  端口被占用但没响应，可能是别的程序'))
       }
+      runApp(['--networks'])
     }
     console.log()
     break
@@ -165,6 +187,57 @@ switch (cmd) {
       console.log(c.dim(`  ${PLIST}`))
       console.log(c.dim('  用 npx clamicro autostart on|off 切换\n'))
     }
+    break
+  }
+
+  case 'tunnel': {
+    const { hasCloudflared, startTunnel, stopTunnel, tunnelPid, TUNNEL_LOG } = await import(
+      `file://${join(APP_DIR, 'lib', 'tunnel.mjs')}`
+    )
+    const { loadConfig, saveConfig } = await import(`file://${join(APP_DIR, 'lib', 'config.mjs')}`)
+    const sub = rest[0] ?? 'on'
+
+    if (sub === 'status') {
+      const pid = tunnelPid()
+      const cfg = loadConfig()
+      console.log(`\n  隧道      ${pid ? c.g('运行中') + c.dim(` pid ${pid}`) : c.y('未运行')}`)
+      console.log(`  公网地址  ${cfg.publicBaseUrl ?? c.dim('无')}`)
+      console.log(c.dim(`  日志      ${TUNNEL_LOG}\n`))
+      break
+    }
+
+    if (sub === 'off') {
+      const was = stopTunnel()
+      const cfg = loadConfig()
+      cfg.publicBaseUrl = null
+      saveConfig(cfg)
+      console.log(was ? c.g('\n  ✓ 隧道已关闭，地址退回局域网') : c.dim('\n  隧道本来就没开'))
+      console.log(c.dim('  重启服务生效： npx clamicro stop && 打开一个 Claude Code 会话\n'))
+      break
+    }
+
+    if (!hasCloudflared()) {
+      console.log(c.y('\n  需要先装 cloudflared：'))
+      console.log('    brew install cloudflared')
+      console.log(c.dim('\n  它是 Cloudflare 官方工具，约 40MB，一次性安装。\n'))
+      process.exit(1)
+    }
+
+    const cfg = loadConfig()
+    console.log(c.dim('\n  正在建立隧道…'))
+    const t = await startTunnel(cfg.port)
+    if (!t) {
+      console.error(c.r(`\n  隧道建立失败，看日志： ${TUNNEL_LOG}\n`))
+      process.exit(1)
+    }
+    cfg.publicBaseUrl = t.url
+    saveConfig(cfg)
+    console.log(`  ${c.g('✓')} ${t.url}`)
+    console.log(c.dim(`    pid ${t.pid}`))
+    console.log(c.y('\n  ⚠️ Cloudflare 会终结 TLS —— 技术上看得到你的命令内容。'))
+    console.log(c.dim('     只在局域网直连不可用时使用（比如网络禁止设备互通）。'))
+    console.log(c.dim('     地址是临时的，隧道重启后会变，需要重新扫码。'))
+    console.log(c.dim('\n  现在重启服务让它认这个地址，然后 npx clamicro qr\n'))
     break
   }
 

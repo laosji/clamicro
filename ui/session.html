@@ -29,6 +29,11 @@
     padding:env(safe-area-inset-top) 0 0;
   }
   header{padding:14px 16px 10px; flex:0 0 auto; border-bottom:1px solid var(--line)}
+  /* 桌面上限宽居中，否则时间线一行横跨整个屏幕没法读。
+     限宽加在容器上，不要加在子元素上。 */
+  header, main{width:100%; max-width:592px; margin-left:auto; margin-right:auto}
+  footer{justify-content:center}
+  footer button{max-width:290px}
   .nav{display:flex; align-items:center; gap:10px; margin-bottom:8px}
   .nav a{color:var(--run); text-decoration:none; font-size:15px}
   .nav h1{font-size:18px; margin:0; font-weight:600; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
