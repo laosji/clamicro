@@ -3,18 +3,20 @@ import { safeEq } from '../auth/token.mjs'
 import { requireDeps } from './deps.mjs'
 
 /**
- * JSON API。
+ * JSON API 路由表。
  *
- * 分两段，边界很重要：
+ * 为什么是表而不是 if 链：**认证不能靠代码顺序维持**。
+ * 之前的写法里，「以下一律需要 token」是一条写在中间的 if，谁在它上面
+ * 加一个 handler，那个端点就是裸的——没有任何东西会报错，代码看着也正常。
+ * 现在 auth 是每条路由必填的字段，漏了在启动时就抛。
  *
- * 1. `/api/approvals/:id` —— 登录 token **或**该审批专属的 ?k= 都能进。
- *    ?k= 是为了从推送点开就能直接决策，不必先登录。它经过了推送服务商，
- *    所以作用域严格限制在这一条审批上。
+ * 两种认证：
  *
- * 2. 其余 `/api/*` —— 一律要登录 token。
- *
- * 加新端点时默认放进第 2 段。要放进第 1 段必须想清楚：这个端点泄露的东西，
- * 值得让一个经过第三方的凭证打开吗。
+ *   'token'    —— 登录令牌。默认就该用这个。
+ *   'approval' —— 登录令牌**或**该审批专属的 ?k=。?k= 是为了从通知点开
+ *                 就能直接决策，不必先登录，所以作用域严格限制在这一条
+ *                 审批上。加新端点时想清楚：这个端点泄露的东西，值得让
+ *                 一个能被转发的链接打开吗。不确定就用 'token'。
  */
 export function apiRoutes(ctx) {
   requireDeps('apiRoutes', ctx, ['config', 'store', 'approvals', 'control', 'inbox', 'notify', 'saveConfig', 'auth', 'publicApproval', 'notifyApproval', 'sseClients', 'network', 'HERE'])
@@ -24,87 +26,86 @@ export function apiRoutes(ctx) {
   } = ctx
   const { authorized } = auth
 
-  return async function handleApi(req, res, url, path) {
-    // ---- 审批 API：Bearer token 或该审批专属的 ?k= 均可 ----
-    const apiMatch = path.match(/^\/api\/approvals\/([\w-]+)(\/decide)?$/)
-    if (apiMatch) {
-      const ap = approvals.get(apiMatch[1])
-      if (!ap) {
-        json(res, 404, { error: 'not_found' })
-        return true
-      }
-      if (!safeEq(url.searchParams.get('k'), ap.key) && !authorized(req)) {
-        json(res, 403, { error: 'forbidden' })
-        return true
-      }
-      if (req.method === 'GET' && !apiMatch[2]) {
-        json(res, 200, { approval: publicApproval(ap) })
-        return true
-      }
-      if (req.method === 'POST' && apiMatch[2]) {
+  /**
+   * @param method  HTTP 方法
+   * @param path    字符串（全等）或正则（捕获组进 params）
+   * @param auth    'token' | 'approval'，必填
+   * @param handler ({ req, res, url, params, approval }) => void
+   */
+  const ROUTES = [
+    // ---- 审批：?k= 可进 ----
+    {
+      method: 'GET', path: /^\/api\/approvals\/([\w-]+)$/, auth: 'approval',
+      handler: ({ res, approval }) => json(res, 200, { approval: publicApproval(approval) }),
+    },
+    {
+      method: 'POST', path: /^\/api\/approvals\/([\w-]+)\/decide$/, auth: 'approval',
+      handler: async ({ req, res, approval }) => {
         const { decision } = await readBody(req)
-        const out = approvals.decide(ap.id, decision, 'phone')
+        const out = approvals.decide(approval.id, decision, 'phone')
         if (!out.ok && out.code === 'already_settled') {
           // 幂等：已被终端或另一入口处理过，回当前真实状态而不是报错
-          json(res, 200, { ok: false, reason: 'already_settled', approval: publicApproval(ap) })
-          return true
+          json(res, 200, { ok: false, reason: 'already_settled', approval: publicApproval(approval) })
+          return
         }
-        json(res, out.ok ? 200 : 400, out.ok ? { ok: true, approval: publicApproval(ap) } : { error: out.code })
-        return true
-      }
-      json(res, 405, { error: 'method_not_allowed' })
-      return true
-    }
+        json(res, out.ok ? 200 : 400, out.ok ? { ok: true, approval: publicApproval(approval) } : { error: out.code })
+      },
+    },
 
-    if (!path.startsWith('/api/')) return false
+    // ---- 会话 ----
+    {
+      method: 'GET', path: '/api/sessions', auth: 'token',
+      handler: ({ res }) => json(res, 200, {
+        sessions: store.sessions(),
+        limits: store.accountLimits(),
+        statusLineSeenAt: store.statusLineSeenAt(),
+      }),
+    },
+    {
+      method: 'GET', path: /^\/api\/sessions\/([\w-]+)$/, auth: 'token',
+      handler: ({ res, params: [sid] }) => json(res, 200, {
+        session: store.sessions().find((x) => x.session_id === sid) ?? null,
+        events: store.events(0, sid),
+        queued: inbox.list(sid),
+      }),
+    },
+    {
+      method: 'POST', path: /^\/api\/sessions\/([\w-]+)\/(pause|resume|cancel)$/, auth: 'token',
+      handler: ({ res, params: [sid, action] }) => {
+        const out = control[action](sid)
+        store.noteControl(sid, action)
+        console.log(`[control] 会话 ${sid.slice(0, 8)} → ${action}`)
+        json(res, 200, { ...out, held: control.isHeld(sid) })
+      },
+    },
 
-    // ---- 以下一律需要 token ----
-    if (!authorized(req)) {
-      json(res, 401, { error: 'unauthorized' })
-      return true
-    }
-
-    const say = path.match(/^\/api\/sessions\/([\w-]+)\/say$/)
-    if (say && req.method === 'POST') {
-      const { text } = await readBody(req)
-      if (!String(text ?? '').trim()) {
-        json(res, 400, { error: 'empty' })
-        return true
-      }
-      const msg = inbox.queue(say[1], String(text).trim())
-      json(res, 200, { ok: true, message: msg, queued: inbox.list(say[1]).length })
-      return true
-    }
-
-    const unsay = path.match(/^\/api\/sessions\/([\w-]+)\/say\/([\w-]+)$/)
-    if (unsay && req.method === 'DELETE') {
-      json(res, 200, { ok: inbox.remove(unsay[1], unsay[2]) })
-      return true
-    }
-
-    if (path === '/api/inbox') {
-      json(res, 200, { inbox: inbox.all() })
-      return true
-    }
-
-    const ctl = path.match(/^\/api\/sessions\/([\w-]+)\/(pause|resume|cancel)$/)
-    if (ctl && req.method === 'POST') {
-      const [, sid, action] = ctl
-      const out = control[action](sid)
-      store.noteControl(sid, action)
-      console.log(`[control] 会话 ${sid.slice(0, 8)} → ${action}`)
-      json(res, 200, { ...out, held: control.isHeld(sid) })
-      return true
-    }
-
-    if (path === '/api/approvals') {
-      json(res, 200, { approvals: approvals.pending().map((a) => publicApproval(a)) })
-      return true
-    }
+    // ---- 从手机往 Claude 发话 ----
+    {
+      method: 'POST', path: /^\/api\/sessions\/([\w-]+)\/say$/, auth: 'token',
+      handler: async ({ req, res, params: [sid] }) => {
+        const { text } = await readBody(req)
+        if (!String(text ?? '').trim()) return json(res, 400, { error: 'empty' })
+        const msg = inbox.queue(sid, String(text).trim())
+        json(res, 200, { ok: true, message: msg, queued: inbox.list(sid).length })
+      },
+    },
+    {
+      method: 'DELETE', path: /^\/api\/sessions\/([\w-]+)\/say\/([\w-]+)$/, auth: 'token',
+      handler: ({ res, params: [sid, mid] }) => json(res, 200, { ok: inbox.remove(sid, mid) }),
+    },
+    {
+      method: 'GET', path: '/api/inbox', auth: 'token',
+      handler: ({ res }) => json(res, 200, { inbox: inbox.all() }),
+    },
+    {
+      method: 'GET', path: '/api/approvals', auth: 'token',
+      handler: ({ res }) => json(res, 200, { approvals: approvals.pending().map((a) => publicApproval(a)) }),
+    },
 
     // ---- 设置：能在手机网页里改的，就别让人回终端敲命令 ----
-    if (path === '/api/config' && req.method === 'GET') {
-      json(res, 200, {
+    {
+      method: 'GET', path: '/api/config', auth: 'token',
+      handler: ({ res }) => json(res, 200, {
         macNotify: config.notify.macNotify,
         onStop: config.notify.onStop,
         minTurnMs: config.notify.minTurnMs,
@@ -117,121 +118,144 @@ export function apiRoutes(ctx) {
         altUrl: config.altUrl,
         localHost: config.localHost,
         network: network(),
-      })
-      return true
-    }
+      }),
+    },
+    {
+      method: 'POST', path: '/api/config', auth: 'token',
+      handler: async ({ req, res }) => {
+        const body = await readBody(req)
+        const before = config.notify.macNotify
+        for (const k of ['macNotify', 'onStop']) if (typeof body[k] === 'boolean') config.notify[k] = body[k]
+        if (Number.isFinite(body.minTurnMs)) config.notify.minTurnMs = Math.max(0, body.minTurnMs)
+        if (Number.isFinite(body.autoApproveMs)) config.approval.autoApproveMs = Math.max(0, body.autoApproveMs)
+        if (['auto', 'hostname', 'ip'].includes(body.hostMode)) {
+          config.hostMode = body.hostMode
+          console.log(`[config] 地址方式 → ${body.hostMode}（重启服务生效）`)
+        }
+        if (typeof body.autoApproveHighRisk === 'boolean') {
+          config.approval.autoApproveHighRisk = body.autoApproveHighRisk
+          if (body.autoApproveHighRisk) console.warn('[config] ⚠️ 高风险操作已设为自动通过')
+        }
+        saveConfig(config)
+        // 提醒被悄悄关掉是最难排查的故障：一声不响，你以为它在守着。
+        // 每次变更都留痕，下次再出问题能直接对时间。
+        console.log(
+          before !== config.notify.macNotify
+            ? `[config] ⚠️ 本机通知 ${before ? '开' : '关'} → ${config.notify.macNotify ? '开' : '关'}（来自网页设置）`
+            : `[config] 已从网页更新设置`,
+        )
+        json(res, 200, { ok: true })
+      },
+    },
 
-    if (path === '/api/config' && req.method === 'POST') {
-      const body = await readBody(req)
-      const before = config.notify.macNotify
-      for (const k of ['macNotify', 'onStop']) if (typeof body[k] === 'boolean') config.notify[k] = body[k]
-      if (Number.isFinite(body.minTurnMs)) config.notify.minTurnMs = Math.max(0, body.minTurnMs)
-      if (Number.isFinite(body.autoApproveMs)) config.approval.autoApproveMs = Math.max(0, body.autoApproveMs)
-      if (['auto', 'hostname', 'ip'].includes(body.hostMode)) {
-        config.hostMode = body.hostMode
-        console.log(`[config] 地址方式 → ${body.hostMode}（重启服务生效）`)
-      }
-      if (typeof body.autoApproveHighRisk === 'boolean') {
-        config.approval.autoApproveHighRisk = body.autoApproveHighRisk
-        if (body.autoApproveHighRisk) console.warn('[config] ⚠️ 高风险操作已设为自动通过')
-      }
-      saveConfig(config)
-      // 提醒被悄悄关掉是最难排查的故障：一声不响，你以为它在守着。
-      // 每次变更都留痕，下次再出问题能直接对时间。
-      console.log(
-        before !== config.notify.macNotify
-          ? `[config] ⚠️ 本机通知 ${before ? '开' : '关'} → ${config.notify.macNotify ? '开' : '关'}（来自网页设置）`
-          : `[config] 已从网页更新设置`,
-      )
-      json(res, 200, { ok: true })
-      return true
-    }
-
-    if (path === '/api/selftest/notify' && req.method === 'POST') {
-      await notify({ title: 'Clamicro', subtitle: '测试通知', body: '看到这条就说明提醒是通的' })
-      json(res, 200, { ok: true })
-      return true
-    }
-
-    // 装完立刻走一遍完整流程才叫装好了
-    if (path === '/api/selftest/approval' && req.method === 'POST') {
-      store.session('selftest').session_name = '安装自检'
-      const ap = approvals.create(
-        {
-          session_id: 'selftest',
-          cwd: HERE,
-          tool_name: 'Bash',
-          tool_input: {
-            command: 'echo "Clamicro 安装自检"',
-            description: '这是一条测试审批，批准或拒绝都不会真的执行任何操作',
+    // ---- 自检：装完立刻走一遍完整流程才叫装好了 ----
+    {
+      method: 'POST', path: '/api/selftest/notify', auth: 'token',
+      handler: async ({ res }) => {
+        await notify({ title: 'Clamicro', subtitle: '测试通知', body: '看到这条就说明提醒是通的' })
+        json(res, 200, { ok: true })
+      },
+    },
+    {
+      method: 'POST', path: '/api/selftest/approval', auth: 'token',
+      handler: ({ res }) => {
+        store.session('selftest').session_name = '安装自检'
+        const ap = approvals.create(
+          {
+            session_id: 'selftest',
+            cwd: HERE,
+            tool_name: 'Bash',
+            tool_input: {
+              command: 'echo "Clamicro 安装自检"',
+              description: '这是一条测试审批，批准或拒绝都不会真的执行任何操作',
+            },
+            permission_rule: { action: 'Bash', behavior: 'ask' },
           },
-          permission_rule: { action: 'Bash', behavior: 'ask' },
-        },
-        { ...config.approval, autoApproveMs: 0 }, // 自检不自动通过，等你真点一下
-      )
-      notifyApproval(ap, '安装自检').catch(() => {})
-      json(res, 200, { id: ap.id, key: ap.key })
-      return true
-    }
+          { ...config.approval, autoApproveMs: 0 }, // 自检不自动通过，等你真点一下
+        )
+        notifyApproval(ap, '安装自检').catch(() => {})
+        json(res, 200, { id: ap.id, key: ap.key })
+      },
+    },
 
-    if (path === '/api/sessions') {
-      json(res, 200, {
-        sessions: store.sessions(),
-        limits: store.accountLimits(),
-        statusLineSeenAt: store.statusLineSeenAt(),
-      })
-      return true
-    }
-
-    const apiSess = path.match(/^\/api\/sessions\/([\w-]+)$/)
-    if (apiSess && req.method === 'GET') {
-      const sid = apiSess[1]
-      json(res, 200, {
-        session: store.sessions().find((x) => x.session_id === sid) ?? null,
-        events: store.events(0, sid),
-        queued: inbox.list(sid),
-      })
-      return true
-    }
-
-    if (path === '/api/state') {
-      json(res, 200, {
+    // ---- 状态推送 ----
+    {
+      method: 'GET', path: '/api/state', auth: 'token',
+      handler: ({ res, url }) => json(res, 200, {
         sessions: store.sessions(),
         events: store.events(Number(url.searchParams.get('since') ?? 0)),
-      })
-      return true
-    }
-
-    if (path === '/api/stream') {
-      // 断线续传：优先用 Last-Event-ID 头（标准），其次 ?since=
-      const lastId = Number(req.headers['last-event-id'] ?? url.searchParams.get('since') ?? 0)
-      res.writeHead(200, {
-        'Content-Type': 'text/event-stream; charset=utf-8',
-        'Cache-Control': 'no-cache, no-transform',
-        Connection: 'keep-alive',
-        'X-Accel-Buffering': 'no',
-      })
-      res.write(`retry: 3000\n\n`)
-      res.write(`event: snapshot\ndata: ${JSON.stringify({ sessions: store.sessions() })}\n\n`)
-      for (const e of store.events(lastId)) {
-        res.write(`id: ${e.id}\nevent: event\ndata: ${JSON.stringify(e)}\n\n`)
-      }
-      sseClients.add(res)
-      const keepAlive = setInterval(() => {
-        try {
-          res.write(': ping\n\n')
-        } catch {
-          /* 下面的 close 会清理 */
+      }),
+    },
+    {
+      method: 'GET', path: '/api/stream', auth: 'token',
+      handler: ({ req, res, url }) => {
+        // 断线续传：优先用 Last-Event-ID 头（标准），其次 ?since=
+        const lastId = Number(req.headers['last-event-id'] ?? url.searchParams.get('since') ?? 0)
+        res.writeHead(200, {
+          'Content-Type': 'text/event-stream; charset=utf-8',
+          'Cache-Control': 'no-cache, no-transform',
+          Connection: 'keep-alive',
+          'X-Accel-Buffering': 'no',
+        })
+        res.write(`retry: 3000\n\n`)
+        res.write(`event: snapshot\ndata: ${JSON.stringify({ sessions: store.sessions() })}\n\n`)
+        for (const e of store.events(lastId)) {
+          res.write(`id: ${e.id}\nevent: event\ndata: ${JSON.stringify(e)}\n\n`)
         }
-      }, 25_000)
-      req.on('close', () => {
-        clearInterval(keepAlive)
-        sseClients.delete(res)
-      })
+        sseClients.add(res)
+        const keepAlive = setInterval(() => {
+          try {
+            res.write(': ping\n\n')
+          } catch {
+            /* 下面的 close 会清理 */
+          }
+        }, 25_000)
+        req.on('close', () => {
+          clearInterval(keepAlive)
+          sseClients.delete(res)
+        })
+      },
+    },
+  ]
+
+  // 启动时就查，而不是等某条路由被访问到才发现它是裸的
+  for (const r of ROUTES) {
+    if (r.auth !== 'token' && r.auth !== 'approval') {
+      throw new Error(`apiRoutes: 路由 ${r.method} ${r.path} 的 auth 非法（${r.auth}）——每条路由都必须显式声明认证方式`)
+    }
+  }
+
+  const matchPath = (r, path) =>
+    typeof r.path === 'string' ? (r.path === path ? [] : null) : (path.match(r.path)?.slice(1) ?? null)
+
+  return async function handleApi(req, res, url, path) {
+    if (!path.startsWith('/api/')) return false
+
+    let pathMatched = false
+    for (const r of ROUTES) {
+      const params = matchPath(r, path)
+      if (!params) continue
+      pathMatched = true
+      if (r.method !== req.method) continue
+
+      // 认证在这里统一做，handler 里不需要也不应该再判一次
+      let approval
+      if (r.auth === 'approval') {
+        approval = approvals.get(params[0])
+        if (!approval) return json(res, 404, { error: 'not_found' }), true
+        if (!safeEq(url.searchParams.get('k'), approval.key) && !authorized(req)) {
+          return json(res, 403, { error: 'forbidden' }), true
+        }
+      } else if (!authorized(req)) {
+        return json(res, 401, { error: 'unauthorized' }), true
+      }
+
+      await r.handler({ req, res, url, params, approval })
       return true
     }
 
-    json(res, 404, { error: 'not found' })
+    // 路径对了但方法不对 → 405，比 404 好排查（尤其是手写 curl 的时候）
+    json(res, pathMatched ? 405 : 404, { error: pathMatched ? 'method_not_allowed' : 'not found' })
     return true
   }
 }

@@ -71,6 +71,23 @@ test('鉴权', async (t) => {
   await t.test('正确 token → 200', async () => {
     assert.equal((await S.get('/api/sessions')).status, 200)
   })
+  await t.test('每一条 /api/* 都要 token —— 不能有漏网的', async () => {
+    // 路由表把 auth 变成了每条路由的必填字段，但「必填」只保证写了，
+    // 不保证写对。这里挨个打一遍，是唯一能证明没有裸端点的办法。
+    const guarded = [
+      ['GET', '/api/sessions'], ['GET', '/api/sessions/abc'], ['GET', '/api/approvals'],
+      ['GET', '/api/inbox'], ['GET', '/api/config'], ['POST', '/api/config'],
+      ['GET', '/api/state'], ['GET', '/api/stream'],
+      ['POST', '/api/sessions/abc/say'], ['DELETE', '/api/sessions/abc/say/x'],
+      ['POST', '/api/sessions/abc/pause'], ['POST', '/api/sessions/abc/resume'],
+      ['POST', '/api/sessions/abc/cancel'],
+      ['POST', '/api/selftest/notify'], ['POST', '/api/selftest/approval'],
+    ]
+    for (const [method, p] of guarded) {
+      const r = await S.raw(p, { method })
+      assert.equal(r.status, 401, `${method} ${p} 没有拦住未认证请求`)
+    }
+  })
   await t.test('未登录访问 /ui → 401 且给配对页', async () => {
     const r = await S.get('/ui', { raw: true })
     assert.equal(r.status, 401)
