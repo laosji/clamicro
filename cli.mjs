@@ -26,7 +26,6 @@ function usage() {
   ${c.b('status')}       服务、网络、待审批的当前状态
   ${c.b('start')}        前台启动服务（调试用；平时由 SessionStart hook 自动拉起）
   ${c.b('stop')}         停止服务
-  ${c.b('autostart')}    开机自启：${c.dim('autostart on | off | status')}
   ${c.b('tunnel')}       公网隧道：${c.dim('tunnel on | off | status')}${c.dim('  ← 网络禁止设备互通时用')}
   ${c.b('trust')}        信任当前网络（陌生网络下服务只绑本机）
   ${c.b('untrust')}      撤销信任：${c.dim('untrust [id前缀 | all]')}${c.dim('  ← 不带参数则撤当前网络')}
@@ -212,57 +211,6 @@ switch (cmd) {
       runApp(['--networks'])
     }
     console.log()
-    break
-  }
-
-  case 'autostart': {
-    const { writeFileSync, rmSync } = await import('node:fs')
-    const PLIST = join(homedir(), 'Library', 'LaunchAgents', 'com.clamicro.plist')
-    const sub = rest[0] ?? 'status'
-    const loaded = () =>
-      (spawnSync('launchctl', ['list'], { encoding: 'utf8' }).stdout ?? '').includes('com.clamicro')
-
-    if (sub === 'off') {
-      spawnSync('launchctl', ['unload', PLIST], { stdio: 'ignore' })
-      try { rmSync(PLIST) } catch { /* 本来就没有 */ }
-      console.log(c.g('\n  ✓ 已关闭开机自启'))
-      console.log(c.dim('  服务仍会在你打开 Claude Code 时由 SessionStart hook 拉起\n'))
-    } else if (sub === 'on') {
-      const { server } = appPaths()
-      if (!existsSync(server)) {
-        console.error(c.r('\n  还没安装。先执行： npx clamicro install\n'))
-        process.exit(1)
-      }
-      writeFileSync(
-        PLIST,
-        `<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>Label</key><string>com.clamicro</string>
-  <key>ProgramArguments</key>
-  <array><string>${process.execPath}</string><string>${server}</string></array>
-  <key>WorkingDirectory</key><string>${APP_DIR}</string>
-  <key>RunAtLoad</key><true/>
-  <key>KeepAlive</key><true/>
-  <key>StandardOutPath</key><string>${LOG}</string>
-  <key>StandardErrorPath</key><string>${join(homedir(), 'Library', 'Logs', 'clamicro.err.log')}</string>
-</dict>
-</plist>
-`,
-      )
-      spawnSync('launchctl', ['unload', PLIST], { stdio: 'ignore' })
-      const r = spawnSync('launchctl', ['load', PLIST], { stdio: 'ignore' })
-      console.log(
-        r.status === 0
-          ? c.g('\n  ✓ 已开启开机自启（崩溃也会自动重启）\n')
-          : c.y(`\n  ! 注册失败，可手动执行： launchctl load ${PLIST}\n`),
-      )
-    } else {
-      console.log(`\n  开机自启  ${loaded() ? c.g('已开启') : c.y('未开启')}`)
-      console.log(c.dim(`  ${PLIST}`))
-      console.log(c.dim('  用 npx clamicro autostart on|off 切换\n'))
-    }
     break
   }
 

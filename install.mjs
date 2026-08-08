@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { createInterface } from 'node:readline/promises'
 import { spawn, spawnSync } from 'node:child_process'
-import { existsSync, openSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, openSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -12,8 +12,29 @@ import { saveConfig } from './src/config.mjs'
 import { syncApp, appPaths, APP_DIR } from './src/paths.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
-const PLIST_NAME = 'com.clamicro.plist'
-const PLIST_DEST = join(homedir(), 'Library', 'LaunchAgents', PLIST_NAME)
+const PLIST_DEST = join(homedir(), 'Library', 'LaunchAgents', 'com.clamicro.plist')
+
+/**
+ * 清掉 2.2 及更早版本注册的 LaunchAgent。
+ *
+ * 开机自启这个功能删掉了——服务跟着 Claude Code 的生命周期走就够了，
+ * SessionStart hook 会在它没跑时拉起来。但**已经开过 `autostart on` 的机器上
+ * 那个 plist 还在**，光删代码等于留下一个孤儿：每次开机它照样按老路径拉起
+ * 一个服务，而新版本对此一无所知。
+ *
+ * 所以是删文件，不是只 unload——unload 撑不过下次重启。
+ * install 和 uninstall 都要调，因为多数人是升级上来的，不会去跑卸载。
+ */
+function clearLegacyAutostart() {
+  if (!existsSync(PLIST_DEST)) return false
+  spawnSync('launchctl', ['unload', PLIST_DEST], { stdio: 'ignore' })
+  try {
+    rmSync(PLIST_DEST)
+  } catch {
+    /* 删不掉也别拦住安装，顶多是它还在 */
+  }
+  return true
+}
 // 先占位，install 流程里会先 syncApp() 再取真实路径
 let STATUSLINE = appPaths().statusLine
 let SESSIONSTART = appPaths().sessionStart
@@ -115,10 +136,9 @@ if (has('--uninstall')) {
   say(`  ${c.g('✓')} 已从 settings.json 摘除：${removed.length ? removed.join('、') : '（无）'}`)
   say(`  ${c.dim(`备份 ${backupPath}`)}`)
 
-  if (existsSync(PLIST_DEST)) {
-    spawnSync('launchctl', ['unload', PLIST_DEST], { stdio: 'ignore' })
-    say(`  ${c.g('✓')} 已停止开机自启（plist 保留在 ${PLIST_DEST}）`)
-  }
+  // 老版本注册过 LaunchAgent，现在这个功能没了，但别人机器上那个 plist 还在，
+  // 不清掉它会继续按老路径拉起服务。**删掉**而不是只 unload：留着下次开机又回来。
+  clearLegacyAutostart()
   const n = stopExisting(loadConfig().port)
   say(`  ${c.g('✓')} 已停止服务${n ? '' : c.dim('（本来就没在跑）')}`)
   say(`\n  ${c.dim(`配置与数据仍在 ${CONFIG_FILE}，可手动删除`)}\n`)
@@ -184,7 +204,10 @@ say(`  ${c.g('✓')} 已写入，备份 ${c.dim(applied.backupPath ?? '（原文
 // 3. 网络信任 —— 不做这步，服务只绑回环，手机连不上，装完等于白装
 const net = fingerprint(config.lanIp)
 if (config.lanIp && net.id && !isTrusted(config, net)) {
-  say(`\n  ${c.b('当前网络')} ${net.label}${net.gateway ? c.dim(`  网关 ${net.gateway}`) : ''}`)
+  // label 在拿不到 SSID 时本身就是「网关 X」，再拼一次网关就成了「网关 X  网关 X」。
+  // NOTES 里记过同一个 bug 在 `networks` 命令上，这条路径当时漏了。
+  const gw = net.gateway && net.label !== `网关 ${net.gateway}` ? c.dim(`  网关 ${net.gateway}`) : ''
+  say(`\n  ${c.b('当前网络')} ${net.label}${gw}`)
   say(c.dim('    手机要连上服务，需要把服务暴露到这个局域网。'))
   say(c.dim('    局域网内是明文传输，所以只在你信任的网络（家里、自己的热点）上开。'))
   say(c.dim('    陌生网络下服务会自动只绑本机，等你再次确认。'))
@@ -198,36 +221,22 @@ if (config.lanIp && net.id && !isTrusted(config, net)) {
   }
 }
 
-// 4. 开机自启
-if (await confirm('\n  开机自动启动服务？', true)) {
-  writeFileSync(
-    PLIST_DEST,
-    `<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>Label</key><string>com.clamicro</string>
-  <key>ProgramArguments</key>
-  <array><string>${process.execPath}</string><string>${appPaths().server}</string></array>
-  <key>WorkingDirectory</key><string>${APP_DIR}</string>
-  <key>RunAtLoad</key><true/>
-  <key>KeepAlive</key><true/>
-  <key>StandardOutPath</key><string>${join(homedir(), 'Library', 'Logs', 'clamicro.log')}</string>
-  <key>StandardErrorPath</key><string>${join(homedir(), 'Library', 'Logs', 'clamicro.err.log')}</string>
-</dict>
-</plist>
-`,
-  )
-  spawnSync('launchctl', ['unload', PLIST_DEST], { stdio: 'ignore' })
-  const r = spawnSync('launchctl', ['load', PLIST_DEST], { stdio: 'ignore' })
-  say(
-    r.status === 0
-      ? `  ${c.g('✓')} 已注册开机自启`
-      : `  ${c.y('!')} 注册失败，可稍后手动执行 launchctl load ${PLIST_DEST}`,
-  )
-} else {
+// 升级上来的机器可能还留着老版本的 LaunchAgent，先清掉再启动，
+// 否则两个服务会抢同一个端口
+if (clearLegacyAutostart()) say(`  ${c.g('✓')} 已移除旧版的开机自启（现在跟随 Claude Code 启动）`)
+
+// 4. 启动服务
+//
+// 不再注册 LaunchAgent。服务的生命周期跟着 Claude Code 走：SessionStart hook
+// 会在服务没跑时把它拉起来，Claude 不开的时候它也不需要在。少一个持久的
+// 系统级改动，卸载也少一件要收拾的东西。
+{
   stopExisting(config.port)
   const out = join(homedir(), 'Library', 'Logs', 'clamicro.log')
+  // ~/Library/Logs 在正常 macOS 账户上一定存在，但不能拿它当前提：
+  // 目录一旦缺失，openSync 抛 ENOENT，安装在最后一步崩掉，
+  // 而此时 hooks 已经写进 settings.json 了——半装状态最难收拾
+  mkdirSync(dirname(out), { recursive: true })
   const fd = openSync(out, 'a')
   const child = spawn(process.execPath, [appPaths().server], {
     detached: true,

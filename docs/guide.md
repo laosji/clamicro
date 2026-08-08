@@ -22,9 +22,9 @@ For your phone to reach the service, the service has to be exposed on your LAN. 
 
 When you move to an unfamiliar network the service automatically retreats to loopback and waits for you to confirm again. That's protection, not a malfunction.
 
-**Should it start at login?**
+That's all it asks. **There is no start-at-login option** — the service follows Claude Code: the `SessionStart` hook brings it up when you open Claude Code, and when Claude Code is closed there's no reason for it to be running. One less thing living in the background.
 
-You don't need it. The `SessionStart` hook brings the service up whenever you open Claude Code. Only turn this on if you want to browse history from your phone while Claude Code isn't running.
+(Earlier versions registered a LaunchAgent. Upgrading from those removes it automatically — nothing to do by hand.)
 
 A QR code is printed at the end.
 

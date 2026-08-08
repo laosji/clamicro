@@ -22,9 +22,9 @@ npx clamicro install
 
 换到陌生网络时服务会自动缩回本机，等你再次确认。这是有意的保护，不是故障。
 
-**3. 要不要开机自启**
+安装只问这些。**没有开机自启这一项**——服务跟着 Claude Code 走：`SessionStart` hook 会在你打开 Claude Code 时把它拉起来，关掉 Claude Code 它也就不需要在了。少一个常驻后台的东西。
 
-不需要。`SessionStart` hook 会在你打开 Claude Code 时自动把服务拉起来。只有当你想「没开 Claude Code 时也能用手机翻记录」才需要开。
+（早期版本注册过 LaunchAgent。从那些版本升上来时会自动清掉，不用手动处理。）
 
 最后会打印一个二维码。
 
