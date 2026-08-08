@@ -270,8 +270,11 @@ test('配对端点', async (t) => {
     const r = await S.get('/api/pair/hint', { raw: true })
     assert.equal(r.status, 200)
     const b = await r.json()
-    assert.match(b.command, /--qr$/)
+    assert.equal(b.command, 'npx clamicro qr')
     assert.ok(!JSON.stringify(b).includes(S.token), '绝不能把口令放进未认证响应')
+    // 曾经返回的是 `node /Users/<用户名>/.claude/.../server.mjs --qr`，
+    // 白白把用户名和安装路径泄露给未认证的请求
+    assert.ok(!b.command.includes('/Users/'), '不该泄露绝对路径')
   })
 
   await t.test('缺自定义头 → 403（CSRF：跨站简单请求带不了它）', async () => {

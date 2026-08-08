@@ -1,0 +1,102 @@
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>配对链接已失效 · Clamicro</title>
+<style>
+  :root{
+    --bg:#f7f8fa; --fg:#12151a; --dim:#6b7280; --line:#e4e7ec; --card:#fff;
+    --accent:#2563eb; --ok:#16a34a; --warn:#b45309;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{ --bg:#0b0d10; --fg:#e8eaed; --dim:#8b93a1; --line:#242a32; --card:#14181d; --warn:#fbbf24 }
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; padding:32px 24px; min-height:100dvh; background:var(--bg); color:var(--fg);
+    font:16px/1.6 -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif;
+    display:flex; flex-direction:column; justify-content:center; align-items:center;
+    text-align:center; -webkit-text-size-adjust:100%;
+  }
+  .wrap{width:100%; max-width:380px}
+  .icon{font-size:52px; margin-bottom:16px}
+  h1{font-size:22px; font-weight:600; margin:0 0 12px}
+  p{color:var(--dim); font-size:15px; margin:0 0 10px}
+  p b{color:var(--fg)}
+
+  button{
+    -webkit-appearance:none; appearance:none; width:100%; margin-top:22px;
+    padding:15px 18px; border-radius:13px; border:none;
+    background:var(--accent); color:#fff; font:600 16px/1 inherit;
+    cursor:pointer; transition:opacity .15s, transform .1s;
+  }
+  button:active{transform:scale(.98)}
+  button:disabled{opacity:.5}
+
+  .state{min-height:44px; margin-top:14px; font-size:14px; color:var(--dim)}
+  .state.on{color:var(--ok)}
+  .state.err{color:var(--warn)}
+
+  details{margin-top:26px; text-align:left}
+  summary{
+    font-size:14px; color:var(--dim); cursor:pointer; list-style:none;
+    display:flex; align-items:center; gap:6px; justify-content:center;
+  }
+  summary::-webkit-details-marker{display:none}
+  summary::before{content:'▸'; transition:transform .15s}
+  details[open] summary::before{transform:rotate(90deg)}
+  code{
+    display:block; margin-top:12px; padding:13px 16px; border-radius:10px;
+    background:var(--card); border:1px solid var(--line); color:var(--fg);
+    font:14px/1.4 ui-monospace,Menlo,monospace; text-align:center;
+    -webkit-user-select:all; user-select:all;
+  }
+</style>
+
+<div class="wrap">
+  <div class="icon">⏳</div>
+  <h1>配对链接已失效</h1>
+  <p>二维码是<b>一次性</b>的，而且 <b>60 秒</b>后过期。</p>
+  <p>这样别人事后翻到截图、录屏或聊天记录里的那张码，也用不了。</p>
+
+  <button id="again">在 Mac 上显示新的二维码</button>
+  <div class="state" id="state"></div>
+
+  <details>
+    <summary>或者在 Mac 终端里执行</summary>
+    <code>npx clamicro qr</code>
+  </details>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+
+// 新码只**弹在 Mac 屏幕上**，不通过这个响应返回。
+// 否则局域网上任何人打开这个页面就能自助拿到登录凭证——
+// 一次性和过期这两条防线会被整个绕过。
+$('again').onclick = async function () {
+  this.disabled = true;
+  $('state').className = 'state';
+  $('state').textContent = '正在通知 Mac…';
+  try {
+    const r = await fetch('/api/pair', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CCM': '1' },
+    });
+    const d = await r.json();
+    if (r.ok && d.ok) {
+      $('state').className = 'state on';
+      $('state').textContent = d.qr
+        ? '✅ 二维码已显示在 Mac 上，去扫它'
+        : '✅ 已通知 Mac（没装 qrencode，屏幕上会显示地址）';
+    } else if (r.status === 429) {
+      $('state').className = 'state err';
+      $('state').textContent = d.error || '刚显示过，等几秒再试';
+    } else {
+      throw new Error();
+    }
+  } catch (e) {
+    $('state').className = 'state err';
+    $('state').textContent = '连不上服务，确认手机和 Mac 在同一个 Wi-Fi';
+  }
+  setTimeout(() => { this.disabled = false; }, 10000);
+};
+</script>

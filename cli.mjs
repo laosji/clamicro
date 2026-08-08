@@ -31,7 +31,9 @@ function usage() {
   ${c.b('trust')}        信任当前网络（陌生网络下服务只绑本机）
   ${c.b('untrust')}      撤销信任：${c.dim('untrust [id前缀 | all]')}${c.dim('  ← 不带参数则撤当前网络')}
   ${c.b('networks')}     当前网络 + 已信任列表
-  ${c.b('rotate-token')} 换发访问令牌${c.dim('  ← 二维码被拍到 / 令牌可能泄露时用')}
+  ${c.b('devices')}      已配对的手机列表
+  ${c.b('forget')}       吊销某台设备：${c.dim('forget <id> | forget all')}
+  ${c.b('rotate-token')} 换发主令牌${c.dim('  ← 只影响 CLI 和二维码，已配对设备不受影响')}
   ${c.b('test-push')}    发一条测试通知
   ${c.b('logs')}         跟踪日志
 
@@ -89,6 +91,16 @@ switch (cmd) {
   case 'rotate-token':
     runApp(['--rotate-token'])
     break
+  case 'devices':
+    runApp(['--devices'])
+    break
+  case 'forget':
+    if (!rest[0]) {
+      console.error(c.r('\n  要吊销哪台？ npx clamicro forget <id>   （先看 npx clamicro devices）\n'))
+      process.exit(1)
+    }
+    runApp([`--forget=${rest[0]}`])
+    break
   case 'networks':
     runApp(['--networks'])
     break
@@ -136,6 +148,22 @@ switch (cmd) {
         console.log(c.dim('            多半是换过网络。看一眼原因： npx clamicro logs'))
         console.log(c.dim('            日志里若有 EADDRNOTAVAIL，说明配置里钉着一个已失效的地址'))
       }
+    }
+
+    // ignoreCwds 是**完全旁路**：列在里面的目录一条审批都不会拦。
+    // 它本来只给「开发 clamicro 自身」用（否则每跑一条命令都在等自己审批），
+    // 但填了之后没有任何地方显示——整个产品在那些目录下静默失效，
+    // 而 status 还显示「运行中 ✓」。旁路必须是看得见的。
+    try {
+      const { loadConfig } = await import(`file://${join(APP_DIR, 'src', 'config.mjs')}`)
+      const skipped = loadConfig().ignoreCwds ?? []
+      if (skipped.length) {
+        console.log(c.y(`  ⚠️ 免审批  ${skipped.length} 个目录下的操作不做任何拦截`))
+        for (const d of skipped) console.log(c.dim(`            ${d}`))
+        console.log(c.dim('            这些目录里 rm -rf 也会直接执行。清空： 编辑 config.json 的 ignoreCwds'))
+      }
+    } catch {
+      /* 读不到配置的话，上面的服务检查已经报过了 */
     }
 
     if (alive) {

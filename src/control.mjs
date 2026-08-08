@@ -55,7 +55,9 @@ export class ControlStore extends EventEmitter {
     // 如果此刻正有工具调用挂在拦截点上，取消就地被消费掉了，
     // 状态必须复位——否则下一个工具调用会被连带取消。
     // 没有挂起者时才保留 CANCELLED，让下一个拦截点来消费它。
-    const consumed = this.#release(sessionId, { action: 'cancel' })
+    // #release 返回的是 waiter 个数，这里要的是「有没有被消费」。
+    // 名字是 consumed，调用方也当布尔用——别让类型和名字对不上。
+    const consumed = this.#release(sessionId, { action: 'cancel' }) > 0
     if (consumed) {
       this.#state.set(sessionId, CONTROL.NONE)
       this.emit('change', sessionId, CONTROL.NONE)

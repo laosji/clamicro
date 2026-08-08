@@ -15,6 +15,7 @@ import { watchNetwork } from './src/netwatch.mjs'
 import { json } from './src/http/respond.mjs'
 import { allowedHosts, hostAllowed, isLoopback, applySecurityHeaders } from './src/http/security.mjs'
 import { makeAuth } from './src/auth/token.mjs'
+import { PairingStore, addDevice, removeDevice } from './src/auth/pairing.mjs'
 import { hookRoutes } from './src/routes/hooks.mjs'
 import { pageRoutes } from './src/routes/pages.mjs'
 import { apiRoutes } from './src/routes/api.mjs'
@@ -93,12 +94,12 @@ setInterval(() => {
 async function notifyApproval(ap, label) {
   // 用 config.baseUrl —— 它已回落到自动探测的局域网 IP；publicBaseUrl 通常是空的
   const detailUrl = `${config.baseUrl}/ui/a/${ap.id}?k=${encodeURIComponent(ap.key)}`
-  const title = `${ap.risk.level === 'high' ? '⚠️' : '🔐'} ${label} 需要审批`
+  const subtitle = `${label} 需要审批${ap.risk.level === 'high' ? ' · 高风险' : ''}`
   const body = `${ap.summary}`.slice(0, 200)
 
   // 日志文件默认非 600，别把单条审批的 key 写进去
   console.log(`[approval] ${ap.id.slice(0, 8)} 深链 ${detailUrl.replace(/k=[^&]*/, 'k=***')}`)
-  await notify({ title, body })
+  await notify({ title: 'Clamicro', subtitle, body })
 }
 
 // ---- 信任当前网络：node server.mjs --trust ----
@@ -179,12 +180,57 @@ if (process.argv.includes('--rotate-token')) {
   const { randomBytes } = await import('node:crypto')
   config.token = randomBytes(32).toString('base64url')
   saveConfig(config)
-  console.log(`\n  ✓ 已换发新令牌`)
-  console.log(`  所有设备上的登录都已失效，需要重新扫码。`)
-  console.log(`\n  重启服务让它认新令牌：`)
-  console.log(`    npx clamicro stop  然后新开一个 Claude Code 会话`)
-  console.log(`  然后重新出码： npx clamicro qr\n`)
+  const n = config.devices?.length ?? 0
+  console.log(`\n  ✓ 已换发主令牌`)
+  console.log(`  \x1b[2m主令牌只给 CLI 和二维码用。\x1b[0m`)
+  console.log(
+    n
+      ? `  \x1b[2m已配对的 ${n} 台设备各有自己的令牌，不受影响，继续能用。\x1b[0m`
+      : `  \x1b[2m目前没有已配对的设备。\x1b[0m`,
+  )
+  console.log(`  \x1b[2m要吊销某台设备： npx clamicro forget <id>（先 npx clamicro devices 看 id）\x1b[0m`)
+  console.log(`\n  重启服务生效： npx clamicro stop  然后新开一个 Claude Code 会话\n`)
   process.exit(0)
+}
+
+/**
+ * 已配对设备列表 / 吊销。
+ *
+ * 每台设备一个令牌，所以吊销是**单独**的——丢一台手机不必让其他设备
+ * 重新配对。这正是「一个全局令牌」做不到的事。
+ */
+if (process.argv.includes('--devices')) {
+  const ds = config.devices ?? []
+  if (!ds.length) {
+    console.log('\n  还没有配对过设备。用 npx clamicro qr 出码，手机扫一下。\n')
+    process.exit(0)
+  }
+  console.log('\n  已配对的设备：')
+  for (const d of ds) {
+    const days = Math.round((Date.now() - d.createdAt) / 86400000)
+    console.log(`    ${d.id}  ${d.name.padEnd(12)} ${days === 0 ? '今天' : days + ' 天前'}配对`)
+  }
+  console.log('\n  吊销： npx clamicro forget <id>   全部： npx clamicro forget all\n')
+  process.exit(0)
+}
+
+{
+  const arg = process.argv.find((a) => a.startsWith('--forget='))
+  if (arg) {
+    const which = arg.split('=')[1]
+    const all = config.devices ?? []
+    const gone = which === 'all' ? all.slice() : all.filter((d) => d.id.startsWith(which))
+    if (!gone.length) {
+      console.log(`\n  没有匹配的设备（${which}）。看一眼： npx clamicro devices\n`)
+      process.exit(1)
+    }
+    config.devices = which === 'all' ? [] : all.filter((d) => !d.id.startsWith(which))
+    saveConfig(config)
+    console.log(`\n  ✓ 已吊销：${gone.map((d) => `${d.name}（${d.id}）`).join('、')}`)
+    console.log(`  这些设备上的登录立即失效，其他设备不受影响。`)
+    console.log(`  重启服务生效： npx clamicro stop  然后新开一个 Claude Code 会话\n`)
+    process.exit(0)
+  }
 }
 
 if (process.argv.includes('--networks')) {
@@ -202,22 +248,39 @@ if (process.argv.includes('--networks')) {
 }
 
 // ---- 打印登录二维码：node server.mjs --qr ----
+//
+// 二维码里放的是一次性配对 id，所以必须向**运行中的**服务申请——
+// 这个进程只是个短命的 CLI，它自己生成的 id 没人认。
 if (process.argv.includes('--qr')) {
-  const loginUrl = `${config.baseUrl}/ui?t=${config.token}`
-  console.log(`\n  ${loginUrl}\n`)
+  let pairId = null
+  try {
+    const r = await fetch(`http://127.0.0.1:${config.port}/api/pair/new`, {
+      method: 'POST',
+      headers: { 'X-CCM': '1' },
+      signal: AbortSignal.timeout(2000),
+    })
+    pairId = (await r.json()).id
+  } catch {
+    console.error('\n  服务没在跑，拿不到配对码。')
+    console.error('  新开一个 Claude Code 会话（SessionStart hook 会拉起服务），或 npx clamicro start\n')
+    process.exit(1)
+  }
+  const loginUrl = `${config.baseUrl}/ui/pair/${pairId}`
+  console.log(`\n  ${loginUrl}`)
+  console.log(`  \x1b[2m一次性，60 秒内有效\x1b[0m\n`)
   const { spawnSync } = await import('node:child_process')
   const r = spawnSync('qrencode', ['-t', 'ANSIUTF8', '-m', '2', loginUrl], { stdio: 'inherit' })
   if (r.error) console.log('（装了 qrencode 可以直接扫码：brew install qrencode）')
   if (config.altUrl) {
     console.log(`\n  用的是 Bonjour 主机名，换 Wi-Fi/换 IP 后依然有效。`)
-    console.log(`  万一手机解析不了 .local，改用：${config.altUrl}/ui?t=${config.token}\n`)
+    console.log(`  万一手机解析不了 .local，改用：${config.altUrl}/ui/pair/${pairId}\n`)
   }
   process.exit(0)
 }
 
 // ---- 手动测试提醒：node server.mjs --test-push ----
 if (process.argv.includes('--test-push')) {
-  await notify({ title: '🔔 Clamicro 测试', body: '看到这条通知，说明提醒通道是通的。' })
+  await notify({ title: 'Clamicro', subtitle: '测试通知', body: '看到这条，说明提醒通道是通的' })
   process.exit(0)
 }
 
@@ -273,13 +336,19 @@ function publicApproval(a, withKey = false) {
 // Host 白名单在启动时算一次。IP 变了由 SessionStart 的 stale 检查重启进程，
 // 网络变了由 netwatch 收缩监听——都不需要在运行期改这个集合。
 const ALLOWED_HOSTS = allowedHosts(config)
-const { sameToken, authorized, loginCookie } = makeAuth(config.token)
+const pairing = new PairingStore()
+// 传函数不是数组：配对成功会往 config.devices 里加，鉴权必须看到最新的那份
+const auth0 = makeAuth(config.token, () => config.devices ?? [])
+const { sameToken, authorized, loginCookie } = auth0
 
-const auth = { sameToken, authorized, loginCookie }
+const auth = auth0
 const handleHooks = hookRoutes({
   config, store, approvals, control, inbox, history, notify, notifyApproval,
 })
-const handlePages = pageRoutes({ config, approvals, notify, auth, publicApproval, HERE })
+const handlePages = pageRoutes({
+  config, approvals, notify, auth, publicApproval, HERE,
+  pairing, addDevice, saveConfig,
+})
 const handleApi = apiRoutes({
   config, store, approvals, control, inbox, notify, saveConfig,
   auth, publicApproval, notifyApproval, sseClients, HERE,
@@ -313,7 +382,9 @@ async function handler(req, res) {
     }
 
     // hooks / statusLine 一律只认本机来源，见 isLoopback 的说明
-    if ((path.startsWith('/hooks/') || path === '/statusline') && !isLoopback(req)) {
+    // /api/pair/new 能凭空造一个配对 id，等于发一张登录券——必须只认本机。
+    // 局域网上任何人都能造券的话，一次性和过期就都白设了。
+    if ((path.startsWith('/hooks/') || path === '/statusline' || path === '/api/pair/new') && !isLoopback(req)) {
       console.warn(`[security] 拒绝来自 ${req.socket.remoteAddress} 的 ${path}`)
       return json(res, 403, { error: 'forbidden' })
     }
@@ -348,7 +419,8 @@ if (!trusted && config.lanIp) {
   console.warn(`[security] 当前网络「${net.label}」未被信任，只绑回环，手机暂时连不上`)
   console.warn(`[security] 确认这是可信网络后执行： node ${join(HERE, 'server.mjs')} --trust`)
   notify({
-    title: '🔒 Clamicro 已收缩到本机',
+    title: 'Clamicro',
+      subtitle: '已收缩到本机',
     body: `检测到新网络「${net.label}」。确认可信后在终端执行 server.mjs --trust`,
     level: 'timeSensitive',
     group: 'clamicro-net',
@@ -414,7 +486,8 @@ const stopWatching = watchNetwork(() => {
   console.warn(`[security] 确认可信后执行： npx clamicro trust`)
   if (wasExposed) {
     notify({
-      title: '🔒 Clamicro 已收缩到本机',
+      title: 'Clamicro',
+      subtitle: '已收缩到本机',
       body: `换到了未信任的网络「${fp.label}」，局域网访问已关闭。确认可信后执行 npx clamicro trust`,
       level: 'timeSensitive',
       group: 'clamicro-net',

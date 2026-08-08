@@ -1,9 +1,10 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { json, html, inlineJson } from '../http/respond.mjs'
+import { readBody, json, html, inlineJson } from '../http/respond.mjs'
 import { safeEq, cookieToken } from '../auth/token.mjs'
 import { requireDeps } from './deps.mjs'
+import { showHud } from '../hud.mjs'
 
 /**
  * 页面、静态资源、配对。
@@ -16,8 +17,11 @@ import { requireDeps } from './deps.mjs'
  * 这两者的：只有真的持有登录 cookie，决策后才跳回首页。
  */
 export function pageRoutes(ctx) {
-  requireDeps('pageRoutes', ctx, ['config', 'approvals', 'notify', 'auth', 'publicApproval', 'HERE'])
-  const { config, approvals, notify, auth, publicApproval, HERE } = ctx
+  requireDeps('pageRoutes', ctx, [
+    'config', 'approvals', 'notify', 'auth', 'publicApproval', 'HERE',
+    'pairing', 'addDevice', 'saveConfig',
+  ])
+  const { config, approvals, notify, auth, publicApproval, HERE, pairing, addDevice, saveConfig } = ctx
   const { sameToken, authorized, loginCookie } = auth
 
   // 配对请求限流，避免局域网上有人刷屏
@@ -25,15 +29,46 @@ export function pageRoutes(ctx) {
 
   const page = (name) => readFileSync(join(HERE, 'ui', name), 'utf8')
 
+  /**
+   * 从 User-Agent 猜个设备名，纯粹是为了让设备列表可读——
+   * 「iPhone」比「未命名设备」好认。UA 是客户端可伪造的，所以它只用于显示，
+   * 绝不参与任何判断。
+   */
+  const deviceNameOf = (req) => {
+    const ua = String(req.headers['user-agent'] ?? '')
+    if (/iPhone/.test(ua)) return 'iPhone'
+    if (/iPad/.test(ua)) return 'iPad'
+    if (/Macintosh/.test(ua)) return 'Mac'
+    if (/Android/.test(ua)) return 'Android'
+    return null
+  }
+
   return async function handlePages(req, res, url, path) {
-    // ---- 配对：未认证也可访问 ----
-    // 让二维码显示在 Mac 屏幕上（口令不经过这个未认证的请求返回），
-    // 局域网上的其他人最多让你的 Mac 弹一次二维码，看不到内容。
-    if (path === '/api/pair/hint') {
-      json(res, 200, { command: `node ${join(HERE, 'server.mjs')} --qr` })
+    /**
+     * 开一张一次性配对券。**只认回环**（在 server.mjs 的前置闸门里挡掉外来请求）——
+     * 它能凭空造出登录凭证，局域网上谁都能造的话，一次性和过期就都白设了。
+     *
+     * 调用方是 `clamicro qr`：那是个短命的 CLI 进程，自己生成的 id 没人认，
+     * 必须向运行中的服务要。
+     */
+    if (req.method === 'POST' && path === '/api/pair/new') {
+      const { id, ttlMs } = pairing.begin()
+      json(res, 200, { id, ttlMs })
       return true
     }
 
+    // ---- 配对提示：未认证也可访问 ----
+    // 只给一条「去 Mac 上敲这个」的命令，不返回任何凭证。
+    if (path === '/api/pair/hint') {
+      json(res, 200, { command: `npx clamicro qr` })
+      return true
+    }
+
+    /**
+     * 让 Mac 弹出二维码。未认证可达，所以有 10 秒限流——
+     * 局域网上有人刷它，最多让你的 Mac 反复弹窗，拿不到任何东西
+     * （二维码里现在只有一次性 id，且这个响应不含它）。
+     */
     if (req.method === 'POST' && path === '/api/pair') {
       // 要求一个自定义头。跨站「简单请求」带不了它，会触发预检而被拦下，
       // 否则你访问的任意网站都能让这台 Mac 弹二维码。
@@ -47,17 +82,84 @@ export function pageRoutes(ctx) {
         return true
       }
       lastPairAt = now
-      const loginUrl = `${config.baseUrl}/ui?t=${config.token}`
+      const { id } = pairing.begin()
+      const loginUrl = `${config.baseUrl}/ui/pair/${id}`
       const { spawnSync, spawn } = await import('node:child_process')
       const png = join(tmpdir(), 'clamicro-pair.png')
       const q = spawnSync('qrencode', ['-o', png, '-s', '10', '-m', '3', loginUrl])
       if (q.status === 0) spawn('open', [png], { detached: true, stdio: 'ignore' }).unref()
       await notify({
-        title: '📱 Clamicro 配对',
-        body: q.status === 0 ? '扫描屏幕上的二维码即可登录' : loginUrl,
+        title: 'Clamicro',
+        subtitle: '配对',
+        body: '扫描屏幕上的二维码 · 60 秒内有效',
+        silent: true, // 你人就在屏幕前等着它，不用出声
       })
-      console.log('[pair] 已在 Mac 上显示二维码')
+      console.log('[pair] 已在 Mac 上显示二维码（一次性，60 秒）')
       json(res, 200, { ok: true, qr: q.status === 0 })
+      return true
+    }
+
+    /**
+     * 「最新一条待审批」的稳定入口。
+     *
+     * 存在的理由是 iOS 的**轻点背面 → 快捷指令 → 打开 URL**：双击手机背面
+     * 就直接落到要批的那一屏，省掉「掏手机、解锁、找书签」。
+     *
+     * 注意它只做**导航**，不做决策。用轻点背面直接批准是很糟的主意：
+     * 那个手势没有上下文（不知道你在批哪条）、误触率高（放桌上就可能触发），
+     * 而且会绕过这个产品唯一的防线——你看清命令再决定。口袋里揣一个
+     * 「对任何事都说好」的按钮，等于把 autoApproveHighRisk 永远打开。
+     */
+    if (req.method === 'GET' && path === '/ui/latest') {
+      if (!authorized(req)) {
+        html(res, 401, page('pair.html'))
+        return true
+      }
+      const [next] = approvals.pending()
+      res.writeHead(302, { Location: next ? `/ui/a/${next.id}` : '/ui' })
+      res.end()
+      return true
+    }
+
+    /**
+     * 配对：扫码落到这里，换发一个该设备专属的令牌。
+     *
+     * 未认证可达是必须的——还没配对呢。安全性来自 id 本身：
+     * 一次性、60 秒过期。事后翻到截图里的那张码一律无效。
+     */
+    const pairMatch = path.match(/^\/ui\/pair\/([\w-]+)$/)
+    if (req.method === 'GET' && pairMatch) {
+      if (!pairing.redeem(pairMatch[1])) {
+        html(res, 410, page('pair-expired.html'))
+        return true
+      }
+      const device = addDevice(config, { name: deviceNameOf(req) })
+      saveConfig(config)
+
+      // 顶替必须**高声**说出来。设备上限的全部价值就是可检测性——
+      // 多出来的那台一定会顶掉你，而你只有在被明确告知时才会发现。
+      // 悄悄顶替等于既失去了多设备能力，又没换来任何东西。
+      const kicked = device.evicted.map((d) => d.name).join('、')
+      console.log(
+        `[pair] 已配对「${device.name}」 ${device.id}` + (kicked ? `，顶掉了 ${kicked}` : ''),
+      )
+      // HUD 负责「此刻正在发生的事」——你人就在屏幕前等着配对结果。
+      // 但它划过去就没了，所以顶替这种**你必须知道**的事同时也发标准通知，
+      // 那条会留在通知中心，错过了还能回头看见。
+      showHud({
+        icon: kicked ? '⚠️' : '📱',
+        title: kicked ? '新设备已顶替原设备' : '已配对',
+        subtitle: kicked ? `${device.name} 接入 · ${kicked} 已下线` : `${device.name} · ${device.id}`,
+      })
+      if (kicked) {
+        notify({
+          title: 'Clamicro',
+          subtitle: '⚠️ 新设备已顶替原设备',
+          body: `${device.name} 接入，${kicked} 已下线。不是你操作的话立刻 npx clamicro forget all`,
+        }).catch(() => {})
+      }
+      res.writeHead(302, { Location: '/ui', 'Set-Cookie': loginCookie(config.baseUrl, device.token) })
+      res.end()
       return true
     }
 

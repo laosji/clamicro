@@ -180,7 +180,8 @@ export class Store extends EventEmitter {
         this.#log(id, 'stop', msg)
         if (notifyConfig.onStop && elapsed >= notifyConfig.minTurnMs) {
           notify = {
-            title: `✅ ${label} 已完成`,
+            title: 'Clamicro',
+            subtitle: `${label} 已完成`,
             body: msg || `耗时 ${Math.round(elapsed / 1000)}s`,
             level: 'active',
             group: 'clamicro',
@@ -194,7 +195,7 @@ export class Store extends EventEmitter {
         this.#touch(s, { state: STATE.ERROR, sub_state: null, last_message: msg, turn_started_at: null })
         this.#log(id, 'error', msg)
         if (notifyConfig.onError) {
-          notify = { title: `❌ ${label} 出错`, body: msg, level: 'timeSensitive', group: 'clamicro' }
+          notify = { title: 'Clamicro', subtitle: `${label} 出错`, body: msg }
         }
         break
       }

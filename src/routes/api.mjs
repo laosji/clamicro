@@ -148,7 +148,7 @@ export function apiRoutes(ctx) {
     }
 
     if (path === '/api/selftest/notify' && req.method === 'POST') {
-      await notify({ title: '🔔 测试通知', body: '看到这条就说明提醒是通的' })
+      await notify({ title: 'Clamicro', subtitle: '测试通知', body: '看到这条就说明提醒是通的' })
       json(res, 200, { ok: true })
       return true
     }

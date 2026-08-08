@@ -19,13 +19,27 @@
  * 「人不在就不该放行 rm -rf」。想主动看的话，手机浏览器随时能打开看板。
  */
 
-/** 本地通知。osascript 的字符串要转义引号和反斜杠，否则命令会被截断。 */
+/**
+ * 通知的三行结构，照抄系统自带通知的信息层级（比如「妙控键盘 / 已连接」）：
+ *
+ *   title     谁              固定「Clamicro」——通知中心按这个分组
+ *   subtitle  发生了什么       一眼扫过去只看这行
+ *   body      细节            要不要处理靠它决定
+ *
+ * 之前把「⚠️ my-project 需要审批」整个塞进 title、细节塞 body，结果是
+ * 通知中心里一堆长短不一的标题，扫一眼分不清哪条是什么。系统通知之所以
+ * 好认，是因为标题永远是「谁」，事件永远在第二行——位置固定，眼睛不用找。
+ */
 async function notifyMac(msg) {
   const { spawn } = await import('node:child_process')
+  // osascript 的字符串要转义引号和反斜杠，否则命令会被截断
   const esc = (s) => String(s ?? '').replace(/["\\]/g, '\\$&').slice(0, 200)
-  const script = `display notification "${esc(msg.body)}" with title "${esc(msg.title)}" sound name "Ping"`
+  const parts = [`display notification "${esc(msg.body)}"`, `with title "${esc(msg.title ?? 'Clamicro')}"`]
+  if (msg.subtitle) parts.push(`subtitle "${esc(msg.subtitle)}"`)
+  // 配对码这类「你正等着它出现」的通知不该出声——你人就在屏幕前
+  if (msg.silent !== true) parts.push('sound name "Ping"')
   await new Promise((resolve) => {
-    const p = spawn('osascript', ['-e', script], { stdio: 'ignore' })
+    const p = spawn('osascript', ['-e', parts.join(' ')], { stdio: 'ignore' })
     p.on('close', resolve)
     p.on('error', resolve)
   })
@@ -36,7 +50,7 @@ export function makeNotifier(config) {
     if (!config.notify.macNotify) return
     try {
       await notifyMac(msg)
-      console.log(`[notify] ${msg.title}`)
+      console.log(`[notify] ${msg.subtitle ?? msg.title}`)
     } catch (err) {
       // 提醒失败绝不能影响 hook 链路——工具调用还等着这个请求返回
       console.error(`[notify] 失败: ${err.message}`)
