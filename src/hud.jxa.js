@@ -1,8 +1,8 @@
-// 屏幕顶部居中的胶囊提示，仿系统连接外设时那一条。
+// 刘海位置的胶囊提示。
 // 由 src/hud.mjs 通过 `osascript -l JavaScript` 调起，参数：图标 标题 副标题 毫秒
 //
-// 用 JXA 的 ObjC 桥手搓一个无边框面板——系统那个 HUD 是 BluetoothUIService
-// 画的，第三方没有 API 能投递。这里的目标是「看起来是同一家出的」，
+// 系统连接外设时那条 HUD 由 BluetoothUIService 绘制，第三方没有 API 能投递，
+// 所以这里用 JXA 的 ObjC 桥手搓一个。目标是「看起来是同一家出的」，
 // 不是像素级复刻。
 ObjC.import('AppKit')
 
@@ -12,15 +12,31 @@ function run(argv) {
 
   $.NSApplication.sharedApplication.setActivationPolicy($.NSApplicationActivationPolicyAccessory)
 
-  const hasSub = subtitle.length > 0
-  const W = 300
-  const H = hasSub ? 74 : 58
-  const R = H / 2 > 22 ? 22 : H / 2 // 胶囊感来自大圆角，但别圆过头变成药丸
+  const screen = $.NSScreen.mainScreen
+  const frame = screen.frame
 
-  const screen = $.NSScreen.mainScreen.frame
+  /**
+   * 刘海高度。有刘海的 Mac 上 safeAreaInsets.top 就是它（这台是 33pt）；
+   * 没刘海的机器返回 0，那时按菜单栏高度走，视觉上等价。
+   */
+  let notch = 0
+  try {
+    notch = Number(screen.safeAreaInsets.top) || 0
+  } catch {
+    notch = 0
+  }
+  const topInset = notch || 24
+
+  const hasSub = subtitle.length > 0
+  // 高度要**盖过刘海**，否则胶囊下沿和刘海下沿错开，看起来是两个东西
+  const H = Math.max(topInset + 4, hasSub ? 76 : 60)
+  // 宽度要明显大于刘海（这台 184pt），让刘海嵌在胶囊里而不是并排
+  const W = hasSub ? 340 : 300
+  const R = 20
+
   const win = $.NSPanel.alloc.initWithContentRectStyleMaskBackingDefer(
-    // 顶部往下 100pt：避开刘海和菜单栏，和系统 HUD 的位置接近
-    $.NSMakeRect((screen.size.width - W) / 2, screen.size.height - H - 100, W, H),
+    // 贴住屏幕**最顶端**——刘海就在那里。窗口层级高于菜单栏，所以能盖上去。
+    $.NSMakeRect(frame.origin.x + (frame.size.width - W) / 2, frame.origin.y + frame.size.height - H, W, H),
     $.NSWindowStyleMaskBorderless,
     $.NSBackingStoreBuffered,
     false,
@@ -34,13 +50,23 @@ function run(argv) {
   )
   win.setAlphaValue(0)
 
-  // 毛玻璃底，跟随系统深浅色——不自己定颜色，那样在另一种外观下必然出错
+  /**
+   * **强制深色**，不跟随系统外观。
+   *
+   * 刘海是物理黑块。浅色外观下如果胶囊也是浅的，两者拼在一起会露出一条
+   * 明显的分界，看着像贴了张纸。深色才能和刘海连成一体——这也是系统那条
+   * HUD 在浅色模式下依然是深色的原因。
+   */
+  win.setAppearance($.NSAppearance.appearanceNamed($.NSAppearanceNameVibrantDark))
+
   const blur = $.NSVisualEffectView.alloc.initWithFrame($.NSMakeRect(0, 0, W, H))
   blur.setMaterial($.NSVisualEffectMaterialHUDWindow)
   blur.setBlendingMode($.NSVisualEffectBlendingModeBehindWindow)
   blur.setState($.NSVisualEffectStateActive)
   blur.setWantsLayer(true)
+  // 只圆下面两个角：上沿贴着屏幕边缘，圆上去会露出屏幕背景的直角
   blur.layer.setCornerRadius(R)
+  blur.layer.setMaskedCorners(1 << 0 | 1 << 1) // MinXMinY | MaxXMinY = 左下 + 右下
   blur.layer.setMasksToBounds(true)
   win.contentView.addSubview(blur)
 
@@ -52,23 +78,25 @@ function run(argv) {
     f.setEditable(false)
     f.setSelectable(false)
     f.setFont($.NSFont.systemFontOfSizeWeight(size, weight))
-    f.setTextColor($.NSColor.labelColor.colorWithAlphaComponent(alpha))
+    // 强制白色：这个面板固定深色，用 labelColor 会跟随系统而在浅色下变黑
+    f.setTextColor($.NSColor.whiteColor.colorWithAlphaComponent(alpha))
     f.setLineBreakMode($.NSLineBreakByTruncatingTail)
     blur.addSubview(f)
     return f
   }
 
-  // 图标
-  const iconField = label(icon, $.NSMakeRect(18, (H - 30) / 2, 30, 30), 21, $.NSFontWeightRegular, 1)
+  // 内容整体压在刘海**下方**：那一条被摄像头占着，放字会被切掉
+  const contentTop = H - topInset
+  const iconField = label(icon, $.NSMakeRect(16, contentTop / 2 - 15, 30, 30), 20, $.NSFontWeightRegular, 1)
   iconField.setAlignment($.NSTextAlignmentCenter)
 
-  const textX = 56
-  const textW = W - textX - 18
+  const textX = 52
+  const textW = W - textX - 16
   if (hasSub) {
-    label(title, $.NSMakeRect(textX, H / 2 + 1, textW, 18), 13, $.NSFontWeightSemibold, 1)
-    label(subtitle, $.NSMakeRect(textX, H / 2 - 19, textW, 16), 11.5, $.NSFontWeightRegular, 0.6)
+    label(title, $.NSMakeRect(textX, contentTop / 2 + 1, textW, 17), 12.5, $.NSFontWeightSemibold, 1)
+    label(subtitle, $.NSMakeRect(textX, contentTop / 2 - 17, textW, 15), 11, $.NSFontWeightRegular, 0.62)
   } else {
-    label(title, $.NSMakeRect(textX, (H - 18) / 2, textW, 18), 13, $.NSFontWeightSemibold, 1)
+    label(title, $.NSMakeRect(textX, contentTop / 2 - 8, textW, 17), 12.5, $.NSFontWeightSemibold, 1)
   }
 
   win.orderFrontRegardless
