@@ -209,6 +209,7 @@ Scan again.
 | Setting | Meaning |
 |---|---|
 | **macOS notification** | The only alert channel, fully offline. Turning it off means total silence |
+| **Notification style** | Set `notify.style` in `config.json`: `notch` (default — a black capsule at the notch), `banner` (standard system notification), or `both`. **The trade-off: the notch capsule never reaches Notification Center.** It slides away and is gone; if you weren't at the screen, it may as well not have happened. Use `banner` or `both` if you want a record |
 | **Notify on task completion** + minimum duration | `Stop` fires every turn, including two-second exchanges. Default: only tasks over 30 seconds |
 | **Auto-approve ordinary operations** + wait time | 10 seconds by default. You can reject at any point during it |
 | **Auto-approve high-risk too** | ⚠️ Off by default. Turning it on means `rm -rf` gets released while you aren't looking — exactly what approval exists to prevent |

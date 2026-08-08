@@ -52,8 +52,24 @@ function runApp(args, opts = {}) {
   process.exit(r.status ?? 0)
 }
 
+/**
+ * 从**已安装的那份**加载模块。
+ *
+ * 未安装时让 import 自己抛 ERR_MODULE_NOT_FOUND 是最差的第一印象：
+ * 新用户 `npm i -g clamicro` 之后随手敲一句 `clamicro status`，
+ * 迎面十行 node 内部堆栈。runApp 早就给了人话提示，这条路径漏了。
+ */
+async function appImport(rel) {
+  const f = join(APP_DIR, 'src', rel)
+  if (!existsSync(f)) {
+    console.error(c.r('\n  还没安装。先执行： npx clamicro install\n'))
+    process.exit(1)
+  }
+  return import(`file://${f}`)
+}
+
 async function port() {
-  const { loadConfig } = await import(`file://${join(APP_DIR, 'src', 'config.mjs')}`)
+  const { loadConfig } = await appImport('config.mjs')
   return loadConfig().port
 }
 
@@ -155,7 +171,7 @@ switch (cmd) {
     // 但填了之后没有任何地方显示——整个产品在那些目录下静默失效，
     // 而 status 还显示「运行中 ✓」。旁路必须是看得见的。
     try {
-      const { loadConfig } = await import(`file://${join(APP_DIR, 'src', 'config.mjs')}`)
+      const { loadConfig } = await appImport('config.mjs')
       const skipped = loadConfig().ignoreCwds ?? []
       if (skipped.length) {
         console.log(c.y(`  ⚠️ 免审批  ${skipped.length} 个目录下的操作不做任何拦截`))
@@ -170,7 +186,7 @@ switch (cmd) {
       // 用量为空时区分两种情况，并且只在终端里催——「新开会话」这个动作
       // 只能在终端做，在手机上看到这句话是干着急
       try {
-        const { loadConfig } = await import(`file://${join(APP_DIR, 'src', 'config.mjs')}`)
+        const { loadConfig } = await appImport('config.mjs')
         const token = loadConfig().token
         const r = await fetch(`http://127.0.0.1:${p}/api/sessions`, {
           headers: { Authorization: `Bearer ${token}` },
@@ -251,10 +267,9 @@ switch (cmd) {
   }
 
   case 'tunnel': {
-    const { hasCloudflared, startTunnel, stopTunnel, tunnelPid, TUNNEL_LOG } = await import(
-      `file://${join(APP_DIR, 'src', 'tunnel.mjs')}`
-    )
-    const { loadConfig, saveConfig } = await import(`file://${join(APP_DIR, 'src', 'config.mjs')}`)
+    const { hasCloudflared, startTunnel, stopTunnel, tunnelPid, TUNNEL_LOG } =
+      await appImport('tunnel.mjs')
+    const { loadConfig, saveConfig } = await appImport('config.mjs')
     const sub = rest[0] ?? 'on'
 
     if (sub === 'status') {
