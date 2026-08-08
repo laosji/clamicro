@@ -280,7 +280,11 @@ if (process.argv.includes('--qr')) {
 
 // ---- 手动测试提醒：node server.mjs --test-push ----
 if (process.argv.includes('--test-push')) {
+  const { hudDone } = await import('./src/hud.mjs')
   await notify({ title: 'Clamicro', subtitle: '测试通知', body: '看到这条，说明提醒通道是通的' })
+  // 等 HUD 播完再退。HUD 是子进程，这里一 exit 它就没了——自检会打印
+  // 「提醒通道是通的」而屏幕上什么都没出现过，比不做自检还糟。
+  await hudDone()
   process.exit(0)
 }
 

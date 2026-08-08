@@ -185,6 +185,27 @@ PostToolUse        …PreToolUse 的全部 + tool_response duration_ms
 | 换网络后手机再也连不上，`status` 显示一切正常 | `bind` 里的 `null` 是「启动时探测局域网 IP」的占位符，而 `saveConfig` 把探测**结果**写回了盘。之后那个地址不属于本机，`listen` 报 `EADDRNOTAVAIL`，服务只剩回环。触发点是 `clamicro trust`——那条**专门用来开放局域网访问**的命令。查了两天 |
 | 手机页面停在旧状态，看着像服务卡死 | Mac 换 IP 后，页面还连着旧地址，SSE 断了。原来只把一个小圆点的 `live` class 去掉，手机上根本看不见 |
 | 点按钮报 `notify is not a function` | 装配处漏传依赖，解构出 `undefined`。JS 不在那一刻报错，要等真的调用才炸。已加 `requireDeps`，改成启动时就失败 |
+| 刘海胶囊代码全对，屏幕上什么都没有 | 见下面「JXA 画窗口」一节，一共四个独立的坑，每一个都单独足以让它彻底不显示，而且**四个都不报错** |
+
+### JXA 画窗口：四个各自足以让它彻底不显示的坑
+
+做刘海 HUD 时连着踩了四个。共同点是 `osascript` 退出码 0、日志正常、`isVisible` 返回 true，**只有肉眼看屏幕才知道没画出来**。
+
+1. **必须跑 `NSApp.run`，不能手动步进 runloop。**
+   原来用 `NSRunLoop.currentRunLoop.runUntilDate()` 一帧帧推。窗口建得出来，WindowServer 也分配了 windowNumber，`isVisible=true`——但 `occlusionState` 始终是 8192，不含 visible 位（2）。换成 `NSApp.run` 之后立刻变 8194，画面就出来了。**AppKit 窗口要参与合成，得有 AppKit 自己的事件循环在跑。**
+   配套：结束时不能用 `app.stop()`，它要等下一个事件才跳出循环，而这个进程没有任何输入事件 → 实测挂 60 秒不退。一次性进程直接 `app.terminate(null)`。
+   还有：`app.run` 不能是 `run()` 的尾表达式，JXA 会把它当返回值求值，实测那样根本不进事件循环。后面随便跟一条语句就行。
+
+2. **`spawn` 不能加 `detached: true`。**
+   它会 `setsid()` 把子进程放进新会话，那个会话拿不到 WindowServer。终端里直接跑能弹，从 node 用 detached 起就不弹。
+
+3. **不能用 `$.NSColor.blackColor.CGColor`。**
+   返回的是 autorelease 的 CGColor，JXA 不替你持有，等图层真正绘制时已经悬空 → 进程被 SIGKILL，130ms 就没，**stderr 一个字都没有**。用 `$.CGColorCreateGenericRGB(0,0,0,1)`（+1 持有）。
+
+4. **父进程别在 HUD 播完前退出。**
+   `showHud` 之前调了 `unref()`，而 `--test-push` 走完 notify 就 `process.exit(0)`。子进程跟着被带走，于是这个**自检命令**打印「提醒通道是通的」，屏幕上什么都没出现过。去掉 unref，并让自检 `await hudDone()`。
+
+方法论上的教训比这四条更重要：**我连着三次拿 `exit=0` 当成「画出来了」**。渲染类的东西唯一有效的验收是截图——`screencapture -x -T 2 -R x,y,w,h` 配合后台跑的进程，几秒就能确认，比读三遍代码可靠得多。凡是「输出到屏幕/网络/文件」的功能，验收标准必须是**从输出端观察到**，不是从调用端返回成功。
 
 ### 反复出现的一类：静默失败伪装成正常
 
