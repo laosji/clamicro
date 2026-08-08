@@ -30,8 +30,10 @@
  * 通知中心里一堆长短不一的标题，扫一眼分不清哪条是什么。系统通知之所以
  * 好认，是因为标题永远是「谁」，事件永远在第二行——位置固定，眼睛不用找。
  */
-async function notifyMac(msg) {
-  const { spawn } = await import('node:child_process')
+import { spawn } from 'node:child_process'
+import { showHud } from './hud.mjs'
+
+async function notifyBanner(msg) {
   // osascript 的字符串要转义引号和反斜杠，否则命令会被截断
   const esc = (s) => String(s ?? '').replace(/["\\]/g, '\\$&').slice(0, 200)
   const parts = [`display notification "${esc(msg.body)}"`, `with title "${esc(msg.title ?? 'Clamicro')}"`]
@@ -45,15 +47,62 @@ async function notifyMac(msg) {
   })
 }
 
-export function makeNotifier(config) {
+/**
+ * 刘海胶囊。
+ *
+ * 层级要重排：系统通知里第一行是「谁」（固定 Clamicro），在胶囊上那是浪费——
+ * 胶囊只有两行，且你一眼就知道是谁弹的。所以粗体行放 subtitle（发生了什么），
+ * 灰行放 body（细节）。
+ *
+ * 声音得自己放：`display notification` 自带 sound name，HUD 没有。
+ */
+function notifyNotch(msg) {
+  showHud({
+    icon: msg.icon ?? '✓',
+    title: msg.subtitle || msg.title || 'Clamicro',
+    subtitle: msg.subtitle ? msg.body : '',
+    ms: msg.ms ?? 2600,
+  })
+  if (msg.silent !== true) {
+    try {
+      spawn('afplay', ['/System/Library/Sounds/Ping.aiff'], { stdio: 'ignore', detached: true }).unref()
+    } catch {
+      /* 没声音不影响看得见 */
+    }
+  }
+}
+
+/**
+ * 两个通道做成可注入的参数，是为了能测「样式到底走没走到对应的通道」。
+ * 这一层出过的 bug 恰好是这个形状：刘海胶囊做完了，但 notify 压根没调它——
+ * 代码在，注释在，就是没接线，而且不报任何错。
+ */
+export function makeNotifier(config, { notch = notifyNotch, banner = notifyBanner } = {}) {
   return async function notify(msg) {
     if (!config.notify.macNotify) return
-    try {
-      await notifyMac(msg)
-      console.log(`[notify] ${msg.subtitle ?? msg.title}`)
-    } catch (err) {
-      // 提醒失败绝不能影响 hook 链路——工具调用还等着这个请求返回
-      console.error(`[notify] 失败: ${err.message}`)
+    // 认不出来就按默认走。配置里打个错字导致**一声不响什么都不弹**，
+    // 是这个项目最不能接受的故障形态——你会以为它在守着。
+    const raw = config.notify.style ?? 'notch'
+    const style = ['notch', 'banner', 'both'].includes(raw) ? raw : 'notch'
+    if (style !== raw) console.warn(`[notify] 未知样式「${raw}」，按 notch 处理`)
+
+    // 每个通道各自 try：'both' 下刘海挂了，横幅还得发出去——
+    // 后者才是你不在屏幕前时唯一会留痕的那条。
+    // 提醒失败绝不能影响 hook 链路，工具调用还等着这个请求返回。
+    if (style === 'notch' || style === 'both') {
+      try {
+        notch(msg) // 不阻塞，HUD 自己 detach
+      } catch (err) {
+        console.error(`[notify] 刘海失败: ${err.message}`)
+      }
     }
+    if (style === 'banner' || style === 'both') {
+      try {
+        await banner(msg)
+      } catch (err) {
+        console.error(`[notify] 横幅失败: ${err.message}`)
+      }
+    }
+    console.log(`[notify] ${msg.subtitle ?? msg.title}`)
   }
 }

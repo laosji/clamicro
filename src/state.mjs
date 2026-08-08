@@ -181,6 +181,7 @@ export class Store extends EventEmitter {
         if (notifyConfig.onStop && elapsed >= notifyConfig.minTurnMs) {
           notify = {
             title: 'Clamicro',
+            icon: '✓',
             subtitle: `${label} 已完成`,
             body: msg || `耗时 ${Math.round(elapsed / 1000)}s`,
             level: 'active',
@@ -195,7 +196,7 @@ export class Store extends EventEmitter {
         this.#touch(s, { state: STATE.ERROR, sub_state: null, last_message: msg, turn_started_at: null })
         this.#log(id, 'error', msg)
         if (notifyConfig.onError) {
-          notify = { title: 'Clamicro', subtitle: `${label} 出错`, body: msg }
+          notify = { title: 'Clamicro', icon: '✕', subtitle: `${label} 出错`, body: msg }
         }
         break
       }
@@ -319,7 +320,11 @@ export class Store extends EventEmitter {
         const mins = five.resets_at ? Math.max(0, Math.round((five.resets_at * 1000 - Date.now()) / 60000)) : null
         this.#log(id, 'quota-warn', `5 小时窗口已用 ${Math.round(five.used_percentage)}%`)
         return {
-          title: `⚡️ 额度接近上限`,
+          // 标题固定是「谁」，事件放第二行——位置固定，眼睛不用找。
+          // 图标单独给，别塞进标题文字：刘海胶囊有专门的图标位。
+          title: 'Clamicro',
+          icon: '⚡️',
+          subtitle: `额度接近上限`,
           body: `5 小时窗口已用 ${Math.round(five.used_percentage)}%` +
             (mins !== null ? `，约 ${mins} 分钟后重置` : ''),
           level: 'timeSensitive',

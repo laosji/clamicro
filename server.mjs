@@ -99,7 +99,7 @@ async function notifyApproval(ap, label) {
 
   // 日志文件默认非 600，别把单条审批的 key 写进去
   console.log(`[approval] ${ap.id.slice(0, 8)} 深链 ${detailUrl.replace(/k=[^&]*/, 'k=***')}`)
-  await notify({ title: 'Clamicro', subtitle, body })
+  await notify({ title: 'Clamicro', icon: ap.risk.level === 'high' ? '⚠️' : '●', subtitle, body })
 }
 
 // ---- 信任当前网络：node server.mjs --trust ----

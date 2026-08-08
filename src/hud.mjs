@@ -17,24 +17,36 @@ const HERE = dirname(fileURLToPath(import.meta.url))
  * ## 代价，得写在前面
  *
  * 窗口活着的前提是那个 osascript 进程活着——它不是「发出去就不管」的通知，
- * 而是一个要维持 ~2.6 秒的子进程。所以：
+ * 而是一个要维持 ~2.6 秒的子进程。更要紧的是：
  *
- *   · 只用在**你人就在屏幕前**的场景（配对成功、设备顶替）
- *   · 审批这类「可能你不在」的提醒仍然走标准通知——它会留在通知中心，
- *     而 HUD 划过去就没了，错过等于没发生
+ *   **HUD 不进通知中心。划过去就没了，人不在屏幕前等于没发生。**
  *
- * 换句话说：HUD 负责「此刻正在发生的事」，通知负责「你回来要看到的事」。
+ * 标准通知负责「你回来要看到的事」，HUD 只负责「此刻正在发生的事」。
+ * 这个取舍现在交给 `config.notify.style` 决定（notch / banner / both），
+ * 不在这一层替调用方选。
  */
+
+/** 上一个还没消失的 HUD。两条提醒挨得近时会叠在同一个位置，得先把旧的收掉。 */
+let current = null
 
 /** HUD 是锦上添花，任何失败都不该影响调用方 */
 export function showHud({ icon = '✓', title, subtitle = '', ms = 2600 } = {}) {
   return new Promise((resolve) => {
     try {
+      // 叠加的两个胶囊会互相透出对方的文字，看起来像渲染坏了
+      if (current?.exitCode === null) {
+        try {
+          current.kill()
+        } catch {
+          /* 已经自己退了 */
+        }
+      }
       const p = spawn(
         'osascript',
         ['-l', 'JavaScript', join(HERE, 'hud.jxa.js'), String(icon), String(title ?? ''), String(subtitle), String(ms)],
         { stdio: 'ignore', detached: true },
       )
+      current = p
       // 不 await 它跑完：调用方（hook 链路）等不起 2.6 秒
       p.unref()
       p.on('error', () => resolve(false))
