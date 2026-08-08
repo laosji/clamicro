@@ -14,6 +14,49 @@
   // 在比例阈值之下就把操作放行。
   const MIN_PX = 56
 
+  /**
+   * 承诺点的位移阈值。
+   *
+   * 抽成纯函数是为了能被直接测——误滑等于误批准，这段逻辑不该只能靠
+   * 在真机上反复试。见 test/swipe.test.mjs。
+   *
+   * 上限 420：横屏时 innerWidth 可达 800+，32% 就要划半个屏幕。
+   * 下限 320：**页面在后台渲染或旋转时 innerWidth 可能读到 0**，
+   * 那会让阈值变成 0，任何一点点拖动都能放行操作。实测踩到过。
+   */
+  function computeThreshold(width, right, mode) {
+    const base = Math.min(Math.max(Number(width) || 375, 320), 420)
+    return right && mode === 'high' ? base * 0.55 : base * 0.32
+  }
+
+  /**
+   * 松手时到底放不放行。全部条件都在这一个地方，避免散落各处漂移。
+   *
+   * @param dx     水平位移（右正左负）
+   * @param vx     瞬时速度
+   * @param axis   轴锁定结果，只有 'x' 才算横向手势
+   * @param th     computeThreshold 的结果
+   * @param moves  收到过几次 move —— 真手指至少几十毫秒、好几个事件
+   * @param dtMs   从第一次 move 到现在的毫秒数
+   */
+  function shouldCommit({ dx, vx, axis, th, moves, dtMs, mode, rightBlocked }) {
+    const right = dx > 0
+    const past = Math.abs(dx) >= th
+    // 甩出快捷方式要求速度方向与位移方向一致；高危批准不给快捷方式，
+    // 必须实打实划过去——一次快速轻扫不该能放行 rm -rf
+    const flick =
+      Math.abs(vx) > 0.55 &&
+      Math.sign(vx) === Math.sign(dx) &&
+      Math.abs(dx) > Math.max(MIN_PX, th * 0.45)
+    const canFlick = !(right && mode === 'high')
+    const dirOk = !(right && rightBlocked)
+    // 一步跳到位的「瞬移拖拽」只可能来自合成事件或输入层异常，
+    // 不该被当成人的决定。
+    const human = moves >= 2 && dtMs >= 80
+    const go = axis === 'x' && dirOk && human && Math.abs(dx) >= MIN_PX && (past || (flick && canFlick))
+    return { go, past, flick, canFlick, human, dirOk }
+  }
+
   /* ── 触感反馈 ──
      iOS Safari 不支持 navigator.vibrate。但 iOS 17.4+ 给 checkbox 加了
      switch 属性，切换它会触发系统触感——在用户手势里以编程方式点击这个
@@ -69,9 +112,7 @@
     // 下限 320 同样重要：页面在后台渲染或旋转时 innerWidth 可能读到 0，
     // 那会让阈值变成 0，任何一点点拖动都能放行操作。实测踩到过。
     function threshold(right) {
-      const w = window.innerWidth || card.getBoundingClientRect().width || 375
-      const base = Math.min(Math.max(w, 320), 420)
-      return right && mode === 'high' ? base * 0.55 : base * 0.32
+      return computeThreshold(window.innerWidth || card.getBoundingClientRect().width, right, mode)
     }
 
     function paint() {
@@ -157,22 +198,14 @@
       tracking = false
       const right = dx > 0
       const th = threshold(right)
-      const past = Math.abs(dx) >= th
-      // 甩出快捷方式要求速度方向与位移方向一致；高危批准不给快捷方式，
-      // 必须实打实划过去——一次快速轻扫不该能放行 rm -rf
-      const flick =
-        Math.abs(vx) > 0.55 &&
-        Math.sign(vx) === Math.sign(dx) &&
-        Math.abs(dx) > Math.max(MIN_PX, th * 0.45)
-      const canFlick = !(right && mode === 'high')
-      const dirOk = !(right && rightBlocked)
-      // 真手指滑动至少要几十毫秒、好几个 move 事件。一步跳到位的「瞬移拖拽」
-      // 只可能来自合成事件或输入层异常，不该被当成人的决定。
-      const human = moves >= 2 && performance.now() - firstMoveT >= 80
-      const go = axis === 'x' && dirOk && human && Math.abs(dx) >= MIN_PX && (past || (flick && canFlick))
+      const d = shouldCommit({
+        dx, vx, axis, th, moves,
+        dtMs: performance.now() - firstMoveT,
+        mode, rightBlocked,
+      })
 
-      window.__swipeDebug = { dx, vx, axis, th, past, flick, canFlick, human, moves, mode, go }
-      if (go) fly(right ? 'allow' : 'deny')
+      window.__swipeDebug = { dx, vx, axis, th, moves, mode, ...d }
+      if (d.go) fly(right ? 'allow' : 'deny')
       else reset()
     }
 
@@ -190,4 +223,7 @@
   }
 
   window.attachSwipe = attachSwipe
+  // 纯判定逻辑单独导出，好让 test/swipe.test.mjs 直接打在真实实现上，
+  // 而不是维护一份会漂移的拷贝
+  window.__swipeLogic = { MIN_PX, computeThreshold, shouldCommit }
 })()
