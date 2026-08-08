@@ -19,10 +19,24 @@ import { PairingStore, addDevice, removeDevice } from './src/auth/pairing.mjs'
 import { hookRoutes } from './src/routes/hooks.mjs'
 import { pageRoutes } from './src/routes/pages.mjs'
 import { apiRoutes } from './src/routes/api.mjs'
+import { makeRedactor } from './src/redact.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const config = loadConfig()
 const store = new Store()
+
+/**
+ * 抹掉本服务自己的凭证，再让它进事件流。
+ *
+ * 事件明细是 Claude 的回复原文；只要它贴过一次登录地址，主令牌就会落进
+ * history.json，并通过 /api/state 发给**已配对的手机**——而手机只该持有
+ * 自己那份可单独吊销的设备令牌。见 src/redact.mjs。
+ *
+ * 传函数而不是数组：配对会往 config.devices 里加设备，抹除要看到最新的。
+ */
+const redact = makeRedactor(() => [config.token, ...(config.devices ?? []).map((d) => d.token)])
+store.setRedactor(redact)
+
 const approvals = new ApprovalStore()
 const control = new ControlStore()
 const inbox = new Inbox()

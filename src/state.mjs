@@ -1,4 +1,5 @@
 import { EventEmitter } from 'node:events'
+import { noRedact } from './redact.mjs'
 
 // 状态机（对应计划 §3）
 export const STATE = {
@@ -37,6 +38,22 @@ export class Store extends EventEmitter {
   #events = []
   #nextEventId = 1
   #maxEvents = 2000
+  #redact = noRedact
+
+  /**
+   * 注入凭证抹除器。
+   *
+   * 事件明细存的是 Claude 的回复原文，里面可能带着本服务自己的登录地址
+   * （查询参数 t= 后面就是主令牌）。那些事件会落盘，并通过 /api/state
+   * 发给已配对的手机——而手机只该拿到自己的设备令牌，主令牌是 forget
+   * 吊销不掉、还能签发新设备的那一个。不抹等于把它送出去。
+   *
+   * 见 src/redact.mjs。不注入就不抹（测试默认）。
+   */
+  setRedactor(fn) {
+    this.#redact = typeof fn === 'function' ? fn : noRedact
+    return this
+  }
 
   session(id) {
     if (!id) return null
@@ -93,13 +110,26 @@ export class Store extends EventEmitter {
 
   restoreEvents(events, nextId) {
     if (Array.isArray(events) && events.length) {
-      this.#events = events.slice(-this.#maxEvents)
+      // 从盘上读回来的事件也要过一遍抹除，两个理由：
+      //   · 这条路径绕过 #log，不在这里抹就是个漏洞
+      //   · 升级到带抹除的版本时，顺手把**已经写进 history.json 的**旧凭证
+      //     清掉——否则老用户的历史里那把钥匙会一直躺着，直到被 3000 条上限挤掉
+      this.#events = events
+        .slice(-this.#maxEvents)
+        .map((e) => (typeof e?.detail === 'string' ? { ...e, detail: this.#redact(e.detail) } : e))
       this.#nextEventId = Math.max(Number(nextId) || 1, ...this.#events.map((e) => e.id + 1))
     }
   }
 
   #log(sessionId, type, detail) {
-    const event = { id: this.#nextEventId++, session_id: sessionId, ts: Date.now(), type, detail }
+    // 事件的唯一入口，抹除放这里就没有漏网的路径
+    const event = {
+      id: this.#nextEventId++,
+      session_id: sessionId,
+      ts: Date.now(),
+      type,
+      detail: this.#redact(detail),
+    }
     this.#events.push(event)
     if (this.#events.length > this.#maxEvents) this.#events.splice(0, this.#events.length - this.#maxEvents)
     this.emit('event', event)
@@ -107,6 +137,10 @@ export class Store extends EventEmitter {
   }
 
   #touch(s, patch) {
+    // last_message 和事件明细是同一个来源（助手回复原文），一样要抹
+    if (typeof patch.last_message === 'string') {
+      patch = { ...patch, last_message: this.#redact(patch.last_message) }
+    }
     Object.assign(s, patch, { updated_at: Date.now() })
     this.emit('session', s)
   }
