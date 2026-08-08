@@ -22,15 +22,130 @@ const HERE = dirname(fileURLToPath(import.meta.url))
  *   **HUD 不进通知中心。划过去就没了，人不在屏幕前等于没发生。**
  *
  * 标准通知负责「你回来要看到的事」，HUD 只负责「此刻正在发生的事」。
- * 这个取舍现在交给 `config.notify.style` 决定（notch / banner / both），
- * 不在这一层替调用方选。
+ * 这个取舍交给 `config.notify.style` 决定（notch / banner / both）。
+ *
+ * ## 为什么要排队
+ *
+ * 一个位置只能放一个胶囊，两条叠上去会互相透出对方的文字。最初的做法是
+ * **杀掉上一条**，结果是用户报的这个症状：
+ *
+ *   「有时候通知不显示，只听见声音了」
+ *
+ * 两条提醒隔几百毫秒时（审批批准 + 任务完成经常连着来），后一条在前一条
+ * 还没画出来时就把它杀了；而声音那时是在 notify 层单独发的，照响不误。
+ * 于是听见两声、只看见一个——**丢掉的恰好是先发生的那件事**。
+ *
+ * 现在改成排队，并且把**声音挪到这一层**：谁真的出现在屏幕上，就谁响。
+ * 声音和画面永远对得上，不会再出现「响了但没看到」。
  */
 
-/** 上一个还没消失的 HUD。两条提醒挨得近时会叠在同一个位置，得先把旧的收掉。 */
-let current = null
+/** 一次最多攒几条。爆发时排队播完要一分钟，那时早就过时了。 */
+export const MAX_QUEUE = 3
 
 /**
- * 等当前这条 HUD 播完。
+ * 队列本体，跟「怎么放一条」解耦。
+ *
+ * 抽出来是为了能测：真实的 runner 会 spawn osascript 往屏幕上弹胶囊，
+ * 那样的测试跑 `npm test` 时会满屏乱闪，而且慢。注入一个假 runner
+ * 就能把排队、丢弃、串行、hudDone 这些真正容易错的地方全部覆盖。
+ *
+ * @param run  (item, done) => void —— 开始放一条，放完调 done(code)
+ */
+export function createHudQueue(run) {
+  const queue = []
+  let running = false
+  const idleWaiters = []
+
+  function pump() {
+    if (running) return
+    const item = queue.shift()
+    if (!item) {
+      while (idleWaiters.length) idleWaiters.shift()()
+      return
+    }
+    running = true
+    let settled = false
+    const done = (code) => {
+      if (settled) return // exit 和 error 都可能来，只认第一次
+      settled = true
+      running = false
+      // 非 0 退出说明胶囊根本没画出来（osascript 崩了、被杀、拿不到 WindowServer）。
+      // 这类失败以前完全无声——正是这个项目反复踩的那一类，所以留一行。
+      if (code) console.error(`[hud] 提示未能显示（退出码 ${code}）`)
+      pump()
+    }
+    try {
+      run(item, done)
+    } catch (err) {
+      console.error(`[hud] 启动失败: ${err.message}`)
+      done(0)
+    }
+  }
+
+  return {
+    push(item) {
+      queue.push(item)
+      // 满了丢**最旧**的：新的状态更有参考价值，积压时旧的那条播出来时早已过期。
+      // 丢了要出声——静默丢弃是这个项目明令禁止的。
+      while (queue.length > MAX_QUEUE) {
+        queue.shift()
+        console.warn(`[hud] 提示积压，丢弃最旧的一条（队列上限 ${MAX_QUEUE}）`)
+      }
+      pump()
+    },
+    idle() {
+      if (!running && !queue.length) return Promise.resolve()
+      return new Promise((resolve) => idleWaiters.push(resolve))
+    },
+    get depth() {
+      return queue.length + (running ? 1 : 0)
+    },
+  }
+}
+
+function playSound() {
+  try {
+    spawn('afplay', ['/System/Library/Sounds/Ping.aiff'], { stdio: 'ignore' }).unref()
+  } catch {
+    /* 没声音不影响看得见 */
+  }
+}
+
+const hud = createHudQueue(({ icon, title, subtitle, ms, sound }, done) => {
+  const p = spawn(
+    'osascript',
+    ['-l', 'JavaScript', join(HERE, 'hud.jxa.js'), String(icon), String(title ?? ''), String(subtitle), String(ms)],
+    // **绝对不能加 detached: true**。它会 setsid() 把子进程放进新会话，
+    // 那个会话拿不到 WindowServer——osascript 照常退出码 0，窗口对象也
+    // 建得出来，但屏幕上什么都不会有。实测直接在终端跑能弹，
+    // 从 node 用 detached 起就不弹，查了很久才定位到这一个选项。
+    //
+    // 也**不要 unref()**：`clamicro test-push` 这类一次性 CLI 会在 spawn
+    // 之后立刻退出，子进程跟着被带走，自检打印「通道是通的」而屏幕上
+    // 什么都没有过。见 hudDone()。
+    { stdio: 'ignore' },
+  )
+  if (sound) playSound() // 和画面同时发生，不再各走各的
+  p.on('exit', done)
+  p.on('error', (err) => {
+    console.error(`[hud] 启动失败: ${err.message}`)
+    done(0)
+  })
+})
+
+/**
+ * 排一条胶囊。立刻返回，不等它播完。
+ *
+ * HUD 是锦上添花，任何失败都不该影响调用方——尤其 hook 链路，工具调用
+ * 还阻塞着等 HTTP 响应。
+ */
+export function showHud({ icon = '✓', title, subtitle = '', ms = 2600, sound = false } = {}) {
+  hud.push({ icon, title, subtitle, ms, sound })
+  return Promise.resolve(true)
+}
+
+/**
+ * 等队列彻底放完。
  *
  * 给 `clamicro test-push` 这类一次性命令用：它们在 notify 之后立刻
  * `process.exit(0)`，而 HUD 是子进程，进程一走它就没了——自检打印
@@ -38,50 +153,5 @@ let current = null
  * 常驻服务不需要调这个。
  */
 export function hudDone() {
-  if (!current || current.exitCode !== null) return Promise.resolve()
-  return new Promise((resolve) => {
-    current.on('exit', resolve)
-    current.on('error', resolve)
-  })
-}
-
-/** HUD 是锦上添花，任何失败都不该影响调用方 */
-export function showHud({ icon = '✓', title, subtitle = '', ms = 2600 } = {}) {
-  return new Promise((resolve) => {
-    try {
-      // 叠加的两个胶囊会互相透出对方的文字，看起来像渲染坏了
-      if (current?.exitCode === null) {
-        try {
-          current.kill()
-        } catch {
-          /* 已经自己退了 */
-        }
-      }
-      const p = spawn(
-        'osascript',
-        ['-l', 'JavaScript', join(HERE, 'hud.jxa.js'), String(icon), String(title ?? ''), String(subtitle), String(ms)],
-        // **绝对不能加 detached: true**。它会 setsid() 把子进程放进新会话，
-        // 那个会话拿不到 WindowServer——osascript 照常退出码 0，窗口对象也
-        // 建得出来，但屏幕上什么都不会有。实测直接在终端跑能弹，
-        // 从 node 用 detached 起就不弹，查了很久才定位到这一个选项。
-        { stdio: 'ignore' },
-      )
-      current = p
-      /**
-       * **不要 unref()。**
-       *
-       * unref 会让子进程不再撑住父进程的事件循环。常驻的服务无所谓，但
-       * `clamicro test-push` 这类一次性 CLI 会在 spawn 之后立刻退出，
-       * 子进程跟着被带走——HUD 一帧都没画出来。结果是这个「自检」命令
-       * 打印 `[notify] 测试通知` 说一切正常，屏幕上什么都没有。
-       *
-       * 不 unref 的代价只是一次性命令会等 HUD 播完（~3 秒），这恰恰是
-       * 自检该有的行为。调用方本来就不 await，hook 链路不受影响。
-       */
-      p.on('error', () => resolve(false))
-      resolve(true)
-    } catch {
-      resolve(false)
-    }
-  })
+  return hud.idle()
 }

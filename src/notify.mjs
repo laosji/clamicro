@@ -31,7 +31,7 @@
  * 好认，是因为标题永远是「谁」，事件永远在第二行——位置固定，眼睛不用找。
  */
 import { spawn } from 'node:child_process'
-import { showHud } from './hud.mjs'
+import { showHud } from './hud.mjs' // 声音也归它管，见 notifyNotch
 
 async function notifyBanner(msg) {
   // osascript 的字符串要转义引号和反斜杠，否则命令会被截断
@@ -57,19 +57,15 @@ async function notifyBanner(msg) {
  * 声音得自己放：`display notification` 自带 sound name，HUD 没有。
  */
 function notifyNotch(msg) {
+  // 声音交给 hud.mjs 在胶囊真正出现的那一刻发。
+  // 在这里单独发过——胶囊排队/失败时照响不误，于是「听见了但没看到」。
   showHud({
     icon: msg.icon ?? '✓',
     title: msg.subtitle || msg.title || 'Clamicro',
     subtitle: msg.subtitle ? msg.body : '',
     ms: msg.ms ?? 2600,
+    sound: msg.silent !== true,
   })
-  if (msg.silent !== true) {
-    try {
-      spawn('afplay', ['/System/Library/Sounds/Ping.aiff'], { stdio: 'ignore', detached: true }).unref()
-    } catch {
-      /* 没声音不影响看得见 */
-    }
-  }
 }
 
 /**
