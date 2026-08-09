@@ -31,6 +31,10 @@
   button:active{transform:scale(.98)}
   button:disabled{opacity:.5}
 
+  /* 比 .state 更淡：它是常驻说明，不是刚发生的事 */
+  .hint{font-size:12.5px; line-height:1.55; color:var(--dim); opacity:.72; margin:12px 0 0}
+  .hint b{color:var(--fg); font-weight:600; opacity:.85}
+
   .state{min-height:44px; margin-top:14px; font-size:14px; color:var(--dim)}
   .state.on{color:var(--ok)}
   .state.err{color:var(--warn)}
@@ -58,6 +62,10 @@
   <p>这样别人事后翻到截图、录屏或聊天记录里的那张码，也用不了。</p>
 
   <button id="again">在 Mac 上显示新的二维码</button>
+  <!-- 和 pair.html 同一条：页面内扫码做不了（http 非 secure context、
+       Safari 无 BarcodeDetector），而原生相机本来就是更好的路径。
+       要解决的是「用户不知道拿什么扫」，不是「没有扫码按钮」。 -->
+  <p class="hint">新码同样出现在 <b>Mac 屏幕</b>上。用 iPhone 自带的<b>相机 App</b> 对着扫即可。</p>
   <div class="state" id="state"></div>
 
   <details>

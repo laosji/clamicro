@@ -147,6 +147,25 @@ PostToolUse        …PreToolUse 的全部 + tool_response duration_ms
 
 同类判断：拿硬故障换小麻烦是亏的。打不开 = 完全不能用，IP 变了 = 重扫一次。
 
+### 配对页里做不了「打开摄像头扫码」
+
+提过一次，值得记下来免得再提：**两层硬阻断，不是没做。**
+
+1. `getUserMedia` 要求 **secure context**。服务跑在 `http://<局域网IP>:8765`，
+   既不是 HTTPS 也不是 localhost，iOS Safari 里 `navigator.mediaDevices`
+   直接是 `undefined`。和「拿不到 Service Worker / Web Push」是同一个根因。
+2. 就算有 HTTPS（`tunnel on` 那条路），**Safari 没有 `BarcodeDetector`**，
+   解码得自带一个 QR 库，和运行时零依赖的约定冲突。
+
+唯一能绕过第 1 层的是 `<input type="file" accept="image/*" capture="environment">`
+——它是文件选择器不是 getUserMedia，不受 secure context 限制。但第 2 层还在，
+而且交互退化成「拍一张再解码」，比原生相机的实时取景差一档。
+
+更根本的是**方向不对**：配对页在手机上、二维码在 Mac 上，而 iOS 相机 App
+扫完会直接开一个 Safari 标签页跳过去——那本来就是完整且更好的路径。
+用户缺的不是「扫码按钮」，是「不知道该拿什么去扫」。所以答案是一行小字，
+不是一个摄像头。
+
 ---
 
 ## 开发时会自己卡自己

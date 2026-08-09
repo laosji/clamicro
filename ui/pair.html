@@ -46,13 +46,24 @@
     white-space:pre-wrap; word-break:normal; overflow-wrap:anywhere;
   }
   .note{font-size:13px; color:var(--dim); margin-top:12px}
+  /* 比 .note 再淡一档：它是「你需要知道的事」，不是「刚发生的事」 */
+  .hint{font-size:12.5px; line-height:1.55; color:var(--dim); opacity:.72; margin:12px 0 0}
+  .hint b{color:var(--fg); font-weight:600; opacity:.85}
 </style>
 </head>
 <body>
 <h1>需要配对</h1>
-<p>这台设备还没有访问口令。点下面的按钮，<b>你的 Mac 上会弹出一个二维码</b>，用相机扫一下就好。</p>
+<p>这台设备还没有访问口令。点下面的按钮，<b>你的 Mac 上会弹出一个二维码</b>。</p>
 
 <button id="pair">在 Mac 上显示二维码</button>
+<!--
+  这行小字代替了「页面内扫码」。做不了：getUserMedia 需要 secure context，
+  而服务跑在 http://<局域网IP> 上；退一步说 Safari 也没有 BarcodeDetector，
+  解码得自带库，和本项目零依赖的约定冲突。
+  而且原生相机本来就是更好的路径——实时取景、自动对焦、扫完直接开 Safari。
+  所以要解决的其实不是「没有扫码入口」，是「用户不知道该拿什么扫」。
+-->
+<p class="hint">二维码会出现在 <b>Mac 屏幕</b>上。用 iPhone 自带的<b>相机 App</b> 对着扫，会自动跳转登录。</p>
 <p class="note" id="msg"></p>
 
 <div class="alt">
