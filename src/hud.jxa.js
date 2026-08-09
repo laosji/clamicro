@@ -57,8 +57,21 @@ function run(argv) {
   win.setBackgroundColor($.NSColor.clearColor)
   win.setHasShadow(false) // 有阴影就露馅了：刘海本身不投影
   win.setIgnoresMouseEvents(true) // 不能挡住底下的东西——它只是个提示
+  /**
+   * FullScreenAuxiliary 不能少。
+   *
+   * 只写 CanJoinAllSpaces | Stationary 的话，**全屏 App 之上不会显示**——
+   * 全屏窗口自己占一个 Space，只有带 FullScreenAuxiliary 的窗口才允许浮在
+   * 上面。用户报的「有时候只有提示声，没有通知」里的「有时候」，很可能就是
+   * 「当时正在用全屏的浏览器/编辑器」。声音是另一个进程放的，照响不误。
+   *
+   * IgnoresCycle：别让它出现在 Cmd-Tab / 窗口循环里，它只是个提示。
+   */
   win.setCollectionBehavior(
-    $.NSWindowCollectionBehaviorCanJoinAllSpaces | $.NSWindowCollectionBehaviorStationary,
+    $.NSWindowCollectionBehaviorCanJoinAllSpaces |
+      $.NSWindowCollectionBehaviorStationary |
+      $.NSWindowCollectionBehaviorFullScreenAuxiliary |
+      $.NSWindowCollectionBehaviorIgnoresCycle,
   )
   win.setAlphaValue(0)
 
