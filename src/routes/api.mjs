@@ -1,6 +1,7 @@
 import { readBody, json } from '../http/respond.mjs'
 import { safeEq } from '../auth/token.mjs'
 import { requireDeps } from './deps.mjs'
+import { MAX_APPROVAL_TIMEOUT_MS, MIN_APPROVAL_TIMEOUT_MS } from '../config.mjs'
 
 /**
  * JSON API 路由表。
@@ -108,6 +109,7 @@ export function apiRoutes(ctx) {
       handler: ({ res }) => json(res, 200, {
         macNotify: config.notify.macNotify,
         onStop: config.notify.onStop,
+        notifyAutoApproved: config.notify.notifyAutoApproved,
         minTurnMs: config.notify.minTurnMs,
         lanIp: config.lanIp,
         autoApproveMs: config.approval.autoApproveMs,
@@ -125,9 +127,26 @@ export function apiRoutes(ctx) {
       handler: async ({ req, res }) => {
         const body = await readBody(req)
         const before = config.notify.macNotify
-        for (const k of ['macNotify', 'onStop']) if (typeof body[k] === 'boolean') config.notify[k] = body[k]
+        for (const k of ['macNotify', 'onStop', 'notifyAutoApproved']) {
+          if (typeof body[k] === 'boolean') config.notify[k] = body[k]
+        }
         if (Number.isFinite(body.minTurnMs)) config.notify.minTurnMs = Math.max(0, body.minTurnMs)
         if (Number.isFinite(body.autoApproveMs)) config.approval.autoApproveMs = Math.max(0, body.autoApproveMs)
+        if (Number.isFinite(body.timeoutMs)) {
+          // 必须夹住。用户把等待时间拉到 10 分钟，得到的不是「等更久」而是
+          // 「审批失效」——超过 hook 的 600s 系统超时后，Claude Code 会把它当成
+          // 非阻塞错误放行到正常权限流程，且不报任何错。见 MAX_APPROVAL_TIMEOUT_MS。
+          const want = body.timeoutMs
+          config.approval.timeoutMs = Math.min(
+            MAX_APPROVAL_TIMEOUT_MS,
+            Math.max(MIN_APPROVAL_TIMEOUT_MS, want),
+          )
+          if (config.approval.timeoutMs !== want) {
+            console.warn(
+              `[config] 等待时长 ${Math.round(want / 1000)}s 超出范围，已夹到 ${Math.round(config.approval.timeoutMs / 1000)}s`,
+            )
+          }
+        }
         if (['auto', 'hostname', 'ip'].includes(body.hostMode)) {
           config.hostMode = body.hostMode
           console.log(`[config] 地址方式 → ${body.hostMode}（重启服务生效）`)

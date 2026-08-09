@@ -6,7 +6,14 @@ Watch Claude Code from your phone, and approve what it wants to run.
 
 Stop babysitting the terminal. When Claude Code needs permission, your Mac notifies you; open the page on your phone, read the command and a one-line summary, swipe to approve or reject — Claude Code continues immediately.
 
-**Be clear on the default before you assume it gates everything: ordinary operations wait 10 seconds, then approve themselves.** What actually waits for you is high-risk work — `rm -rf`, force pushes, anything touching `~/.ssh` — and those wait until they time out and are then **auto-denied**. So out of the box it *tells you* about routine work and *stops* dangerous work. Set the 10 seconds to 0 in settings if you want every single operation to wait for you.
+**Be clear on the defaults before you assume it gates everything:**
+
+| | Waits | Then | Notifies you |
+|---|---|---|---|
+| Ordinary operations | 10s | **auto-approve** | yes |
+| High-risk (`rm -rf`, force push, anything touching `~/.ssh`) | 3 min | **auto-deny** | yes |
+
+So out of the box it *tells you* about routine work and *stops* dangerous work. Both the wait and the timeout behaviour are adjustable in settings — set the 10s to 0 and every operation waits for you; the 3 minutes can go up to 570s (beyond that you hit the hook's own system timeout and the approval stops working at all).
 
 **Zero dependencies.** Node ≥ 18 and `curl` (built into macOS). Nothing in `node_modules` at runtime.
 
@@ -148,14 +155,14 @@ Two tiers based on where you are — neither reaches outside:
 
 Two channels were tried and both removed: an ntfy relay with action buttons (approve straight from the lock screen — that hands the *control plane* to a third party), and Bark (one line saying "there's an approval", control plane staying on the LAN). The latter was about as restrained as it gets, and it still only bought "something can page you while you're away" — but this tool assumes you're nearby to begin with. Continuously telling an outside server that an operation is waiting for approval isn't worth that.
 
-**Be clear about the cost:** once you leave the Mac, *nothing* alerts you. High-risk operations wait out the timeout (570s by default) and get auto-rejected, failing that turn. That is the intended default — nobody should be approving `rm -rf` while away. You can still open the dashboard from your phone whenever you want to look.
+**Be clear about the cost:** once you leave the Mac, *nothing* alerts you. High-risk operations wait out the timeout (3 minutes by default) and get auto-rejected, failing that turn. That is the intended default — nobody should be approving `rm -rf` while away. You can still open the dashboard from your phone whenever you want to look.
 ---
 
 ## Design notes
 
 **Hooks must respond before pushing.** `async: true` only works for `command` hooks; HTTP hooks always block for the response. So every endpoint returns `{}` immediately and pushes afterwards.
 
-**570-second self-timeout returning deny.** Never let it reach the system's 600s timeout — that's treated as a non-blocking error and falls through to the normal permission flow, leaving the terminal hanging on a prompt nobody is looking at.
+**Self-timeout capped at 570 seconds.** Never let it reach the system's 600s timeout — that's treated as a non-blocking error and falls through to the normal permission flow, leaving the terminal hanging on a prompt nobody is looking at.
 
 **Five terminal states:** `allowed` / `auto_allowed` / `denied` / `expired` / `abandoned`. When the same approval is decided from multiple places, first write wins and later ones get the real current state instead of an error.
 

@@ -119,6 +119,13 @@
 </div>
 <p class="hint">单位秒。设 0 表示每轮都提醒。</p>
 
+<div class="card">
+  <div class="row">
+    <div class="lbl"><b>自动通过的操作也提醒</b><span>不需要你做决定，但让你知道 Claude 刚跑了什么。关掉的话日常操作它既不拦也不说</span></div>
+    <input type="checkbox" id="notifyAuto">
+  </div>
+</div>
+
 <h2>审批策略</h2>
 <div class="card">
   <div class="row">
@@ -131,6 +138,14 @@
   </div>
 </div>
 <p class="hint">单位秒。高风险操作不受这条影响，见下方。</p>
+
+<div class="card">
+  <div class="row">
+    <div class="lbl"><b>高风险操作等待时长</b><span>没人决策时等多久，到点<b>拒绝</b>。别设太长——你走开一次，会话就冻在那里</span></div>
+    <input type="text" id="hiSec" style="width:90px;text-align:right" inputmode="numeric">
+  </div>
+</div>
+<p class="hint">单位秒，10 – 570。<b>上限是硬的</b>：hook 的系统超时是 600 秒，超过就会被当成非阻塞错误放行到普通权限流程，等于这次审批白做。</p>
 
 <div class="card danger">
   <div class="row">
@@ -188,6 +203,7 @@ async function load() {
   const c = await fetch('/api/config').then((r) => r.json());
   $('macNotify').checked = c.macNotify;
   $('onStop').checked = c.onStop;
+  $('notifyAuto').checked = c.notifyAutoApproved;
   $('minTurnMs').value = Math.round(c.minTurnMs / 1000);
 
   $('autoOn').checked = c.autoApproveMs > 0;
@@ -204,6 +220,7 @@ async function load() {
     : '改动后需重启服务';
   $('autoHigh').disabled = !c.autoApproveMs;
   $('toSec').textContent = Math.round(c.timeoutMs / 1000);
+  $('hiSec').value = Math.round(c.timeoutMs / 1000);
   document.querySelector('.card.danger').classList.toggle('on', c.autoApproveHighRisk);
   $('highHint').classList.toggle('on', c.autoApproveHighRisk);
 }
@@ -219,8 +236,10 @@ async function save(patch, note = '已保存') {
 }
 
 
-for (const id of ['macNotify', 'onStop']) {
-  $(id).addEventListener('change', function () { save({ [id]: this.checked }); });
+for (const id of ['macNotify', 'onStop', 'notifyAuto']) {
+  // notifyAuto 这个 input 的 id 和配置字段名不一样，单独映射
+  const field = id === 'notifyAuto' ? 'notifyAutoApproved' : id;
+  $(id).addEventListener('change', function () { save({ [field]: this.checked }); });
 }
 $('minTurnMs').addEventListener('change', function () {
   save({ minTurnMs: Math.max(0, Number(this.value) || 0) * 1000 });
@@ -233,6 +252,15 @@ $('autoOn').addEventListener('change', function () {
 });
 $('autoSec').addEventListener('change', function () {
   save({ autoApproveMs: Math.max(1, Number(this.value) || 10) * 1000 });
+});
+
+// 上限 570 秒是硬的：hook 的系统超时 600 秒，越过去审批就白做了。
+// 前端先夹一次给即时反馈，服务端仍然会独立夹一遍——前端的限制永远只是提示。
+$('hiSec').addEventListener('change', function () {
+  const want = Number(this.value) || 180;
+  const sec = Math.min(570, Math.max(10, want));
+  save({ timeoutMs: sec * 1000 },
+       sec !== want ? `只能设 10 – 570 秒，已改为 ${sec} 秒` : `高风险操作等待 ${sec} 秒`);
 });
 
 // 这个开关会取消掉审批功能对危险操作的全部保护，值得一次显式确认
