@@ -18,14 +18,24 @@ import assert from 'node:assert/strict'
 import { makeRedactor, noRedact } from '../src/redact.mjs'
 import { Store } from '../src/state.mjs'
 
-const TOKEN = 'jHCa5_ZfQq2mXvNb8sKtLpRw3EyU7dGh1AoZi9cVxBn'
-const DEVICE = 'dev_9KpQm2XvNbLsKtRw3EyU7dGh'
+/**
+ * 夹具必须是**一眼假**的。
+ *
+ * 第一版我照着自己机器上的真令牌敲，前 8 个字符一模一样，而这个文件是要
+ * 推到公开仓库的——43 位里泄 8 位，搜索空间实打实小了一截。发布前扫描只查
+ * 「有没有完整令牌」，完整匹配不上就放行了，前缀泄漏它看不出来。
+ *
+ * 测试用的凭证不需要「看起来真」，只需要长度够（redact 对 <12 字符的不做
+ * 全局替换）、且不像任何真实存在的东西。
+ */
+const TOKEN = 'EXAMPLE-MAIN-TOKEN-DO-NOT-USE-000000000000'
+const DEVICE = 'EXAMPLE-DEVICE-TOKEN-DO-NOT-USE-0000'
 
 test('抹除器', async (t) => {
   const redact = makeRedactor(() => [TOKEN, DEVICE])
 
   await t.test('抹掉主令牌', () => {
-    const got = redact(`扫这个：http://DcMac.local:8765/ui?t=${TOKEN}`)
+    const got = redact(`扫这个：http://mac.local:8765/ui?t=${TOKEN}`)
     assert.ok(!got.includes(TOKEN), got)
   })
 
