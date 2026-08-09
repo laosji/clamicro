@@ -39,6 +39,9 @@ function usage() {
   ${c.b('devices')}      已配对的手机列表
   ${c.b('forget')}       吊销某台设备：${c.dim('forget <id> | forget all')}
   ${c.b('rotate-token')} 换发主令牌${c.dim('  ← 只影响 CLI 和二维码，已配对设备不受影响')}
+  ${c.b('pending')}      列出待审批
+  ${c.b('approve')}      在终端批准：${c.dim('approve [id前缀]')}${c.dim('  ← 高危必须写 id')}
+  ${c.b('deny')}         在终端拒绝：${c.dim('deny [id前缀]')}
   ${c.b('test-push')}    发一条测试通知
   ${c.b('logs')}         跟踪日志
 
@@ -81,6 +84,122 @@ async function port() {
 function listeners(p) {
   const r = spawnSync('lsof', ['-ti', `tcp:${p}`, '-sTCP:LISTEN'], { encoding: 'utf8' })
   return (r.stdout ?? '').trim().split('\n').filter(Boolean)
+}
+
+/**
+ * 打到**正在跑的那个服务**上。
+ *
+ * 待审批记录只存在于服务进程的内存里（hook 的 HTTP 连接还挂在它手上），
+ * 所以 approve/deny 不能像 `--devices` 那样另起一个一次性进程——
+ * 那个进程的 ApprovalStore 是空的，什么也结不掉。
+ */
+async function api(path, init = {}) {
+  const p = await port()
+  if (!listeners(p).length) {
+    console.error(c.r('\n  服务没在跑。开一个 Claude Code 会话会自动拉起它。\n'))
+    process.exit(1)
+  }
+  const { loadConfig } = await appImport('config.mjs')
+  const r = await fetch(`http://127.0.0.1:${p}${path}`, {
+    ...init,
+    headers: {
+      Authorization: `Bearer ${loadConfig().token}`,
+      ...(init.body ? { 'Content-Type': 'application/json' } : {}),
+      ...init.headers,
+    },
+    signal: AbortSignal.timeout(3000),
+  })
+  return { status: r.status, body: await r.json().catch(() => ({})) }
+}
+
+const riskTag = (a) =>
+  a.risk?.level === 'high' ? c.r('高危') : a.risk?.level === 'medium' ? c.y('中') : c.dim('普通')
+
+/**
+ * 在终端上决策。
+ *
+ * 为什么要有这个：这个工具的前提是「你人在电脑边」，可之前**人在电脑边时
+ * 反而没有快捷路径**——刘海胶囊是 setIgnoresMouseEvents(true) 点不了的，
+ * 终端状态栏只显示个数字，于是坐在 Mac 前最快的批准方式是去另一个房间
+ * 拿手机。这是反的。
+ */
+async function decideFromCli(decision, idPrefix) {
+  const { body } = await api('/api/approvals')
+  const list = body.approvals ?? []
+  if (!list.length) {
+    console.log(c.dim('\n  没有待审批的操作\n'))
+    process.exit(0)
+  }
+
+  const show = (a) =>
+    `  ${c.b(a.id.slice(0, 8))}  ${riskTag(a)}  ${a.headline ?? a.summary ?? a.tool_name}`
+
+  if (decision === 'list') {
+    console.log()
+    for (const a of list) {
+      console.log(show(a))
+      const left = Math.max(0, Math.round((a.expires_at - Date.now()) / 1000))
+      // 到点会怎么处理，必须写清楚——「等着」和「等着然后自动放行」是两回事
+      const fate = a.auto_decision === 'allow' ? c.y(`${left}s 后自动通过`) : c.dim(`${left}s 后自动拒绝`)
+      console.log(`            ${fate}`)
+    }
+    console.log(c.dim('\n  npx clamicro approve <id前缀>   /   deny <id前缀>\n'))
+    process.exit(0)
+  }
+
+  let target
+  if (idPrefix) {
+    const hits = list.filter((a) => a.id.startsWith(idPrefix))
+    if (!hits.length) {
+      console.error(c.r(`\n  没有以 ${idPrefix} 开头的待审批\n`))
+      list.forEach((a) => console.log(show(a)))
+      process.exit(1)
+    }
+    if (hits.length > 1) {
+      console.error(c.r(`\n  ${idPrefix} 匹配到 ${hits.length} 条，写长一点\n`))
+      hits.forEach((a) => console.log(show(a)))
+      process.exit(1)
+    }
+    target = hits[0]
+  } else if (list.length === 1) {
+    target = list[0]
+  } else {
+    console.log(c.y(`\n  有 ${list.length} 条待审批，指明是哪一条：\n`))
+    list.forEach((a) => console.log(show(a)))
+    console.log(c.dim(`\n  npx clamicro ${decision === 'allow' ? 'approve' : 'deny'} <id前缀>\n`))
+    process.exit(1)
+  }
+
+  // 高危批准必须点名，不能靠「反正只有一条」蒙过去。
+  // 手机上高危右滑要划 55% 且不给快捷方式，终端这边也得有等价的摩擦——
+  // 两个入口的安全强度不一致的话，人会自然挑松的那个。
+  if (decision === 'allow' && target.risk?.level === 'high' && !idPrefix) {
+    console.error(c.r('\n  这是高风险操作，批准要写明 id：\n'))
+    console.log(show(target))
+    if (target.detail) console.log(c.dim(`\n${target.detail.split('\n').slice(0, 6).map((l) => `    ${l}`).join('\n')}`))
+    console.log(c.dim(`\n  npx clamicro approve ${target.id.slice(0, 8)}\n`))
+    process.exit(1)
+  }
+
+  // 决策前把命令原文打出来，终端回滚记录里留一份——事后要能查「我批了什么」
+  console.log(`\n${show(target)}`)
+  if (target.detail) {
+    console.log(c.dim(target.detail.split('\n').slice(0, 8).map((l) => `    ${l}`).join('\n')))
+  }
+
+  const { body: out } = await api(`/api/approvals/${target.id}/decide`, {
+    method: 'POST',
+    body: JSON.stringify({ decision }),
+  })
+  if (out.ok) {
+    console.log(decision === 'allow' ? c.g('\n  ✓ 已批准\n') : c.y('\n  ✓ 已拒绝\n'))
+  } else if (out.reason === 'already_settled') {
+    // 幂等：手机上刚批过、或者终端弹框先放行了
+    console.log(c.dim(`\n  这条已经被处理过了（${out.approval?.status ?? '未知状态'}）\n`))
+  } else {
+    console.error(c.r(`\n  失败：${out.error ?? '未知'}\n`))
+    process.exit(1)
+  }
 }
 
 switch (cmd) {
@@ -127,6 +246,19 @@ switch (cmd) {
     break
   case 'test-push':
     runApp(['--test-push'])
+    break
+
+  // 在终端上决策。人就在 Mac 前时，不该还要去拿手机。
+  case 'approve':
+  case 'allow':
+    await decideFromCli('allow', rest[0])
+    break
+  case 'deny':
+  case 'reject':
+    await decideFromCli('deny', rest[0])
+    break
+  case 'pending':
+    await decideFromCli('list', null)
     break
 
   case 'start': {

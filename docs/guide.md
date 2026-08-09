@@ -145,6 +145,17 @@ Approving gives you a **3-second undo window** with a full-screen countdown ring
 
 > Also not instant. Hooks are one-way, and the only injection point is "when this turn ends". So what you write enters the conversation after that session finishes its current turn. Good for "I can see it going the wrong way, let me redirect it."
 
+**Approve from the terminal** — when you're sitting right at the Mac, you shouldn't have to fetch your phone from another room:
+
+```bash
+npx clamicro pending          # list what's waiting, with "in N seconds it will ..."
+npx clamicro approve          # approve when there's exactly one
+npx clamicro approve 31454f39 # name a specific one
+npx clamicro deny 31454f39
+```
+
+> **High-risk operations require the explicit id** — you can't approve one just because it happens to be the only one waiting. On the phone a high-risk approval takes a deliberate 55% swipe with no flick shortcut; the terminal needs equivalent friction, because if one entrance is looser than the other, people drift to the loose one. The full command is printed before the decision, so your scrollback keeps a record of what you approved.
+
 ---
 
 ## 7. Troubleshooting

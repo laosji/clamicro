@@ -6,6 +6,8 @@ Watch Claude Code from your phone, and approve what it wants to run.
 
 Stop babysitting the terminal. When Claude Code needs permission, your Mac notifies you; open the page on your phone, read the command and a one-line summary, swipe to approve or reject — Claude Code continues immediately.
 
+**Be clear on the default before you assume it gates everything: ordinary operations wait 10 seconds, then approve themselves.** What actually waits for you is high-risk work — `rm -rf`, force pushes, anything touching `~/.ssh` — and those wait until they time out and are then **auto-denied**. So out of the box it *tells you* about routine work and *stops* dangerous work. Set the 10 seconds to 0 in settings if you want every single operation to wait for you.
+
 **Zero dependencies.** Node ≥ 18 and `curl` (built into macOS). Nothing in `node_modules` at runtime.
 
 > macOS + iPhone only. The service uses macOS-specific facilities (`scutil`, `osascript`, Bonjour) and the UI is built for iOS Safari.
