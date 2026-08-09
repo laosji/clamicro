@@ -1,9 +1,15 @@
 #!/usr/bin/env node
 import { spawn, spawnSync } from 'node:child_process'
-import { existsSync, openSync } from 'node:fs'
+import { existsSync, openSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { APP_DIR, appPaths, installedInfo } from './src/paths.mjs'
+import { isNewer, checkUpdate } from './src/update.mjs'
+
+// npm 包自己的版本（不是已安装运行时的版本，两者可能不一样——这正是要提示的）
+const PKG_VERSION = JSON.parse(
+  readFileSync(new URL('./package.json', import.meta.url), 'utf8'),
+).version
 
 const [cmd, ...rest] = process.argv.slice(2)
 const LOG = join(homedir(), 'Library', 'Logs', 'clamicro.log')
@@ -142,6 +148,45 @@ switch (cmd) {
     const p = await port()
     console.log(`\n  版本      ${info?.version ?? c.y('未安装')}`)
     console.log(`  运行时    ${c.dim(APP_DIR)}`)
+
+    // 运行时落后于当前这个包。**离线判断，不花任何代价。**
+    //
+    // `npx clamicro@latest status` 跑的是 npm 包里的 cli.mjs，但服务跑的是
+    // APP_DIR 里那份拷贝——只有 install 才会同步。不提示的话，status 会
+    // 老老实实报旧版本号，用户以为自己已经升级了。
+    if (info?.version && isNewer(PKG_VERSION, info.version)) {
+      console.log(c.y(`            ⚠️ 这个包是 ${PKG_VERSION}，运行时还停在 ${info.version}`))
+      console.log(c.dim('            跑一次 npx clamicro install 同步（配置和已配对设备都不受影响）'))
+    }
+
+    // registry 上有没有更新的版本。
+    //
+    // 放在这里而不是末尾：下面 `runApp(['--networks'])` 会 process.exit()，
+    // 之后的代码根本执行不到。
+    //
+    // 这是整个工具唯一一次主动对外的网络请求，理由见 src/update.mjs：
+    // 2.0.1 及更早的版本会把主令牌泄漏进事件流，一个管审批的工具不能
+    // 让人一直蒙在鼓里。config.json 里 checkUpdates: false 可以彻底关掉。
+    try {
+      const { loadConfig } = await appImport('config.mjs')
+      const cfg = loadConfig()
+      if (cfg.checkUpdates !== false) {
+        // checkUpdate 从**包自己**那份加载，不能走 appImport。
+        //
+        // 运行时落后正是这段代码要提示的情况，而旧运行时里压根没有
+        // update.mjs——appImport 找不到文件会 process.exit(1)，于是
+        // status 在刚说完「你该升级了」的下一行就死掉。实测踩到。
+        const up = await checkUpdate(info?.version ?? PKG_VERSION, {
+          cacheFile: join(APP_DIR, '..', 'update-check.json'),
+        })
+        if (up) {
+          console.log(c.y(`  新版本    ${up.latest}  ${c.dim(`（当前 ${info?.version ?? PKG_VERSION}）`)}`))
+          console.log(c.dim('            npx clamicro@latest install'))
+        }
+      }
+    } catch {
+      /* 查不到版本不是错误——没网的时候这个工具照样该能用 */
+    }
     const alive = listeners(p).length > 0
     console.log(`  服务      ${alive ? c.g('运行中') : c.y('未运行')} ${c.dim(`:${p}`)}`)
 
