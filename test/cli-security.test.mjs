@@ -49,7 +49,9 @@ test('untrust：撤销指定的网络', async (t) => {
   await t.test('all 清空整个列表', () => {
     write({ trustedNetworks: { ...NETS } })
     assert.equal(run('--untrust=all').status, 0)
-    assert.deepEqual(read().trustedNetworks, {})
+    // saveConfig 只写和默认不同的项，空列表等于默认，所以键本身会消失。
+    // 要断言的是「没有任何网络还被信任」，不是「文件里有个空对象」。
+    assert.deepEqual(read().trustedNetworks ?? {}, {})
   })
 
   await t.test('对不上的 id → 非零退出，且不动配置', () => {
@@ -61,11 +63,13 @@ test('untrust：撤销指定的网络', async (t) => {
   })
 
   await t.test('撤销不误伤其他配置', () => {
-    write({ trustedNetworks: { ...NETS }, hostMode: 'ip', notify: { macNotify: false } })
+    // 刻意用**非默认值**：等于默认的项本来就不落盘，拿它们做断言是空测。
+    // hostMode 默认 'ip'，这里设 'hostname'；macNotify 默认 true，这里设 false。
+    write({ trustedNetworks: { ...NETS }, hostMode: 'hostname', notify: { macNotify: false } })
     run('--untrust=all')
     const c = read()
-    assert.equal(c.hostMode, 'ip')
-    assert.equal(c.notify.macNotify, false)
+    assert.equal(c.hostMode, 'hostname', '用户改过的地址方式不能被撤销操作抹掉')
+    assert.equal(c.notify.macNotify, false, '用户关掉的通知不能被重新打开')
     assert.equal(c.token.length, 43, '不得误伤令牌')
   })
 })

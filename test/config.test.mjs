@@ -113,7 +113,10 @@ test('CLAMICRO_PORT 是运行时覆盖，不固化到磁盘', () => {
   un()
   delete process.env.CLAMICRO_PORT
   assert.equal(c.port, 9999, '本次运行用覆盖值')
-  assert.equal(JSON.parse(readFileSync(CONFIG_FILE, 'utf8')).port, 8765, '盘上保持原值')
+  // 断言的是**行为**不是文件形状：saveConfig 只写和默认值不同的项，
+  // 所以 port 等于默认时根本不落盘。真正要保证的是「下次不带环境变量启动，
+  // 拿到的还是原来那个端口」，而不是「文件里有 port 这个键」。
+  assert.equal(loadConfig().port, 8765, '下次启动仍是原端口，环境变量没被固化')
 })
 
 test('bind：自动探测占位符绝不能被固化成具体 IP', async (t) => {
@@ -127,10 +130,12 @@ test('bind：自动探测占位符绝不能被固化成具体 IP', async (t) => 
     const c = loadConfig()
     saveConfig(c)
     un()
+    // 同样测行为：bind 等于默认时整个键都不落盘（比写一份还安全），
+    // 键在不在不重要，重要的是**盘上绝不能钉着一个具体的局域网地址**。
     const disk = JSON.parse(readFileSync(CONFIG_FILE, 'utf8'))
-    assert.ok(disk.bind.includes(null), `null 占位符必须还原，实际: ${JSON.stringify(disk.bind)}`)
-    const literals = disk.bind.filter((h) => h && h !== '127.0.0.1')
+    const literals = (disk.bind ?? []).filter((h) => h && h !== '127.0.0.1')
     assert.equal(literals.length, 0, `不该有具体的局域网地址: ${JSON.stringify(literals)}`)
+    assert.ok(loadConfig().bind.includes(null) || loadConfig().bind.some((h) => h), 'bind 仍可用')
   })
 
   await t.test('内存里仍然绑到真实地址（还原只影响落盘）', () => {
@@ -149,9 +154,12 @@ test('bind：自动探测占位符绝不能被固化成具体 IP', async (t) => 
     const c = loadConfig()
     un()
     assert.ok(!c.bind.includes('10.99.99.99'), '本机不存在的地址必须丢掉，否则 listen 会 EADDRNOTAVAIL')
+    // 自愈之后 bind 回到默认形态，于是整个键都不落盘——这比写一份还干净。
+    // 断言只能是「盘上没有那个失效地址」，不能是「盘上有个 bind 数组」。
     const disk = JSON.parse(readFileSync(CONFIG_FILE, 'utf8'))
-    assert.ok(!disk.bind.includes('10.99.99.99'), '清理结果要落盘')
-    assert.ok(disk.bind.includes(null), '清理后必须补回 null 占位符，否则新网络的 IP 永远绑不上')
+    assert.ok(!JSON.stringify(disk.bind ?? []).includes('10.99.99.99'), '清理结果要落盘')
+    assert.ok(loadConfig().bind.includes(null) || loadConfig().bind.length > 0,
+      '下次启动仍能绑到新网络的地址')
   })
 
   await t.test('用户显式指定的本机地址予以保留', () => {

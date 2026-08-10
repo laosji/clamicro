@@ -160,13 +160,26 @@ function migrateLegacyDir() {
   }
 }
 
+/**
+ * 合并盘上的配置到默认值之上。
+ *
+ * **base 必须深拷贝。** 原来是 `{ ...base }` 浅拷贝：override 里没有的键
+ * 直接共享 DEFAULTS 的对象引用，于是后面任何一句
+ * `config.notify.macNotify = ...`（迁移代码里就有）都会**改掉 DEFAULTS 本身**。
+ *
+ * 这个 bug 潜伏很久没暴露，因为以前没人拿 DEFAULTS 做比较。加了「只写非默认项」
+ * 之后立刻炸出来：DEFAULTS 被污染成和用户值一样，剪枝就把用户真正设过的值
+ * 也当成默认剪掉了——表现是从 Bark 迁移过来的 macNotify:false 直接消失。
+ *
+ * DEFAULTS 是模块级单例，被写坏之后同一进程里后续所有 loadConfig 都是错的。
+ */
 function deepMerge(base, override) {
   if (override == null || typeof override !== 'object' || Array.isArray(override)) {
-    return override === undefined ? base : override
+    return override === undefined ? structuredClone(base) : override
   }
-  const out = { ...base }
+  const out = structuredClone(base ?? {})
   for (const [k, v] of Object.entries(override)) {
-    out[k] = k in base && base[k] && typeof base[k] === 'object' && !Array.isArray(base[k])
+    out[k] = base?.[k] && typeof base[k] === 'object' && !Array.isArray(base[k])
       ? deepMerge(base[k], v)
       : v
   }
@@ -215,6 +228,33 @@ export function loadConfig() {
   }
 
   /**
+   * 解冻 2.5.0 之前被固化进盘的默认值。
+   *
+   * 老版本的 saveConfig 把**整个合并后的配置**写盘，于是用户从没设过的默认值
+   * 也被 `trust`、配对这些日常操作顺手存了下来。结果是改 DEFAULTS 对所有已有
+   * 安装完全无效。saveConfig 已经改成只写非默认项，但盘上那些旧值还在，
+   * 而且看起来和「用户显式设的」一模一样。
+   *
+   * 这两个键可以安全地当成残留删掉，因为**2.5.0 之前它们根本没有设置入口**：
+   * timeoutMs 和 notifyAutoApproved 都不在设置页里，API 也不接受写入。
+   * 也就是说盘上出现的值只可能是当时的默认值被固化的产物，不可能是用户的选择。
+   *
+   * 只在「等于那个旧默认值」时改——万一有人手改过 config.json，尊重他。
+   *
+   * 注意这段跑在 deepMerge **之后**，所以是「赋回新默认值」而不是 delete——
+   * 删掉只会留下 undefined，默认值补不回来。赋回之后它等于默认，
+   * saveConfig 的 pruneDefaults 自然就不再把它写盘了。
+   */
+  if (config.approval?.timeoutMs === 570_000) {
+    config.approval.timeoutMs = DEFAULTS.approval.timeoutMs
+    dirty = true
+  }
+  if (config.notify?.notifyAutoApproved === false) {
+    config.notify.notifyAutoApproved = DEFAULTS.notify.notifyAutoApproved
+    dirty = true
+  }
+
+  /**
    * 自愈：丢掉 bind 里钉着的、本机已经没有的地址。
    *
    * 旧版本的 saveConfig 会把探测结果写回盘（见那边的注释），于是 bind 里留下
@@ -237,7 +277,13 @@ export function loadConfig() {
     }
   }
   if (dirty) {
-    writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2))
+    // **这里才是默认值被固化的源头**，比 saveConfig 更隐蔽：它直接把
+    // deepMerge 之后的整个对象写盘，于是每一次「首次启动 / 生成 token /
+    // 跑一条迁移」都会把当时的全部默认值刻进 config.json。
+    //
+    // 一开始只修了 saveConfig，键数纹丝不动——因为服务启动走的是这一条。
+    // 两条写路径都得剪，漏一条等于没修。
+    writeFileSync(CONFIG_FILE, JSON.stringify(pruneDefaults(config, DEFAULTS), null, 2))
     chmodSync(CONFIG_FILE, 0o600) // 含访问 token
     console.log(`[config] 已写入 ${CONFIG_FILE}`)
   }
@@ -299,8 +345,51 @@ export function saveConfig(config) {
     persist.bind = [...new Set(persist.bind.map((h) => (h && (h === lanIp || h === tailscaleIp) ? null : h)))]
     if (!persist.bind.includes(null)) persist.bind.push(null)
   }
-  writeFileSync(CONFIG_FILE, JSON.stringify(persist, null, 2))
+  writeFileSync(CONFIG_FILE, JSON.stringify(pruneDefaults(persist, DEFAULTS), null, 2))
   chmodSync(CONFIG_FILE, 0o600)
+}
+
+/**
+ * 只写「和默认值不一样」的部分。
+ *
+ * ## 为什么必须这样
+ *
+ * 原来是把**整个合并后的配置**写盘。于是用户从没设过的每一个默认值，都会被
+ * `trust`、配对、换令牌这些日常操作顺手固化进 config.json——实测一个正常使用
+ * 的配置里有 27 个键，其中 `quotaWarnPct`、`style`、`checkUpdates`、`timeoutMs`、
+ * `notifyAutoApproved` 用户一个都没碰过。
+ *
+ * 后果是：**这个项目的每一个默认值，都被冻结在用户第一次触发保存的那一刻。**
+ * 之后再改 DEFAULTS，对所有已有安装完全无效——包括安全相关的默认值。
+ * 实测：把高危等待从 570s 改成 180s、把 notifyAutoApproved 改成 true，
+ * 发版之后**没有任何一个老用户拿到**，而 README 已经照新默认写了。
+ *
+ * 这和 `bind` 那个两天的 bug 是同一个病：**把派生值当成用户意图存了下来。**
+ * 那次存的是「启动时探测的结果」，这次存的是「当时的默认值」。
+ *
+ * ## 语义
+ *
+ * 值等于默认值 → 不写盘 → 以后跟着默认值走。
+ * 值不等于默认值 → 写盘 → 一直是用户说了算。
+ *
+ * 副作用是：用户手动把某项**设成了和默认值一样**的值，之后默认值变了，
+ * 他会跟着变。这是可以接受的——分不清「显式设成 10 秒」和「默认就是 10 秒」，
+ * 需要额外记一份「用户碰过哪些键」，代价大于收益。
+ *
+ * 不在 DEFAULTS 里的东西（token、devices、trustedNetworks…）一律原样保留。
+ */
+function pruneDefaults(value, defaults) {
+  if (defaults === undefined) return value // 不是默认项，是状态，全留
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    return JSON.stringify(value) === JSON.stringify(defaults) ? undefined : value
+  }
+  const out = {}
+  for (const [k, v] of Object.entries(value)) {
+    const kept = pruneDefaults(v, defaults?.[k])
+    if (kept !== undefined) out[k] = kept
+  }
+  // 整个子对象都等于默认 → 连这个键都不写
+  return Object.keys(out).length ? out : undefined
 }
 
 /**
