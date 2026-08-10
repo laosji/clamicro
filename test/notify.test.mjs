@@ -154,3 +154,39 @@ test('专注模式：静音但不隐藏', async (t) => {
     assert.equal(msg.silent, undefined)
   })
 })
+
+test('通知正文剥掉 markdown', async (t) => {
+  const { plainText } = await import('../src/notify.mjs')
+
+  await t.test('标题标记不该出现在通知里', () => {
+    // 用户实际看到过的那条：「## 改了什么…」——半成品，第一眼就是没做完
+    assert.equal(plainText('## 改了什么\n\n记忆更新完了。'), '改了什么 记忆更新完了。')
+  })
+
+  await t.test('粗体 / 斜体 / 行内代码', () => {
+    assert.equal(plainText('**很重要** 和 *次要* 和 `code`'), '很重要 和 次要 和 code')
+  })
+
+  await t.test('链接只留文字，不留 URL', () => {
+    // URL 在一行通知里既占地方又点不了
+    assert.equal(plainText('见 [NOTES](./NOTES.md) 一节'), '见 NOTES 一节')
+  })
+
+  await t.test('列表标记去掉，换行压成空格', () => {
+    assert.equal(plainText('- 甲\n- 乙\n1. 丙'), '甲 乙 丙')
+  })
+
+  await t.test('代码块整段丢掉——一行里放不下', () => {
+    assert.equal(plainText('前\n```js\nfoo()\n```\n后'), '前 后')
+  })
+
+  await t.test('普通文本原样保留，不做「智能摘要」', () => {
+    // 这可能是你唯一会看到的那句话，不该在这里改字面内容
+    const s = '测试全部通过，537 条'
+    assert.equal(plainText(s), s)
+  })
+
+  await t.test('非字符串不炸', () => {
+    for (const v of [null, undefined, 123, {}]) assert.equal(plainText(v), '')
+  })
+})

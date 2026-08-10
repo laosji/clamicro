@@ -36,11 +36,41 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { showHud } from './hud.mjs' // 声音也归它管，见 notifyNotch
 
+/**
+ * 把 markdown 压成一行普通文本。
+ *
+ * 通知正文来自助手回复原文，里面全是 `## 标题`、`**粗体**`、列表、代码块。
+ * 系统通知和刘海胶囊都只有一行、都不渲染 markdown，于是屏幕上出现的是
+ * 「## 改了什么…」这种半成品——用户看到的第一眼就是没做完的东西。
+ *
+ * 只做减法：去掉标记、把换行压成空格。**不改字面内容**——这条通知可能是
+ * 你唯一会看到的那句话，不该在这里做「智能摘要」。
+ */
+export function plainText(s) {
+  if (typeof s !== 'string') return ''
+  return s
+    .replace(/```[\s\S]*?```/g, ' ')       // 代码块整段丢掉，一行里放不下
+    .replace(/^\s{0,3}#{1,6}\s+/gm, '')     // # 标题
+    .replace(/^\s{0,3}>\s?/gm, '')          // > 引用
+    .replace(/^\s{0,3}[-*+]\s+/gm, '')      // - 列表
+    .replace(/^\s{0,3}\d+\.\s+/gm, '')     // 1. 列表
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1') // 链接/图片 → 只留文字
+    .replace(/\*\*([^*]+)\*\*/g, '$1')     // **粗体**
+    .replace(/(^|[^*])\*([^*\n]+)\*/g, '$1$2') // *斜体*
+    .replace(/`([^`]+)`/g, '$1')            // `行内代码`
+    .replace(/^\s*[-*_]{3,}\s*$/gm, ' ')    // --- 分隔线
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
 async function notifyBanner(msg) {
   // osascript 的字符串要转义引号和反斜杠，否则命令会被截断
   const esc = (s) => String(s ?? '').replace(/["\\]/g, '\\$&').slice(0, 200)
-  const parts = [`display notification "${esc(msg.body)}"`, `with title "${esc(msg.title ?? 'Clamicro')}"`]
-  if (msg.subtitle) parts.push(`subtitle "${esc(msg.subtitle)}"`)
+  const parts = [
+    `display notification "${esc(plainText(msg.body))}"`,
+    `with title "${esc(msg.title ?? 'Clamicro')}"`,
+  ]
+  if (msg.subtitle) parts.push(`subtitle "${esc(plainText(msg.subtitle))}"`)
   // 配对码这类「你正等着它出现」的通知不该出声——你人就在屏幕前
   if (msg.silent !== true) parts.push('sound name "Ping"')
   await new Promise((resolve) => {
@@ -74,8 +104,8 @@ function notifyNotch(msg, onFail) {
    */
   showHud({
     icon: msg.icon ?? '✓',
-    title: msg.compact ? (msg.short || msg.subtitle || 'Clamicro') : (msg.subtitle || msg.title || 'Clamicro'),
-    subtitle: msg.compact ? '' : (msg.subtitle ? msg.body : ''),
+    title: plainText(msg.compact ? (msg.short || msg.subtitle || 'Clamicro') : (msg.subtitle || msg.title || 'Clamicro')),
+    subtitle: msg.compact ? '' : plainText(msg.subtitle ? msg.body : ''),
     ms: msg.ms ?? 2600,
     sound: msg.silent !== true,
     tint: msg.tint ?? 'plain',

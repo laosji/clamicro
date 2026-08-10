@@ -342,6 +342,35 @@ switch (cmd) {
       }
     }
 
+    /**
+     * 通知**实际**会长什么样，而不是配置里写了什么。
+     *
+     * 服务由 SessionStart hook 用 `nohup … & disown` 起，随即被 launchd 收养
+     * （PPID=1）。孤儿进程拿不到图形会话，刘海胶囊画不出来——窗口建得出来、
+     * 退出码 0，但屏幕上什么都没有。代码里已经自动回落到系统横幅了，可
+     * **status 完全不说**，用户只会觉得「我明明设了 notch，怎么出来的是横幅」。
+     *
+     * 设置和实际不一致时必须写出来，这正是这个项目反复强调的：
+     * 静默降级比不降级更难排查。
+     */
+    if (alive) {
+      try {
+        const { loadConfig } = await appImport('config.mjs')
+        const style = loadConfig().notify?.style ?? 'notch'
+        const svcPid = listeners(p)[0]
+        const ppid = spawnSync('ps', ['-o', 'ppid=', '-p', svcPid], { encoding: 'utf8' }).stdout?.trim()
+        const orphan = ppid === '1'
+        if (style === 'notch' && orphan) {
+          console.log(`  通知      ${c.y('系统横幅')}${c.dim('（设置是刘海，但服务在后台运行，画不出窗口，已自动回落）')}`)
+          console.log(c.dim('            想看刘海：npx clamicro stop 后用 npx clamicro start 前台启动'))
+        } else {
+          console.log(`  通知      ${style === 'banner' ? '系统横幅' : style === 'both' ? '刘海 + 横幅' : '刘海胶囊'}`)
+        }
+      } catch {
+        /* 读不到就不显示这一行，别为了一行信息把 status 弄挂 */
+      }
+    }
+
     // hooks 是整条链路的入口。它们没了的表现是「服务运行中 ✓、什么都收不到」，
     // 而 status 以前只看服务活没活——最该看的那一项反而不在上面。
     try {
