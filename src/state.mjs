@@ -29,17 +29,30 @@ function subStateForTool(toolName, toolInput) {
 }
 
 /**
- * 额度后缀，形如「 · 33%」。拿不到就返回空串——空闲状态不该因为额度缺失
- * 而显示成「已完成 · NaN%」或者干脆不弹。
+ * 完成之后**接着播**的那条额度提示。
  *
- * 只取 5 小时窗口：7 天窗口变化太慢，放在一闪而过的胶囊上没有决策价值。
+ * 不并进「已完成」里：完成是一个状态，额度是另一条信息，挤在一行会让
+ * 两个都变得不好扫。分成前后两条，各自只说一件事——反正 HUD 队列本来
+ * 就是串行的，第二条会自动等第一条播完。
+ *
+ * 字段叫 pct 不叫 used_percentage —— applyStatusLine 存进来时就改过名了。
+ * 第一版照着 hook 的原始载荷写，读出来永远 undefined，表现是「额度明明有，
+ * 胶囊上就是不显示」，而且不报错。测试抓到的。
+ *
+ * 拿不到额度就返回 null，不播第二条——空闲状态不该因为额度缺失而弹一条
+ * 「额度 NaN%」。
  */
-function quotaSuffix(limits) {
-  // 字段叫 pct 不叫 used_percentage —— applyStatusLine 存进来时就改过名了。
-  // 第一版照着 hook 的原始载荷写成 used_percentage，读出来永远 undefined，
-  // 表现是「额度明明有，胶囊上就是不显示」，不报错。测试抓到的。
+function quotaFollowUp(limits) {
   const pct = limits?.five_hour?.pct
-  return Number.isFinite(pct) ? ` · ${Math.round(pct)}%` : ''
+  if (!Number.isFinite(pct)) return null
+  return {
+    icon: '◔',
+    short: `${Math.round(pct)}%`,
+    // 只有真的接近上限才用警告色，平时是中性的——天天见红会让人对红色脱敏
+    tint: pct >= 90 ? 'warn' : 'info',
+    // 比主状态短：它是补充信息，不该占同样长的时间
+    ms: 1600,
+  }
 }
 
 function truncate(s, n) {
@@ -241,8 +254,10 @@ export class Store extends EventEmitter {
              * statusLine 和手机看板里，得专门去看。
              */
             compact: true,
-            short: `已完成${quotaSuffix(this.#accountLimits)}`,
+            short: '已完成',
             tint: 'ok',
+            // 播完「已完成」再接一条额度。见 quotaFollowUp。
+            after: quotaFollowUp(this.#accountLimits),
             subtitle: `${label} 已完成`,
             body: msg || `耗时 ${Math.round(elapsed / 1000)}s`,
             level: 'active',

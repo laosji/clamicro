@@ -335,7 +335,9 @@ test('完成状态带上额度——任务跑完正是你会看一眼的时刻',
     s.session('x').turn_started_at = Date.now() - 60_000
     const { notify } = s.applyHook('stop', { session_id: 'x', last_assistant_message: '好了' },
       { onStop: true, minTurnMs: 0 })
-    assert.equal(notify.short, '已完成 · 33%')
+    assert.equal(notify.short, '已完成', '完成就是完成，额度不挤进这一行')
+    assert.equal(notify.after.short, '33%', '额度作为跟着播的第二条')
+    assert.equal(notify.after.tint, 'info', '没接近上限时用中性色')
   })
 
   await t.test('拿不到额度时只显示状态，不显示 NaN', () => {
@@ -345,6 +347,7 @@ test('完成状态带上额度——任务跑完正是你会看一眼的时刻',
     const { notify } = s.applyHook('stop', { session_id: 'x', last_assistant_message: '好了' },
       { onStop: true, minTurnMs: 0 })
     assert.equal(notify.short, '已完成')
+    assert.equal(notify.after, null, '拿不到额度就不播第二条，而不是播「NaN%」')
   })
 
   await t.test('仍然是横向态且用成功色', () => {

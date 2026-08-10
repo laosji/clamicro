@@ -77,6 +77,23 @@ function notifyNotch(msg) {
     sound: msg.silent !== true,
     tint: msg.tint ?? 'plain',
   })
+
+  /**
+   * 跟着播的第二条（目前只有「完成之后报一下额度」）。
+   *
+   * 队列本来就是串行的，直接 push 就会排在主状态后面。**一定是静音的**：
+   * 同一件事响两声只会让人以为出了两件事。
+   */
+  if (msg.after) {
+    showHud({
+      icon: msg.after.icon ?? '◔',
+      title: msg.after.short ?? '',
+      subtitle: '',
+      ms: msg.after.ms ?? 1600,
+      sound: false,
+      tint: msg.after.tint ?? 'info',
+    })
+  }
 }
 
 /**
