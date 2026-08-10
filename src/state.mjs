@@ -216,9 +216,11 @@ export class Store extends EventEmitter {
           notify = {
             title: 'Clamicro',
             icon: '✓',
-            // 完成是**状态**：横向一条，图标说明「完成了」，文字只说「哪个」
+            // 完成是**状态**：横向一条只说状态本身。
+            // 项目名不放这儿——横向态是给余光扫的，「已完成」三个字就够；
+            // 想知道是哪个项目，纵向的通知和手机看板里都有。
             compact: true,
-            short: label,
+            short: '已完成',
             subtitle: `${label} 已完成`,
             body: msg || `耗时 ${Math.round(elapsed / 1000)}s`,
             level: 'active',
