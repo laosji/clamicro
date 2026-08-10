@@ -53,15 +53,22 @@
     -webkit-backdrop-filter:saturate(180%) blur(14px);
     border-bottom:1px solid var(--line);
   }
-  #quotabar .qrow{display:flex; align-items:center; gap:14px}
+  /* 两行而不是并排：并排时进度条被挤到一半宽，10% 和 20% 看着差不多；
+     而且右边放不下重置时间——那是「还要等多久」的唯一来源 */
+  #quotabar .qline{display:flex; align-items:center; gap:10px}
+  #quotabar .qline + .qline{margin-top:5px}
+  #quotabar .qline > .qm{flex:1; min-width:0}
+  #quotabar .qreset{
+    flex:0 0 auto; font-size:11px; color:var(--dim);
+    white-space:nowrap; font-variant-numeric:tabular-nums;
+  }
   /* 5h 是主角：真正影响「还能不能再跑一轮」的是它。7d 以天计，小一档 */
-  #quotabar .q5{flex:1.6}
-  #quotabar .q7{flex:1; opacity:.68}
+  #quotabar .q7{opacity:.62}
   #quotabar .q7 .meter{font-size:11px}
   #quotabar .q7 .bar{height:4px}
   /* 陈旧：整条变暗 + 一个感叹号，点开才展开解释——信息不丢，只是折叠 */
   #quotabar.stale{cursor:pointer}
-  #quotabar.stale .qrow{opacity:.5}
+  #quotabar.stale .qline{opacity:.5}
   #quotabar .qbang{display:none; font-size:13px; color:var(--warn); font-weight:700; flex:0 0 auto}
   #quotabar.stale .qbang{display:inline}
   #quotabar .qwarn{display:none; margin-top:7px; font-size:11.5px; line-height:1.5; color:var(--warn)}
@@ -271,10 +278,14 @@ function renderQuotaBar() {
   el.classList.toggle('stale', stale);
   if (!stale) el.classList.remove('open');
 
-  el.innerHTML = `<div class="qrow">
-      <div class="q5">${meter('5h', quota.five_hour?.pct)}</div>
-      <div class="q7">${meter('7d', quota.seven_day?.pct)}</div>
+  el.innerHTML = `<div class="qline">
+      <div class="qm">${meter('5h', quota.five_hour?.pct)}</div>
+      <span class="qreset">${until(quota.five_hour?.resets_at)}</span>
       <span class="qbang">!</span>
+    </div>
+    <div class="qline q7">
+      <div class="qm">${meter('7d', quota.seven_day?.pct)}</div>
+      <span class="qreset">${until(quota.seven_day?.resets_at)}</span>
     </div>
     <div class="qwarn">
       这是 ${ago(quota.at)}的旧数据，当前没有会话在上报。
