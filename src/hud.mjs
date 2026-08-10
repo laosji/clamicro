@@ -130,6 +130,8 @@ export function createHudQueue(run) {
  *
  * `clamicro start`（前台、有 shell 父进程）不受影响，刘海照常显示。
  */
+let warnedNoWindows = false
+
 function canDrawWindows() {
   return process.ppid !== 1
 }
@@ -146,6 +148,16 @@ const hud = createHudQueue((item, done) => {
   const { icon, title, subtitle, ms, sound, tint } = item
   // 画不出来就别装：直接走回落，别让用户以为发了个看不见的东西
   if (!canDrawWindows()) {
+    // 降级必须留痕。第一版这条路径一行日志都不打，于是「刘海怎么没了」
+    // 完全无从查起——而「静默降级比不降级更难排查」正是这个项目反复
+    // 强调的那条。每次都打太吵，所以只在**第一次**说一句。
+    if (!warnedNoWindows) {
+      warnedNoWindows = true
+      console.warn(
+        `[hud] 本进程画不出窗口（ppid=${process.ppid}，多半是被 launchd 收养的后台服务），` +
+          `刘海提示改走系统横幅。想看刘海：前台 npx clamicro start`,
+      )
+    }
     if (sound) playSound()
     try {
       item.onFail?.()
