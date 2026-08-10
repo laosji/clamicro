@@ -44,6 +44,29 @@
   .dot.live{background:var(--ok)}
   header a{margin-left:auto; font-size:14px; color:var(--run); text-decoration:none}
 
+  /* sticky：滚动时始终可见。不粘住的话只是换了个位置，算不上状态栏 */
+  #quotabar{
+    position:sticky; top:0; z-index:20; flex:0 0 auto;
+    width:100%; max-width:592px; margin:0 auto; padding:7px 18px 9px;
+    background:color-mix(in srgb, var(--bg) 88%, transparent);
+    backdrop-filter:saturate(180%) blur(14px);
+    -webkit-backdrop-filter:saturate(180%) blur(14px);
+    border-bottom:1px solid var(--line);
+  }
+  #quotabar .qrow{display:flex; align-items:center; gap:14px}
+  /* 5h 是主角：真正影响「还能不能再跑一轮」的是它。7d 以天计，小一档 */
+  #quotabar .q5{flex:1.6}
+  #quotabar .q7{flex:1; opacity:.68}
+  #quotabar .q7 .meter{font-size:11px}
+  #quotabar .q7 .bar{height:4px}
+  /* 陈旧：整条变暗 + 一个感叹号，点开才展开解释——信息不丢，只是折叠 */
+  #quotabar.stale{cursor:pointer}
+  #quotabar.stale .qrow{opacity:.5}
+  #quotabar .qbang{display:none; font-size:13px; color:var(--warn); font-weight:700; flex:0 0 auto}
+  #quotabar.stale .qbang{display:inline}
+  #quotabar .qwarn{display:none; margin-top:7px; font-size:11.5px; line-height:1.5; color:var(--warn)}
+  #quotabar.stale.open .qwarn{display:block}
+
   main{
     flex:1 1 auto; overflow-y:auto; overflow-x:hidden; -webkit-overflow-scrolling:touch;
     overscroll-behavior:contain;
@@ -190,6 +213,14 @@
   <a href="/ui/settings">设置</a>
 </header>
 
+<!--
+  用量状态条。放这儿而不是正文里，是因为它**不是操作**：首页的职责是
+  决策（批/拒）和感知（什么在跑），用量只是你瞟一眼的背景信息。
+  它以前是正文中部的一整张卡片，既抢手机上最贵的垂直空间，又因为数字
+  变化频繁而让下面的内容不停跳动。
+-->
+<div id="quotabar" hidden></div>
+
 <main id="view"></main>
 
 <nav>
@@ -220,6 +251,41 @@ function meter(label, pct) {
   const cls = v >= 90 ? 'hot' : v >= 70 ? 'mid' : '';
   return `<div class="meter"><b>${label}</b><div class="bar"><i class="${cls}" style="width:${v}%"></i></div><span class="pct">${Math.round(v)}%</span></div>`;
 }
+
+/**
+ * 顶部用量条。
+ *
+ * 没数据时**整条不显示**（不占位）：首次安装、statusLine 还没上报过时，
+ * 一条空条比没有更让人困惑；那种情况的解释留在「设置」页。
+ *
+ * statusLine 在活跃会话里每次响应更新都上报，秒级新鲜。超过 10 分钟没动静
+ * 就说明没有会话在报——**此时把旧数字当成当前值展示是在骗人**，所以整条
+ * 变暗、挂一个感叹号，点开才展开完整解释。信息不丢，只是折叠。
+ */
+function renderQuotaBar() {
+  const el = $('quotabar');
+  if (!quota) { el.hidden = true; return; }
+  el.hidden = false;
+
+  const stale = Date.now() - quota.at > 600000;
+  el.classList.toggle('stale', stale);
+  if (!stale) el.classList.remove('open');
+
+  el.innerHTML = `<div class="qrow">
+      <div class="q5">${meter('5h', quota.five_hour?.pct)}</div>
+      <div class="q7">${meter('7d', quota.seven_day?.pct)}</div>
+      <span class="qbang">!</span>
+    </div>
+    <div class="qwarn">
+      这是 ${ago(quota.at)}的旧数据，当前没有会话在上报。
+      statusLine 是会话<b>启动时</b>读取的，新开一个 Claude Code 会话才会刷新。
+    </div>`;
+}
+
+// 点一下展开陈旧说明。只在 stale 时有意义，CSS 里也只有 stale 才显示。
+document.getElementById('quotabar').addEventListener('click', function () {
+  if (this.classList.contains('stale')) this.classList.toggle('open');
+});
 
 function until(ts) {
   if (!ts) return '';
@@ -295,26 +361,7 @@ function renderHome() {
       </div>`).join('');
   }
 
-  h += '<h2>用量</h2>';
-  // statusLine 在活跃会话里每次响应更新都上报，秒级新鲜。
-  // 超过 10 分钟没动静就说明没有会话在报，此时把旧数字当成当前值展示是在骗人。
-  const stale = quota && Date.now() - quota.at > 600000;
-  h += quota ? `<div class="card${stale ? ' alert' : ''}">
-      ${meter('5h', quota.five_hour?.pct)}
-      <div class="reset">${until(quota.five_hour?.resets_at)}</div>
-      <div style="height:10px"></div>
-      ${meter('7d', quota.seven_day?.pct)}
-      <div class="reset">${until(quota.seven_day?.resets_at)}</div>
-      <div class="reset" style="margin-top:8px;opacity:.7">更新于 ${ago(quota.at)}</div>
-      ${stale ? `<div class="path" style="white-space:normal;color:var(--warn);margin-top:8px">
-        ⚠️ 这是 ${ago(quota.at)}的旧数据，当前没有会话在上报。
-        statusLine 是会话启动时读取的，新开一个 Claude Code 会话才会刷新。
-      </div>` : ''}
-    </div>`
-    : `<div class="card"><div class="path" style="white-space:normal">${slSeen
-        ? '暂无数据 — 已收到过上报，但这次没有额度字段'
-        : 'Claude Code 只在会话<b>启动时</b>读取 statusLine 配置，所以装 Clamicro 之前就开着的会话不会上报用量。下次新开会话时这里会自动出现数字。'}</div></div>`;
-
+  renderQuotaBar();
   h += '<h2>状态</h2>';
   h += `<div class="card"><div class="top">
       <span class="name">${busy.length ? `${busy.length} 个会话进行中` : '空闲'}</span>
