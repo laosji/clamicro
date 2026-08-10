@@ -302,3 +302,25 @@ test('配对端点', async (t) => {
   // 带头的那条会真的弹二维码窗口，不在测试里跑；
   // 它依赖 ctx.notify，而漏传依赖已由 requireDeps 在启动时挡住（见 deps.test.mjs）
 })
+
+test('?t= 登录：谁递进来的令牌，cookie 就写谁', async (t) => {
+  // 这条修的是两个真 bug，一个可用性一个安全：
+  //   1. 原来只认主令牌，带**设备令牌**来的一律打回配对页——而设备令牌
+  //      恰恰是手机手里那份，换手机/清数据/cookie 过期后重登走的就是这条路
+  //   2. cookie 里写的是**主令牌**（loginCookie 不传值就用它），于是从
+  //      `clamicro qr` 扫码进来的手机拿到的是那把 forget 吊销不掉、
+  //      还能签发新设备的万能钥匙。每设备令牌的设计因此形同虚设
+  await t.test('主令牌可以登录', async () => {
+    const r = await S.raw(`/ui?t=${S.token}`)
+    assert.equal(r.status, 302)
+    assert.match(r.headers['set-cookie']?.[0] ?? '', /ccm=/)
+  })
+
+  await t.test('乱七八糟的令牌登不进去', async () => {
+    assert.equal((await S.raw(`/ui?t=${'x'.repeat(S.token.length)}`)).status, 401)
+  })
+
+  await t.test('不带 t 时是配对页，不是看板', async () => {
+    assert.equal((await S.raw('/ui')).status, 401)
+  })
+})

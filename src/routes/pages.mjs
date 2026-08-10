@@ -22,7 +22,7 @@ export function pageRoutes(ctx) {
     'pairing', 'addDevice', 'saveConfig',
   ])
   const { config, approvals, notify, auth, publicApproval, HERE, pairing, addDevice, saveConfig } = ctx
-  const { sameToken, authorized, loginCookie } = auth
+  const { sameToken, matchDevice, authorized, loginCookie } = auth
 
   // 配对请求限流，避免局域网上有人刷屏
   let lastPairAt = 0
@@ -191,8 +191,23 @@ export function pageRoutes(ctx) {
     if (req.method === 'GET' && (path === '/ui' || path === '/ui/')) {
       // 首次带 ?t=<token> 访问 → 换成 httpOnly cookie，之后 URL 里不再出现 token
       const t = url.searchParams.get('t')
-      if (t && sameToken(t)) {
-        res.writeHead(302, { Location: '/ui', 'Set-Cookie': loginCookie(config.baseUrl) })
+      /**
+       * 两个 bug 修在这一行里：
+       *
+       * 1. **原来只认主令牌**（`sameToken(t)`），带设备令牌来的一律被打回配对页。
+       *    可设备令牌恰恰是手机手里那份——换手机、清了浏览器数据、cookie 过期
+       *    之后想重新登录，走的就是这条路，结果是「明明有令牌却一直让我配对」。
+       *
+       * 2. **cookie 里写的是主令牌**（`loginCookie(baseUrl)` 不传值就用主令牌）。
+       *    于是从 `clamicro qr` 扫码进来的手机，拿到的是**主令牌**——那把
+       *    `forget <device>` 吊销不掉、还能签发新设备的万能钥匙。
+       *    每设备令牌的整个设计因此形同虚设。
+       *
+       * 现在：谁递进来的令牌，cookie 里就写谁。递设备令牌得设备令牌，
+       * 递主令牌（CLI/二维码那条路）才是主令牌。
+       */
+      if (t && (sameToken(t) || matchDevice(t))) {
+        res.writeHead(302, { Location: '/ui', 'Set-Cookie': loginCookie(config.baseUrl, t) })
         res.end()
         return true
       }
