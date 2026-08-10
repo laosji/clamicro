@@ -59,7 +59,7 @@ async function notifyBanner(msg) {
  *
  * 声音得自己放：`display notification` 自带 sound name，HUD 没有。
  */
-function notifyNotch(msg) {
+function notifyNotch(msg, onFail) {
   // 声音交给 hud.mjs 在胶囊真正出现的那一刻发。
   // 在这里单独发过——胶囊排队/失败时照响不误，于是「听见了但没看到」。
   /**
@@ -79,6 +79,7 @@ function notifyNotch(msg) {
     ms: msg.ms ?? 2600,
     sound: msg.silent !== true,
     tint: msg.tint ?? 'plain',
+    onFail,
   })
 
   /**
@@ -147,10 +148,24 @@ export function makeNotifier(config, { notch = notifyNotch, banner = notifyBanne
     // 后者才是你不在屏幕前时唯一会留痕的那条。
     // 提醒失败绝不能影响 hook 链路，工具调用还等着这个请求返回。
     if (style === 'notch' || style === 'both') {
+      /**
+       * 刘海画不出来时**自动回落到系统横幅**。
+       *
+       * 为什么必须有这条：服务是被 nohup 起来的孤儿进程（PPID=1），拿不到
+       * 图形会话，窗口建得出来但永远不参与合成。同一份代码在终端里跑得好好的，
+       * 从服务里发就什么都没有——而声音照响，于是表现成「只听见声音」。
+       *
+       * 与其让用户在「好看但收不到」和「难看但收得到」之间自己选，
+       * 不如画得出来就用刘海、画不出来就退回横幅。**通知的第一职责是送达。**
+       */
+      // Promise.resolve 包一层：banner 不保证返回 Promise（测试里就是同步桩），
+      // 直接 .catch 会在回落路径上再炸一次——而这条路径本来就是给失败兜底的
+      const fallback = style === 'both' ? undefined : () => Promise.resolve(banner(msg)).catch(() => {})
       try {
-        notch(msg) // 不阻塞，HUD 自己 detach
+        notch(msg, fallback) // 不阻塞，HUD 自己 detach
       } catch (err) {
         console.error(`[notify] 刘海失败: ${err.message}`)
+        fallback?.()
       }
     }
     if (style === 'banner' || style === 'both') {

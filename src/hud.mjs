@@ -71,7 +71,17 @@ export function createHudQueue(run) {
       running = false
       // 非 0 退出说明胶囊根本没画出来（osascript 崩了、被杀、拿不到 WindowServer）。
       // 这类失败以前完全无声——正是这个项目反复踩的那一类，所以留一行。
-      if (code) console.error(`[hud] 提示未能显示（退出码 ${code}）`)
+      if (code) {
+        console.error(`[hud] 提示未能显示（退出码 ${code}）`)
+        // 画不出来时回落到别的通道。最常见的原因是**服务是孤儿进程**
+        // （nohup 起的，PPID=1），拿不到图形会话，窗口永远不参与合成——
+        // 而这正是本项目服务的常态。见 hud.jxa.js 里的自检。
+        try {
+          item.onFail?.()
+        } catch (err) {
+          console.error(`[hud] 回落失败: ${err.message}`)
+        }
+      }
       pump()
     }
     try {
@@ -103,6 +113,27 @@ export function createHudQueue(run) {
   }
 }
 
+/**
+ * 这个进程画得出窗口吗。
+ *
+ * **判据是 `process.ppid === 1`**——被收养的孤儿进程拿不到图形会话，
+ * AppKit 窗口建得出来（isVisible 为 true、WindowServer 也给了 windowNumber），
+ * 但永远不参与合成，屏幕上什么都没有，退出码还是 0。
+ *
+ * 而本项目的服务恰恰就是这个形态：`bin/session-start.sh` 用
+ * `nohup node server.mjs & disown` 起它，hook 脚本随即退出，服务被 launchd
+ * 收养。于是**从服务发的刘海提示一条都显示不出来，只剩声音**——
+ * 用户报的「有时候只有提示声」，主因就是这个。
+ *
+ * 为什么不用 occlusionState 自检：试过，在真实的孤儿环境里它照样带着
+ * visible 位，判不出来。ppid 是能直接观察、能复现、能解释的那个量。
+ *
+ * `clamicro start`（前台、有 shell 父进程）不受影响，刘海照常显示。
+ */
+function canDrawWindows() {
+  return process.ppid !== 1
+}
+
 function playSound() {
   try {
     spawn('afplay', ['/System/Library/Sounds/Ping.aiff'], { stdio: 'ignore' }).unref()
@@ -111,7 +142,19 @@ function playSound() {
   }
 }
 
-const hud = createHudQueue(({ icon, title, subtitle, ms, sound, tint }, done) => {
+const hud = createHudQueue((item, done) => {
+  const { icon, title, subtitle, ms, sound, tint } = item
+  // 画不出来就别装：直接走回落，别让用户以为发了个看不见的东西
+  if (!canDrawWindows()) {
+    if (sound) playSound()
+    try {
+      item.onFail?.()
+    } catch (err) {
+      console.error(`[hud] 回落失败: ${err.message}`)
+    }
+    done(0)
+    return
+  }
   const p = spawn(
     'osascript',
     ['-l', 'JavaScript', join(HERE, 'hud.jxa.js'),
@@ -140,8 +183,8 @@ const hud = createHudQueue(({ icon, title, subtitle, ms, sound, tint }, done) =>
  * HUD 是锦上添花，任何失败都不该影响调用方——尤其 hook 链路，工具调用
  * 还阻塞着等 HTTP 响应。
  */
-export function showHud({ icon = '✓', title, subtitle = '', ms = 2600, sound = false, tint = 'plain' } = {}) {
-  hud.push({ icon, title, subtitle, ms, sound, tint })
+export function showHud({ icon = '✓', title, subtitle = '', ms = 2600, sound = false, tint = 'plain', onFail } = {}) {
+  hud.push({ icon, title, subtitle, ms, sound, tint, onFail })
   return Promise.resolve(true)
 }
 

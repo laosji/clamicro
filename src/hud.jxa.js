@@ -261,6 +261,7 @@ function run(argv) {
   const easeOutBack = (t) => 1 + 2.2 * Math.pow(t - 1, 3) + 1.2 * Math.pow(t - 1, 2)
   const easeOutCubic = (t) => 1 - Math.pow(1 - t, 3)
 
+  let checked = false
   const IN = 0.34
   const OUT = 0.26
   const start = Date.now()
@@ -293,6 +294,25 @@ function run(argv) {
     if (t < holdEnd) {
       layout(W, H)
       win.setAlphaValue(1)
+      /**
+       * **自检：确认真的画出来了。**
+       *
+       * 这是整件事里最关键的一行。窗口能建、isVisible 返回 true、退出码 0，
+       * 都**不能证明屏幕上有东西**——孤儿进程（PPID=1，比如被 nohup 起来的
+       * 服务）拿不到图形会话，窗口永远不参与合成。而这正是本项目服务的形态。
+       *
+       * occlusionState 的 visible 位（1<<1）才是唯一可信的判据。不含它就
+       * 抛异常，让 osascript 以非 0 退出——上层据此回落到系统横幅。
+       *
+       * 只在展开完成后查一次：动画期间状态本来就在变。
+       */
+      if (!checked) {
+        checked = true
+        if ((Number(win.occlusionState) & 2) === 0) {
+          win.close
+          throw new Error('窗口未参与合成（多半是没有图形会话），本次提示未显示')
+        }
+      }
       return
     }
 
