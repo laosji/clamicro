@@ -160,3 +160,54 @@ test('从盘上读回的旧事件也要抹', async (t) => {
 test('noRedact 是恒等函数', () => {
   assert.equal(noRedact('abc'), 'abc')
 })
+
+const { ApprovalStore, matchKey } = await import('../src/approvals.mjs')
+
+test('审批详情同样不得带出凭证', async (t) => {
+  const mk = () => new ApprovalStore().setRedactor(makeRedactor(() => [TOKEN]))
+  const cmd = `curl -H 'Authorization: Bearer ${TOKEN}' http://x/api`
+
+  await t.test('命令原文里的令牌被抹', () => {
+    // 事件流那边补过，审批这边当时漏了——而这边更常见：命令里带凭证是日常，
+    // 而审批详情正是手机上最主要显示的东西
+    const ap = mk().create(
+      { session_id: 's', tool_name: 'Bash', tool_input: { command: cmd }, cwd: '/tmp' },
+      { autoApproveMs: 0, timeoutMs: 1000 },
+    )
+    assert.ok(!ap.detail.includes(TOKEN), `detail 里还有令牌: ${ap.detail}`)
+    assert.ok(!ap.headline.includes(TOKEN))
+    assert.ok(!ap.summary.includes(TOKEN))
+  })
+
+  await t.test('**tool_input 绝不能动** —— matchKey 靠它逐字对账', () => {
+    // 改一个字节，supersede 就永远匹配不上 PreToolUse 算出的键，
+    // 「已经执行完了却还显示待审批」的幽灵条目就回来了
+    const store = mk()
+    const ap = store.create(
+      { session_id: 's', tool_name: 'Bash', tool_input: { command: cmd }, cwd: '/tmp' },
+      { autoApproveMs: 0, timeoutMs: 1000 },
+    )
+    assert.equal(ap.tool_input.command, cmd, 'tool_input 必须逐字保留')
+    assert.equal(ap.match_key, matchKey('s', 'Bash', { command: cmd }), '对账键必须还能算得出来')
+  })
+
+  await t.test('高亮下标仍然对齐抹除后的文本', () => {
+    // 抹除会改变长度，所以必须「先截断、再抹、最后算区间」
+    const ap = mk().create(
+      { session_id: 's', tool_name: 'Bash', tool_input: { command: `rm -rf /tmp/x  # ${TOKEN}` }, cwd: '/tmp' },
+      { autoApproveMs: 0, timeoutMs: 1000 },
+    )
+    for (const sp of ap.detail_spans) {
+      assert.ok(sp.end <= ap.detail.length, `区间 ${sp.start}-${sp.end} 超出文本长度 ${ap.detail.length}`)
+      assert.ok(ap.detail.slice(sp.start, sp.end).length > 0, '区间切出来是空的，说明下标错位')
+    }
+  })
+
+  await t.test('不注入抹除器时行为不变', () => {
+    const ap = new ApprovalStore().create(
+      { session_id: 's', tool_name: 'Bash', tool_input: { command: 'echo hi' }, cwd: '/tmp' },
+      { autoApproveMs: 0, timeoutMs: 1000 },
+    )
+    assert.ok(ap.detail.includes('echo hi'))
+  })
+})

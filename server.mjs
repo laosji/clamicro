@@ -24,6 +24,16 @@ import { verifyHooks, install, HOOK_MAP } from './src/settings.mjs'
 import { appPaths } from './src/paths.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
+
+/**
+ * 这次是被 CLI 借来跑一条一次性查询（`--qr` / `--devices` / `--networks` …），
+ * 还是真的要起服务。
+ *
+ * 区别很重要：一次性进程**不该有副作用**，也**不该发通知**——它跑完就
+ * `process.exit(0)`，而 HUD 是子进程，进程一走就被带走，通知只会留在日志里。
+ */
+const ONE_SHOT = process.argv.some((a) => a.startsWith('--'))
+
 const config = loadConfig()
 const store = new Store()
 
@@ -38,8 +48,11 @@ const store = new Store()
  */
 const redact = makeRedactor(() => [config.token, ...(config.devices ?? []).map((d) => d.token)])
 store.setRedactor(redact)
+// 审批详情是同一个洞的另一半：命令里带凭证很常见，而详情正是手机上
+// 最主要显示的东西。见 ApprovalStore.setRedactor 里为什么不能动 tool_input。
 
-const approvals = new ApprovalStore()
+
+const approvals = new ApprovalStore().setRedactor(redact)
 const control = new ControlStore()
 const inbox = new Inbox()
 const notify = makeNotifier(config)
@@ -59,7 +72,7 @@ history.bind(() => ({
   store.restoreLimits(loaded.limits)
   // 一次性查询命令（status / networks / qr）只是借这个进程读数据，
   // 不该把服务端的启动日志混进它们的输出里
-  const quiet = process.argv.some((a) => a.startsWith('--'))
+  const quiet = ONE_SHOT
   if (!quiet && (restored || loaded.events.length)) {
     console.log(
       `[history] 恢复 ${restored} 条审批、${loaded.events.length} 条事件` +
@@ -94,11 +107,13 @@ approvals.on('created', () => history.touch())
 approvals.on('settled', () => history.touch())
 store.on('event', () => history.touch())
 
-setInterval(() => {
-  approvals.sweep(86_400_000) // 记录留一天，够回看昨天的操作
-  history.touch()
-  healHooks()
-}, 300_000).unref()
+if (!ONE_SHOT) {
+  setInterval(() => {
+    approvals.sweep(86_400_000) // 记录留一天，够回看昨天的操作
+    history.touch()
+    healHooks()
+  }, 300_000).unref()
+}
 
 /**
  * hooks 自愈。
@@ -152,8 +167,17 @@ function healHooks() {
     console.error(`[hooks] 自愈失败: ${err.message}`)
   }
 }
-// 启动时先查一次：多数覆盖发生在服务没跑的时候
-healHooks()
+/**
+ * 启动时先查一次：多数覆盖发生在服务没跑的时候。
+ *
+ * **只在真的起服务时做。** 第一版没加这个判断，于是 `clamicro devices`
+ * 这种纯查询命令也会改写 settings.json 并留一个备份文件——反复破坏就
+ * 反复备份，无限堆积。而且它发的那条「已修复」通知还显示不出来
+ * （一次性进程 exit 会带走 HUD 子进程）。
+ *
+ * 一句话：**只读命令不能有副作用。**
+ */
+if (!ONE_SHOT) healHooks()
 
 /**
  * 发出一条审批请求通知。
