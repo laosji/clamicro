@@ -134,6 +134,44 @@ export function install({ port, dryRun = false, statusLinePath, sessionStartPath
 }
 
 /** 只摘掉我们加过的，用户自己的条目原样保留。 */
+/**
+ * 我们的 hook 还在不在。
+ *
+ * ## 为什么需要这个
+ *
+ * hooks 装完就再也没人看过一眼。可 `~/.claude/settings.json` 是**共享的**：
+ * 别的工具也往里写、用户自己也会手改、恢复备份会整个覆盖。一旦我们的条目
+ * 没了，表现是**服务照常运行、status 一切正常、就是再也收不到任何东西**——
+ * 这正是 NOTES 里记的第 2 号复发故障（「hooks 静默失败」）。
+ *
+ * 更糟的是 SessionStart 也在里面：它一旦没了，连「打开 Claude Code 自动
+ * 拉起服务」都不再发生，而那本来是唯一会定期跑到的检查点。
+ *
+ * @returns { ok, missing: string[], statusLine: 'ours'|'other'|'missing' }
+ */
+export function verifyHooks({ port = 8765, statusLinePath } = {}) {
+  const settings = read()
+  const missing = []
+  const ours = (h) => isOurs(h, `http://127.0.0.1:${port}`) || isOursCmd(h)
+
+  for (const [event] of HOOK_MAP) {
+    const list = settings.hooks?.[event]
+    const found = Array.isArray(list) && list.some((g) => Array.isArray(g?.hooks) && g.hooks.some(ours))
+    if (!found) missing.push(event)
+  }
+  // SessionStart 是 command 类型，单独判
+  const ss = settings.hooks?.SessionStart
+  if (!Array.isArray(ss) || !ss.some((g) => Array.isArray(g?.hooks) && g.hooks.some(isOursCmd))) {
+    missing.push('SessionStart')
+  }
+
+  let statusLine = 'missing'
+  const cur = settings.statusLine?.command
+  if (cur) statusLine = isOursCmd({ type: 'command', command: cur }) ? 'ours' : 'other'
+
+  return { ok: missing.length === 0, missing, statusLine }
+}
+
 export function uninstall({ statusLinePath }) {
   const settings = read()
   const removed = []

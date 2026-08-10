@@ -110,3 +110,47 @@ test('通道抛异常不能带走 hook 链路', async (t) => {
     assert.equal(banner.calls.length, 1, '一个通道坏掉不该把另一个也拖下水')
   })
 })
+
+test('专注模式：静音但不隐藏', async (t) => {
+  const mk = (focus, cfg = {}) => {
+    const notch = spy()
+    const banner = spy()
+    const notify = makeNotifier(
+      { notify: { macNotify: true, style: 'notch', ...cfg } },
+      { notch, banner, focus: () => focus },
+    )
+    return { notify, notch, banner }
+  }
+
+  await t.test('专注开着时照样显示', async () => {
+    const { notify, notch } = mk(true)
+    await notify(MSG)
+    assert.equal(notch.calls.length, 1, '藏起来的话，待审批会卡到超时被拒')
+  })
+
+  await t.test('但标记为静音', async () => {
+    const { notify, notch } = mk(true)
+    await notify(MSG)
+    assert.equal(notch.calls[0].silent, true)
+  })
+
+  await t.test('专注关着时不动原消息', async () => {
+    const { notify, notch } = mk(false)
+    await notify(MSG)
+    assert.equal(notch.calls[0].silent, undefined)
+  })
+
+  await t.test('respectFocus: false 时无视专注', async () => {
+    const { notify, notch } = mk(true, { respectFocus: false })
+    await notify(MSG)
+    assert.equal(notch.calls[0].silent, undefined)
+  })
+
+  await t.test('原消息对象不被就地改写', async () => {
+    // 同一条 msg 会同时发给刘海和横幅，就地改会串味
+    const { notify } = mk(true)
+    const msg = { ...MSG }
+    await notify(msg)
+    assert.equal(msg.silent, undefined)
+  })
+})

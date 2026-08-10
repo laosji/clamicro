@@ -31,6 +31,9 @@
  * 好认，是因为标题永远是「谁」，事件永远在第二行——位置固定，眼睛不用找。
  */
 import { spawn } from 'node:child_process'
+import { readFileSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
 import { showHud } from './hud.mjs' // 声音也归它管，见 notifyNotch
 
 async function notifyBanner(msg) {
@@ -101,9 +104,39 @@ function notifyNotch(msg) {
  * 这一层出过的 bug 恰好是这个形状：刘海胶囊做完了，但 notify 压根没调它——
  * 代码在，注释在，就是没接线，而且不报任何错。
  */
-export function makeNotifier(config, { notch = notifyNotch, banner = notifyBanner } = {}) {
+/**
+ * 系统「专注模式 / 勿扰」开着吗。
+ *
+ * 读 macOS 自己的断言文件。开着任一专注模式时 storeAssertionRecords 非空，
+ * 关掉就没了。没有公开 API，但这个文件是稳定的，而且**纯读文件、不联网、
+ * 不起子进程**——放在 hook 链路上零成本。
+ *
+ * 读不到就当没开：宁可多响一声，也别因为一个探测失败而把提醒整个吞掉。
+ */
+function focusActive() {
+  try {
+    const p = join(homedir(), 'Library', 'DoNotDisturb', 'DB', 'Assertions.json')
+    const d = JSON.parse(readFileSync(p, 'utf8'))
+    return (d.data ?? []).some((b) => Array.isArray(b?.storeAssertionRecords) && b.storeAssertionRecords.length)
+  } catch {
+    return false
+  }
+}
+
+export function makeNotifier(config, { notch = notifyNotch, banner = notifyBanner, focus = focusActive } = {}) {
   return async function notify(msg) {
     if (!config.notify.macNotify) return
+
+    /**
+     * 专注模式下**只静音，不隐藏**。
+     *
+     * 开了专注是「别打扰我」，不是「别让我知道」——尤其待审批那条，
+     * 藏起来的代价是任务卡到超时被拒。系统通知走的也是这个逻辑：
+     * 专注模式压的是声音和横幅，不是事件本身。
+     */
+    if (config.notify.respectFocus !== false && focus()) {
+      msg = { ...msg, silent: true }
+    }
     // 认不出来就按默认走。配置里打个错字导致**一声不响什么都不弹**，
     // 是这个项目最不能接受的故障形态——你会以为它在守着。
     const raw = config.notify.style ?? 'notch'

@@ -20,6 +20,8 @@ import { hookRoutes } from './src/routes/hooks.mjs'
 import { pageRoutes } from './src/routes/pages.mjs'
 import { apiRoutes } from './src/routes/api.mjs'
 import { makeRedactor } from './src/redact.mjs'
+import { verifyHooks, install, HOOK_MAP } from './src/settings.mjs'
+import { appPaths } from './src/paths.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const config = loadConfig()
@@ -95,7 +97,63 @@ store.on('event', () => history.touch())
 setInterval(() => {
   approvals.sweep(86_400_000) // 记录留一天，够回看昨天的操作
   history.touch()
+  healHooks()
 }, 300_000).unref()
+
+/**
+ * hooks 自愈。
+ *
+ * `~/.claude/settings.json` 是**共享的**：别的工具往里写、用户手改、恢复
+ * 备份整个覆盖——我们的条目随时可能消失。而消失之后的表现是**服务照常
+ * 运行、status 一切正常、就是再也收不到任何东西**。这正是 NOTES 里的
+ * 第 2 号复发故障。
+ *
+ * ## 只补「被覆盖」，不补「你故意卸载的」
+ *
+ * 判据是：**还剩至少一条我们的 hook**。
+ *   · 部分缺失 → 多半是被别的写入覆盖掉了，补回来
+ *   · 全部缺失 → 看起来就是 `clamicro uninstall`，不该跟用户对着干，
+ *     只在日志里说一声，且**只说一次**，不刷屏
+ *
+ * 不这样区分的话，卸载完只要服务还活着，五分钟后 hooks 又自己回来了——
+ * 那比不自愈更糟。
+ */
+let warnedHooksGone = false
+function healHooks() {
+  try {
+    const v = verifyHooks({ port: config.port, statusLinePath: appPaths().statusLine })
+    if (v.ok) {
+      warnedHooksGone = false
+      return
+    }
+    const allGone = v.missing.length >= HOOK_MAP.length + 1
+    if (allGone) {
+      if (!warnedHooksGone) {
+        warnedHooksGone = true
+        console.warn('[hooks] settings.json 里已经没有任何 clamicro 的 hook —— 视为你卸载了，不自动补回')
+      }
+      return
+    }
+    console.warn(`[hooks] 检测到缺失：${v.missing.join('、')}，正在补回`)
+    const { statusLine, sessionStart } = appPaths()
+    install({ port: config.port, statusLinePath: statusLine, sessionStartPath: sessionStart })
+    console.warn('[hooks] ✓ 已补回（原文件已备份）')
+    notify({
+      title: 'Clamicro',
+      icon: '⚠',
+      tint: 'warn',
+      compact: true,
+      short: 'hooks 已修复',
+      subtitle: 'hooks 被覆盖，已自动补回',
+      body: `缺失：${v.missing.join('、')}`,
+    }).catch(() => {})
+  } catch (err) {
+    // 自愈本身不能把服务搞挂
+    console.error(`[hooks] 自愈失败: ${err.message}`)
+  }
+}
+// 启动时先查一次：多数覆盖发生在服务没跑的时候
+healHooks()
 
 /**
  * 发出一条审批请求通知。

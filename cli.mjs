@@ -342,6 +342,21 @@ switch (cmd) {
       }
     }
 
+    // hooks 是整条链路的入口。它们没了的表现是「服务运行中 ✓、什么都收不到」，
+    // 而 status 以前只看服务活没活——最该看的那一项反而不在上面。
+    try {
+      const { verifyHooks } = await appImport('settings.mjs')
+      const v = verifyHooks({ port: p })
+      if (!v.ok) {
+        console.log(c.r(`  ⚠️ hooks    缺失 ${v.missing.length} 项：${v.missing.join('、')}`))
+        console.log(c.dim('            服务照常跑，但收不到任何事件。修复： npx clamicro install'))
+      } else {
+        console.log(`  hooks     ${c.g('完整')}${v.statusLine === 'ours' ? '' : c.y(`  · statusLine 被别的工具占用，额度无法采集`)}`)
+      }
+    } catch {
+      /* 读不到 settings.json 的话，install 那步本来就会报 */
+    }
+
     // ignoreCwds 是**完全旁路**：列在里面的目录一条审批都不会拦。
     // 它本来只给「开发 clamicro 自身」用（否则每跑一条命令都在等自己审批），
     // 但填了之后没有任何地方显示——整个产品在那些目录下静默失效，
