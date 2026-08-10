@@ -28,6 +28,20 @@ function subStateForTool(toolName, toolInput) {
   return 'Working'
 }
 
+/**
+ * 额度后缀，形如「 · 33%」。拿不到就返回空串——空闲状态不该因为额度缺失
+ * 而显示成「已完成 · NaN%」或者干脆不弹。
+ *
+ * 只取 5 小时窗口：7 天窗口变化太慢，放在一闪而过的胶囊上没有决策价值。
+ */
+function quotaSuffix(limits) {
+  // 字段叫 pct 不叫 used_percentage —— applyStatusLine 存进来时就改过名了。
+  // 第一版照着 hook 的原始载荷写成 used_percentage，读出来永远 undefined，
+  // 表现是「额度明明有，胶囊上就是不显示」，不报错。测试抓到的。
+  const pct = limits?.five_hour?.pct
+  return Number.isFinite(pct) ? ` · ${Math.round(pct)}%` : ''
+}
+
 function truncate(s, n) {
   if (typeof s !== 'string') return ''
   return s.length <= n ? s : s.slice(0, n - 1) + '…'
@@ -216,11 +230,19 @@ export class Store extends EventEmitter {
           notify = {
             title: 'Clamicro',
             icon: '✓',
-            // 完成是**状态**：横向一条只说状态本身。
-            // 项目名不放这儿——横向态是给余光扫的，「已完成」三个字就够；
-            // 想知道是哪个项目，纵向的通知和手机看板里都有。
+            /**
+             * 完成是**状态**：横向一条只说状态本身。
+             *
+             * 项目名不放这儿——横向态是给余光扫的，「已完成」三个字就够；
+             * 想知道是哪个项目，纵向通知和手机看板里都有。
+             *
+             * 但额度要带上：任务刚跑完正是你会抬头看一眼的时刻，也正是
+             * 「还能不能再来一轮」这个问题最有意义的时刻。平时它藏在
+             * statusLine 和手机看板里，得专门去看。
+             */
             compact: true,
-            short: '已完成',
+            short: `已完成${quotaSuffix(this.#accountLimits)}`,
+            tint: 'ok',
             subtitle: `${label} 已完成`,
             body: msg || `耗时 ${Math.round(elapsed / 1000)}s`,
             level: 'active',
@@ -235,7 +257,7 @@ export class Store extends EventEmitter {
         this.#touch(s, { state: STATE.ERROR, sub_state: null, last_message: msg, turn_started_at: null })
         this.#log(id, 'error', msg)
         if (notifyConfig.onError) {
-          notify = { title: 'Clamicro', icon: '✕', subtitle: `${label} 出错`, body: msg }
+          notify = { title: 'Clamicro', icon: '✕', tint: 'danger', subtitle: `${label} 出错`, body: msg }
         }
         break
       }
@@ -365,6 +387,7 @@ export class Store extends EventEmitter {
           icon: '⚡️',
           compact: true,
           short: `额度 ${Math.round(five.used_percentage)}%`,
+          tint: 'warn',
           subtitle: `额度接近上限`,
           body: `5 小时窗口已用 ${Math.round(five.used_percentage)}%` +
             (mins !== null ? `，约 ${mins} 分钟后重置` : ''),

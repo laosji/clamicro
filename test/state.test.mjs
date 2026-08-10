@@ -322,3 +322,36 @@ test('事件上限：不会无限增长', () => {
   for (let i = 0; i < 2500; i++) hook(s, 'session-start')
   assert.ok(s.allEvents().length <= 2000, `事件数 ${s.allEvents().length} 超过上限`)
 })
+
+test('完成状态带上额度——任务跑完正是你会看一眼的时刻', async (t) => {
+  const mk = () => new Store()
+
+  await t.test('有额度数据时附在状态后面', () => {
+    const s = mk()
+    s.applyStatusLine(
+      { session_id: 'x', rate_limits: { five_hour: { used_percentage: 33.4, resets_at: 0 } } },
+      { quotaWarnPct: 0 },
+    )
+    s.session('x').turn_started_at = Date.now() - 60_000
+    const { notify } = s.applyHook('stop', { session_id: 'x', last_assistant_message: '好了' },
+      { onStop: true, minTurnMs: 0 })
+    assert.equal(notify.short, '已完成 · 33%')
+  })
+
+  await t.test('拿不到额度时只显示状态，不显示 NaN', () => {
+    // statusLine 没上报过（新开会话之前）是常态，不能因此把胶囊弄坏
+    const s = mk()
+    s.session('x').turn_started_at = Date.now() - 60_000
+    const { notify } = s.applyHook('stop', { session_id: 'x', last_assistant_message: '好了' },
+      { onStop: true, minTurnMs: 0 })
+    assert.equal(notify.short, '已完成')
+  })
+
+  await t.test('仍然是横向态且用成功色', () => {
+    const s = mk()
+    s.session('x').turn_started_at = Date.now() - 60_000
+    const { notify } = s.applyHook('stop', { session_id: 'x' }, { onStop: true, minTurnMs: 0 })
+    assert.equal(notify.compact, true)
+    assert.equal(notify.tint, 'ok')
+  })
+})

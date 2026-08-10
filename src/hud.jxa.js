@@ -25,9 +25,22 @@ ObjC.import('QuartzCore')
 const TOP_R = 15
 const BOT_R = 20
 
+/**
+ * 状态色。用 Apple 深色模式下的系统色，不是随手调的——
+ * 这些值是为「深色背景上要看得清、但不刺眼」定的，而胶囊固定纯黑。
+ */
+const TINTS = {
+  ok: [0.196, 0.843, 0.294], // systemGreen  完成
+  warn: [1.0, 0.839, 0.039], // systemYellow 额度、需要注意
+  danger: [1.0, 0.271, 0.227], // systemRed  出错、高风险
+  info: [0.392, 0.824, 1.0], // systemTeal   配对之类的中性事件
+  plain: [1, 1, 1],
+}
+
 function run(argv) {
-  const [icon = '✓', title = '', subtitle = '', msArg = '2600'] = argv
+  const [icon = '✓', title = '', subtitle = '', msArg = '2600', tintName = 'plain'] = argv
   const ms = Number(msArg) || 2600
+  const tint = TINTS[tintName] || TINTS.plain
 
   $.NSApplication.sharedApplication.setActivationPolicy($.NSApplicationActivationPolicyAccessory)
 
@@ -136,7 +149,7 @@ function run(argv) {
   const box = $.NSView.alloc.initWithFrame($.NSMakeRect(0, 0, W, H))
   body.addSubview(box)
 
-  const label = (text, rect, size, weight, alpha) => {
+  const label = (text, rect, size, weight, alpha, rgb = null) => {
     const f = $.NSTextField.alloc.initWithFrame(rect)
     f.setStringValue(text)
     f.setBezeled(false)
@@ -144,8 +157,10 @@ function run(argv) {
     f.setEditable(false)
     f.setSelectable(false)
     f.setFont($.NSFont.systemFontOfSizeWeight(size, weight))
-    // 强制白色：这个面板固定深色，用 labelColor 会跟随系统而在浅色下变黑
-    f.setTextColor($.NSColor.whiteColor.colorWithAlphaComponent(alpha))
+    // 强制指定颜色：这个面板固定深色，用 labelColor 会跟随系统而在浅色下变黑。
+    // rgb 给了就用状态色，没给就是白色。
+    const [r, g, b] = rgb ?? [1, 1, 1]
+    f.setTextColor($.NSColor.colorWithSRGBRedGreenBlueAlpha(r, g, b, alpha))
     f.setLineBreakMode($.NSLineBreakByTruncatingTail)
     box.addSubview(f)
     return f
@@ -161,17 +176,20 @@ function run(argv) {
     ic.setAlignment($.NSTextAlignmentCenter)
     const textX = padX + 38
     const textW = W - textX - padX
-    label(title, $.NSMakeRect(textX, midY + 1, textW, 17), 12.5, $.NSFontWeightSemibold, 1)
+    label(title, $.NSMakeRect(textX, midY + 1, textW, 17), 12.5, $.NSFontWeightSemibold, 1, tint)
+    // 细节行不染色：它多半是命令原文，染上颜色反而干扰阅读
     label(subtitle, $.NSMakeRect(textX, midY - 17, textW, 15), 11, $.NSFontWeightRegular, 0.62)
   } else {
     // ── 紧凑态：内容摆在刘海**两侧** ──
     // 中间那块是物理刘海，放什么都看不见。所以图标贴左、文字贴右，
     // 刘海正好夹在中间——这也是 Dynamic Island 紧凑态在做的事。
     const midY = H / 2
-    const ic = label(icon, $.NSMakeRect(TOP_R + 6, midY - 13, 30, 26), 17, $.NSFontWeightRegular, 1)
+    // 图标和状态文字同色。注意 emoji（⚠️ ⚡️ 📱）自带颜色不受 textColor 影响，
+    // 只有 ✓ ✕ 这类**字形**图标会跟着变——所以状态类的图标优先用字形。
+    const ic = label(icon, $.NSMakeRect(TOP_R + 6, midY - 13, 30, 26), 17, $.NSFontWeightRegular, 1, tint)
     ic.setAlignment($.NSTextAlignmentCenter)
     const textX = TOP_R + SIDE_ICON + notchW
-    const t = label(title, $.NSMakeRect(textX, midY - 9, SIDE_TEXT - 12, 18), 12.5, $.NSFontWeightMedium, 0.95)
+    const t = label(title, $.NSMakeRect(textX, midY - 9, SIDE_TEXT - 12, 18), 12.5, $.NSFontWeightMedium, 1, tint)
     t.setAlignment($.NSTextAlignmentLeft)
   }
 

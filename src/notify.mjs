@@ -75,6 +75,7 @@ function notifyNotch(msg) {
     subtitle: msg.compact ? '' : (msg.subtitle ? msg.body : ''),
     ms: msg.ms ?? 2600,
     sound: msg.silent !== true,
+    tint: msg.tint ?? 'plain',
   })
 }
 

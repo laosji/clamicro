@@ -111,10 +111,11 @@ function playSound() {
   }
 }
 
-const hud = createHudQueue(({ icon, title, subtitle, ms, sound }, done) => {
+const hud = createHudQueue(({ icon, title, subtitle, ms, sound, tint }, done) => {
   const p = spawn(
     'osascript',
-    ['-l', 'JavaScript', join(HERE, 'hud.jxa.js'), String(icon), String(title ?? ''), String(subtitle), String(ms)],
+    ['-l', 'JavaScript', join(HERE, 'hud.jxa.js'),
+      String(icon), String(title ?? ''), String(subtitle), String(ms), String(tint ?? 'plain')],
     // **绝对不能加 detached: true**。它会 setsid() 把子进程放进新会话，
     // 那个会话拿不到 WindowServer——osascript 照常退出码 0，窗口对象也
     // 建得出来，但屏幕上什么都不会有。实测直接在终端跑能弹，
@@ -139,8 +140,8 @@ const hud = createHudQueue(({ icon, title, subtitle, ms, sound }, done) => {
  * HUD 是锦上添花，任何失败都不该影响调用方——尤其 hook 链路，工具调用
  * 还阻塞着等 HTTP 响应。
  */
-export function showHud({ icon = '✓', title, subtitle = '', ms = 2600, sound = false } = {}) {
-  hud.push({ icon, title, subtitle, ms, sound })
+export function showHud({ icon = '✓', title, subtitle = '', ms = 2600, sound = false, tint = 'plain' } = {}) {
+  hud.push({ icon, title, subtitle, ms, sound, tint })
   return Promise.resolve(true)
 }
 
