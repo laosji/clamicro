@@ -59,10 +59,20 @@ async function notifyBanner(msg) {
 function notifyNotch(msg) {
   // 声音交给 hud.mjs 在胶囊真正出现的那一刻发。
   // 在这里单独发过——胶囊排队/失败时照响不误，于是「听见了但没看到」。
+  /**
+   * 横向还是纵向，按**语义**分，不按「body 是不是空的」分。
+   *
+   *   compact（状态）→ 横向一条。图标已经说明了是什么状态，文字只用来
+   *     回答「哪个项目」，所以要短——横向那块只有 168pt，长了就截断。
+   *   否则（需要你看内容）→ 纵向展开，标题 + 细节两行。
+   *
+   * 「已完成」曾经因为附带了一句助手消息就走纵向——它本来就是个状态，
+   * 不该只因为 body 非空就撑成一整块。
+   */
   showHud({
     icon: msg.icon ?? '✓',
-    title: msg.subtitle || msg.title || 'Clamicro',
-    subtitle: msg.subtitle ? msg.body : '',
+    title: msg.compact ? (msg.short || msg.subtitle || 'Clamicro') : (msg.subtitle || msg.title || 'Clamicro'),
+    subtitle: msg.compact ? '' : (msg.subtitle ? msg.body : ''),
     ms: msg.ms ?? 2600,
     sound: msg.silent !== true,
   })

@@ -216,6 +216,9 @@ export class Store extends EventEmitter {
           notify = {
             title: 'Clamicro',
             icon: '✓',
+            // 完成是**状态**：横向一条，图标说明「完成了」，文字只说「哪个」
+            compact: true,
+            short: label,
             subtitle: `${label} 已完成`,
             body: msg || `耗时 ${Math.round(elapsed / 1000)}s`,
             level: 'active',
@@ -358,6 +361,8 @@ export class Store extends EventEmitter {
           // 图标单独给，别塞进标题文字：刘海胶囊有专门的图标位。
           title: 'Clamicro',
           icon: '⚡️',
+          compact: true,
+          short: `额度 ${Math.round(five.used_percentage)}%`,
           subtitle: `额度接近上限`,
           body: `5 小时窗口已用 ${Math.round(five.used_percentage)}%` +
             (mins !== null ? `，约 ${mins} 分钟后重置` : ''),

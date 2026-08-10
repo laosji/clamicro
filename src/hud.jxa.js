@@ -37,12 +37,42 @@ function run(argv) {
   // 没刘海的机器（外接屏、老 Mac）退回菜单栏高度，视觉上等价
   const topInset = notch.h || menubarHeight(screen) || 24
 
+  /**
+   * ## 两种形态
+   *
+   * 有没有第二行，决定的不只是高度，而是**整条提示往哪个方向长**：
+   *
+   *   紧凑（只有一行状态）→ **横向**。高度就是刘海本身，内容摆在刘海
+   *     **两侧**：图标在左、文字在右。刘海物理上遮住中间那块，所以中间
+   *     不能放东西——这也正是 Dynamic Island 紧凑态的做法。
+   *
+   *   展开（带细节）→ **纵向**。宽度先快速到位，然后往下掉出一整块，
+   *     内容压在刘海下方。
+   *
+   * 两种形态的动画曲线也不同，见下面的 animate：横向只动宽度，纵向以
+   * 高度为主。让「这是个状态」和「这需要你看一眼」在余光里就能分开。
+   */
   const hasSub = subtitle.length > 0
-  const contentH = hasSub ? 46 : 32
-  const H = topInset + contentH
-  // 主体必须明显宽过刘海，刘海才会「嵌在里面」而不是和胶囊并排。
-  // 两侧再各留 TOP_R 给反向曲线张开的部分。
-  const bodyW = Math.max((notch.w || 185) + 120, hasSub ? 330 : 290)
+  const notchW = notch.w || 185
+
+  // 紧凑态：高度贴着刘海，两侧各留出一块放内容
+  const SIDE_ICON = 38
+  /**
+   * 文字区按**实际字宽**算，不用固定值。
+   *
+   * 固定 168pt 的话，「clamicro」这种短标签也要占满，整条横着拉得老长，
+   * 而横向态的意义就是「一眼扫过、不占地方」。这里先量一遍再定宽。
+   *
+   * 上限 150：再长就该用纵向了；下限 54：太窄了胶囊两头不对称，难看。
+   */
+  const SIDE_TEXT = hasSub ? 0 : Math.min(150, Math.max(54, measureText(title, 12.5) + 18))
+  // 展开态：内容在刘海下方
+  const contentH = 46
+
+  const H = hasSub ? topInset + contentH : Math.max(topInset, 30)
+  const bodyW = hasSub
+    ? Math.max(notchW + 150, 340)
+    : SIDE_ICON + notchW + SIDE_TEXT
   const W = bodyW + TOP_R * 2
 
   const win = $.NSPanel.alloc.initWithContentRectStyleMaskBackingDefer(
@@ -121,20 +151,28 @@ function run(argv) {
     return f
   }
 
-  // 内容整体压在刘海**下方**：那一条被摄像头占着，放字会被切掉。
-  // 左右各让开 TOP_R，那是反向曲线张开的地方，压上去会被切。
-  const padX = TOP_R + 16
-  const midY = contentH / 2
-  const iconField = label(icon, $.NSMakeRect(padX, midY - 15, 30, 30), 20, $.NSFontWeightRegular, 1)
-  iconField.setAlignment($.NSTextAlignmentCenter)
-
-  const textX = padX + 36
-  const textW = W - textX - padX
   if (hasSub) {
+    // ── 展开态：内容压在刘海**下方** ──
+    // 刘海那一条被摄像头占着，放字会被切掉。左右各让开 TOP_R，
+    // 那是反向曲线张开的地方，压上去也会被切。
+    const padX = TOP_R + 18
+    const midY = contentH / 2
+    const ic = label(icon, $.NSMakeRect(padX, midY - 15, 30, 30), 20, $.NSFontWeightRegular, 1)
+    ic.setAlignment($.NSTextAlignmentCenter)
+    const textX = padX + 38
+    const textW = W - textX - padX
     label(title, $.NSMakeRect(textX, midY + 1, textW, 17), 12.5, $.NSFontWeightSemibold, 1)
     label(subtitle, $.NSMakeRect(textX, midY - 17, textW, 15), 11, $.NSFontWeightRegular, 0.62)
   } else {
-    label(title, $.NSMakeRect(textX, midY - 8, textW, 17), 12.5, $.NSFontWeightSemibold, 1)
+    // ── 紧凑态：内容摆在刘海**两侧** ──
+    // 中间那块是物理刘海，放什么都看不见。所以图标贴左、文字贴右，
+    // 刘海正好夹在中间——这也是 Dynamic Island 紧凑态在做的事。
+    const midY = H / 2
+    const ic = label(icon, $.NSMakeRect(TOP_R + 6, midY - 13, 30, 26), 17, $.NSFontWeightRegular, 1)
+    ic.setAlignment($.NSTextAlignmentCenter)
+    const textX = TOP_R + SIDE_ICON + notchW
+    const t = label(title, $.NSMakeRect(textX, midY - 9, SIDE_TEXT - 12, 18), 12.5, $.NSFontWeightMedium, 0.95)
+    t.setAlignment($.NSTextAlignmentLeft)
   }
 
   /**
@@ -144,15 +182,19 @@ function run(argv) {
    * SwiftUI 坐标系里（y 向下），所以这里上下是镜像过的。
    */
   const shape = (w, h) => {
+    // 半径必须按当前高度夹住。紧凑态只有 33pt 高，而 TOP_R + BOT_R = 35——
+    // 不夹的话路径自交，画出来是一团乱七八糟的东西。
+    const tr = Math.min(TOP_R, h / 2)
+    const br = Math.min(BOT_R, h - tr, w / 2 - tr)
     const p = $.CGPathCreateMutable()
     $.CGPathMoveToPoint(p, null, 0, h)
-    $.CGPathAddQuadCurveToPoint(p, null, TOP_R, h, TOP_R, h - TOP_R) // 左上：外张
-    $.CGPathAddLineToPoint(p, null, TOP_R, BOT_R)
-    $.CGPathAddQuadCurveToPoint(p, null, TOP_R, 0, TOP_R + BOT_R, 0) // 左下：普通圆角
-    $.CGPathAddLineToPoint(p, null, w - TOP_R - BOT_R, 0)
-    $.CGPathAddQuadCurveToPoint(p, null, w - TOP_R, 0, w - TOP_R, BOT_R) // 右下
-    $.CGPathAddLineToPoint(p, null, w - TOP_R, h - TOP_R)
-    $.CGPathAddQuadCurveToPoint(p, null, w - TOP_R, h, w, h) // 右上：外张
+    $.CGPathAddQuadCurveToPoint(p, null, tr, h, tr, h - tr) // 左上：外张
+    $.CGPathAddLineToPoint(p, null, tr, br)
+    $.CGPathAddQuadCurveToPoint(p, null, tr, 0, tr + br, 0) // 左下：普通圆角
+    $.CGPathAddLineToPoint(p, null, w - tr - br, 0)
+    $.CGPathAddQuadCurveToPoint(p, null, w - tr, 0, w - tr, br) // 右下
+    $.CGPathAddLineToPoint(p, null, w - tr, h - tr)
+    $.CGPathAddQuadCurveToPoint(p, null, w - tr, h, w, h) // 右上：外张
     $.CGPathCloseSubpath(p)
     return p
   }
@@ -176,8 +218,9 @@ function run(argv) {
 
   // 起始形态就是刘海本身：从它「长出来」，而不是凭空淡入。
   // 这是这类 HUD 最容易辨认的一点，也是纯 alpha 淡入做不出来的。
-  const W0 = (notch.w || 185) + TOP_R * 2
-  const H0 = topInset
+  const W0 = notchW + TOP_R * 2
+  // 紧凑态的高度全程等于终高（就是刘海），起点终点一致才不会有竖直方向的跳动
+  const H0 = hasSub ? topInset : H
   layout(W0, H0)
   win.orderFrontRegardless
 
@@ -209,9 +252,22 @@ function run(argv) {
     const t = (Date.now() - start) / 1000
 
     if (t < IN) {
-      const e = easeOutBack(t / IN)
-      layout(W0 + (W - W0) * e, H0 + (H - H0) * e)
-      win.setAlphaValue(Math.min(1, (t / IN) * 3)) // 先出现再展开，别在半透明状态下变形
+      const k = t / IN
+      win.setAlphaValue(Math.min(1, k * 3)) // 先出现再展开，别在半透明状态下变形
+      if (hasSub) {
+        /**
+         * 纵向：宽度**先**用一条快曲线到位（前 45% 就走完），高度随后带回弹
+         * 掉下来。主视觉是往下长的那一下。
+         *
+         * 两个维度同速的话，看起来只是「一个方块整体变大」，方向感就没了。
+         */
+        const wk = easeOutCubic(Math.min(1, k / 0.45))
+        const hk = easeOutBack(k)
+        layout(W0 + (W - W0) * wk, H0 + (H - H0) * hk)
+      } else {
+        // 横向：高度全程不动（就是刘海本身），只有宽度向两侧推开
+        layout(W0 + (W - W0) * easeOutBack(k), H)
+      }
       return
     }
 
@@ -222,9 +278,16 @@ function run(argv) {
       return
     }
 
-    // 收回去也回到刘海形态，而不是原地消失
-    const e = easeOutCubic(Math.min(1, (t - holdEnd) / OUT))
-    layout(W - (W - W0) * e, H - (H - H0) * e)
+    // 收回去也回到刘海形态，而不是原地消失。方向和进来时一致：
+    // 横向的收成一条，纵向的先收高度。
+    const k = Math.min(1, (t - holdEnd) / OUT)
+    const e = easeOutCubic(k)
+    if (hasSub) {
+      const hk = easeOutCubic(Math.min(1, k / 0.7)) // 高度先收，宽度殿后
+      layout(W - (W - W0) * e, H - (H - H0) * hk)
+    } else {
+      layout(W - (W - W0) * e, H)
+    }
     win.setAlphaValue(1 - e)
     if (e >= 1) {
       timer.invalidate
@@ -285,6 +348,27 @@ function notchSize(screen) {
     return { w: Math.ceil(Number(screen.frame.size.width) - l - r), h: Math.ceil(top) }
   } catch {
     return { w: 0, h: 0 }
+  }
+}
+
+/**
+ * 量一段文字在指定字号下的宽度（pt）。
+ *
+ * 用一个不上屏的 NSTextField + sizeToFit —— 比手算字符数靠谱得多：
+ * 中文、英文、emoji 的宽度差好几倍，按字符数估会让胶囊忽宽忽窄。
+ */
+function measureText(text, size) {
+  try {
+    const f = $.NSTextField.alloc.initWithFrame($.NSMakeRect(0, 0, 400, 24))
+    f.setStringValue(String(text ?? ''))
+    f.setBezeled(false)
+    f.setDrawsBackground(false)
+    f.setEditable(false)
+    f.setFont($.NSFont.systemFontOfSizeWeight(size, $.NSFontWeightMedium))
+    f.sizeToFit
+    return Number(f.frame.size.width) || 90
+  } catch {
+    return 90
   }
 }
 
