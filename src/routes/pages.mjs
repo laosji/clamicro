@@ -336,6 +336,18 @@ export function pageRoutes(ctx) {
       return true
     }
 
+    /**
+     * 新手引导。三屏三个路由，不是同一屏的分步显示——中途切走再回来能从
+     * 中断的那一步继续（进度记在 localStorage，首页渲染前据此重定向回来）。
+     *
+     * 必须已登录：这几屏讲的是「你现在能做什么」，对还没配对的人毫无意义，
+     * 而且第三屏要真的创建一条审批。未登录一律回配对页。
+     */
+    if (req.method === 'GET' && /^\/ui\/onboarding\/[123]$/.test(path)) {
+      html(res, authorized(req) ? 200 : 401, page(authorized(req) ? 'onboarding.html' : 'pair.html'))
+      return true
+    }
+
     if (req.method === 'GET' && path === '/ui/settings') {
       if (!authorized(req)) {
         html(res, 401, '<h1>需要访问口令</h1><p>请先从 /ui 进入</p>')

@@ -56,26 +56,7 @@
   }
   .steps b{color:var(--fg); font-weight:600}
   .steps li + li{margin-top:2px}
-  /* 加到主屏幕的提示。放在最下面：它是「以后更方便」，不是「现在要做」，
-     排在配对步骤前面会抢掉主线 */
-  .a2hs{
-    margin-top:26px; padding:14px 16px; border-radius:10px;
-    background:var(--monobg); border:1px dashed var(--line);
-    font-size:13.5px; line-height:1.6; color:var(--dim); text-align:left;
-  }
-  .a2hs b{color:var(--fg); font-weight:600}
-  .a2hs .k{
-    display:inline-block; padding:1px 6px; margin:0 1px; border-radius:5px;
-    background:var(--card); border:1px solid var(--line); color:var(--fg);
-    font-size:12.5px;
-  }
-  /* 按钮必须独占一行。inline 流下来会被挤在警告文字的末尾，
-     看着像句子的一部分而不是一个可点的东西 */
-  .a2hs button{
-    display:block; width:auto; margin:12px 0 0; padding:9px 16px;
-    font-size:14px; border-radius:9px;
-  }
-  .a2hs .warn{display:block; margin-top:6px; opacity:.8}
+
 </style>
 <link rel="manifest" href="/ui/manifest.webmanifest">
 <link rel="apple-touch-icon" href="/ui/icons/icon-180.png">
@@ -125,71 +106,13 @@
   <pre id="cmd">…</pre>
 </div>
 
-<!--
-  「加到主屏幕」解决的是**第二次以后**的问题：这个地址带端口，没人记得住，
-  而且它不在任何 App 列表里——下次想打开只能翻浏览器历史。加成图标之后
-  它就是一个能点的东西。
 
-  默认藏起来，由 JS 决定要不要显示：
-    · 已经是独立窗口打开的（standalone）→ 已经装过了，再提示就是噪音
-    · Android/Chrome 会给 beforeinstallprompt，可以直接弹系统安装框
-    · iOS 没有那个事件，只能给操作说明——但它是这个产品的主力平台
--->
-<div class="a2hs" id="a2hs" hidden>
-  <b>装到主屏幕，下次一点就开</b><br>
-  <span id="a2hsHow"></span>
-  <button id="a2hsBtn" hidden>添加到主屏幕</button>
-</div>
 
 <script>
 const $ = (id) => document.getElementById(id);
 fetch('/api/pair/hint').then((r) => r.json()).then((d) => ($('cmd').textContent = d.command));
 
-/**
- * 加到主屏幕。
- *
- * 这个地址带端口（`:8765`），没人记得住，而且它不出现在任何 App 列表里——
- * 下次想打开只能翻浏览器历史。加成图标之后它就是一个能点的东西。
- *
- * 一个真实的坑要说出来：图标记住的是**你当时打开的那个地址**。用 IP 加的话，
- * 路由器重新分配 IP 之后那个图标就打不开了；用 `.local` 主机名加的话，
- * 换 Wi-Fi、换 IP 都还有效。所以提示里明确让人用 .local 那个地址。
- */
-(function initA2HS() {
-  const box = $('a2hs');
-  // 已经是从主屏幕图标打开的 → 装过了，再提示就是噪音
-  const standalone = window.matchMedia('(display-mode: standalone)').matches
-    || window.navigator.standalone === true;
-  if (standalone) return;
 
-  const iOS = /iPad|iPhone|iPod/.test(navigator.userAgent)
-    || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-  const isLocal = location.hostname.endsWith('.local');
-  // 用 IP 加的图标会在路由器重新分配 IP 之后失效，这一句必须说
-  const warn = isLocal ? '' :
-    '<span class="warn">这个地址是 IP，换网或重启路由器后可能失效；'
-    + '用 <b>.local</b> 那个地址添加更稳。</span>';
-
-  box.hidden = false;
-  $('a2hsHow').innerHTML = iOS
-    ? '在 Safari 里点底部的<span class="k">分享</span>，选<span class="k">添加到主屏幕</span>。' + warn
-    : '在浏览器菜单里选<span class="k">添加到主屏幕</span>（或「安装应用」）。' + warn;
-
-  // Android/Chrome 能直接弹系统安装框；iOS 没有这个事件，只能给说明
-  let deferred = null;
-  window.addEventListener('beforeinstallprompt', (e) => {
-    e.preventDefault();
-    deferred = e;
-    $('a2hsBtn').hidden = false;
-  });
-  $('a2hsBtn').onclick = async () => {
-    if (!deferred) return;
-    $('a2hsBtn').hidden = true;
-    deferred.prompt();
-    await deferred.userChoice;
-    deferred = null;
-  };
-})();
 
 $('pair').onclick = async function () {
   this.disabled = true;

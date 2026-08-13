@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b0d10" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f7f8fa" media="(prefers-color-scheme: light)">
+<title>开始使用 · Clamicro</title>
+<link rel="manifest" href="/ui/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/ui/icons/icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Clamicro">
+<style>
+  :root{
+    --bg:#f7f8fa; --card:#fff; --fg:#12151a; --dim:#6b7280; --line:#e4e7ec;
+    --monobg:#f0f2f5; --ok:#0a7d34; --accent:#1570ef;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --bg:#0b0d10; --card:#14181d; --fg:#e8eaed; --dim:#8b93a1; --line:#242a32;
+      --monobg:#0f1318; --ok:#4ade80; --accent:#60a5fa;
+    }
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent}
+  html{touch-action:manipulation; -webkit-text-size-adjust:100%}
+  body{
+    margin:0; background:var(--bg); color:var(--fg); min-height:100vh;
+    font:16px/1.55 -apple-system,BlinkMacSystemFont,"PingFang SC","Helvetica Neue",sans-serif;
+    padding:calc(46px + env(safe-area-inset-top)) 20px calc(28px + env(safe-area-inset-bottom));
+    max-width:520px; margin-inline:auto;
+  }
+  h1{font-size:21px; margin:0 0 8px; font-weight:700}
+  p{color:var(--dim); font-size:14.5px; margin:0 0 10px}
+  p b{color:var(--fg)}
+
+  /* 进度点：三屏是三个路由，人需要知道自己在哪一步、还剩几步 */
+  .stepdots{display:flex; gap:6px; margin-bottom:22px}
+  .stepdots i{width:6px; height:6px; border-radius:50%; background:var(--line); transition:width .2s}
+  .stepdots i.on{background:var(--accent); width:16px; border-radius:3px}
+
+  .connected{
+    display:flex; align-items:center; gap:9px; margin-bottom:26px;
+    font-size:13.5px; color:var(--ok); font-weight:600;
+  }
+  .connected .cdot{
+    width:7px; height:7px; border-radius:50%; background:var(--ok);
+    box-shadow:0 0 6px var(--ok); flex:0 0 auto;
+  }
+
+  button.primary{
+    width:100%; padding:16px; border-radius:13px; cursor:pointer; margin-top:24px;
+    font:600 16px -apple-system,"PingFang SC",sans-serif;
+    background:var(--accent); color:#fff; border:none;
+  }
+  button.primary:active{opacity:.85}
+  button.primary:disabled{opacity:.5}
+  .skip{
+    display:block; text-align:center; margin-top:16px; font-size:14px;
+    color:var(--dim); font-weight:600; text-decoration:none; padding:8px;
+  }
+
+  .caplist{margin:16px 0 6px}
+  .cap{display:flex; align-items:center; gap:11px; padding:12px 0; border-bottom:1px solid var(--line)}
+  .cap:last-child{border-bottom:none}
+  .cap .ic{
+    width:32px; height:32px; border-radius:9px; flex:0 0 auto;
+    background:var(--monobg); display:flex; align-items:center; justify-content:center; font-size:15px;
+  }
+  .cap .tx{font-size:14.5px; font-weight:500}
+  .devicenote{
+    margin-top:18px; padding:12px 13px; border-radius:11px;
+    background:var(--monobg); font-size:12.5px; color:var(--dim); line-height:1.55;
+  }
+  .err{color:var(--warn, #b54708); font-size:13px; margin-top:12px}
+</style>
+</head>
+<body>
+
+<div class="stepdots"><i id="d1"></i><i id="d2"></i><i id="d3"></i></div>
+
+<!-- ① 连接确认 -->
+<section id="s1" hidden>
+  <div class="connected"><span class="cdot"></span><span id="host">已连接</span></div>
+  <h1>连上了</h1>
+  <p>这台手机之后可以接收 Claude Code 的操作确认。</p>
+  <button class="primary" id="go1">继续</button>
+</section>
+
+<!-- ② 权限说明 -->
+<section id="s2" hidden>
+  <h1>你可以在手机上</h1>
+  <div class="caplist">
+    <div class="cap"><span class="ic">📄</span><span class="tx">查看命令内容</span></div>
+    <div class="cap"><span class="ic">✋</span><span class="tx">允许或拒绝操作</span></div>
+    <div class="cap"><span class="ic">💬</span><span class="tx">给当前会话发一句话</span></div>
+  </div>
+  <div class="devicenote">所有新设备都必须在 Mac 上确认，陌生手机没法直接连上来。</div>
+  <button class="primary" id="go2">继续</button>
+</section>
+
+<!-- ③ 安全演示 -->
+<section id="s3" hidden>
+  <h1>先体验一条假请求</h1>
+  <p><b>允许或拒绝都不会执行任何命令。</b>走一遍你就知道真的来了是什么样。</p>
+  <button class="primary" id="go3">继续</button>
+  <a class="skip" href="/ui" id="skip">跳过，进入首页</a>
+  <div class="err" id="err" hidden></div>
+</section>
+
+<script>
+/**
+ * 新手引导。三屏 = 三个路由（/ui/onboarding/1|2|3），不是同一屏的分步显示。
+ *
+ * 为什么分路由：中途切走 App 再回来能**从中断的那一步继续**，不用整个重来。
+ * 进度记在 localStorage，首页在渲染之前会据此把你送回来（见 home.html 顶部
+ * 那段 early redirect）。
+ *
+ * 三个 key，各管各的：
+ *   ccm-onboard-step  走到第几步了 —— 只在引导流程内有意义
+ *   ccm-onboarded     整个引导做完/跳过 —— 此后首页不再拦截
+ *   ccm-demo          刚触发了演示审批 —— 首页据此显示「测试完成」横幅
+ */
+const $ = (id) => document.getElementById(id);
+const step = Math.min(3, Math.max(1, Number(location.pathname.split('/').pop()) || 1));
+
+localStorage.setItem('ccm-onboard-step', String(step));
+$('s' + step).hidden = false;
+$('d' + step).classList.add('on');
+
+// 已经做完的步骤也点亮，让进度条真的像进度条
+for (let i = 1; i < step; i++) $('d' + i).style.background = 'var(--accent)';
+
+if (step === 1) {
+  // 显示 Mac 的名字。这一屏唯一的作用是让你确认「连的是我那台电脑」，
+  // 没有名字的话它就只是一句正确的废话
+  fetch('/api/config').then((r) => r.json()).then((c) => {
+    const name = String(c.localHost || '').replace(/\.local$/i, '');
+    if (name) $('host').textContent = `已连接到 ${name}`;
+  }).catch(() => { /* 拿不到就保持「已连接」，不值得为它卡住流程 */ });
+  $('go1').onclick = () => (location.href = '/ui/onboarding/2');
+}
+
+if (step === 2) $('go2').onclick = () => (location.href = '/ui/onboarding/3');
+
+if (step === 3) {
+  const done = () => {
+    localStorage.setItem('ccm-onboarded', '1');
+    localStorage.removeItem('ccm-onboard-step');
+  };
+  $('skip').onclick = done;
+
+  $('go3').onclick = async function () {
+    this.disabled = true;
+    this.textContent = '正在准备…';
+    try {
+      const r = await fetch('/api/selftest/approval', {
+        method: 'POST',
+        headers: { 'X-CCM': '1' },
+      }).then((x) => x.json());
+      if (!r.id) throw new Error('没拿到审批 id');
+      // 先落盘再跳转：跳过去之后这个页面就不在了，晚一步写就丢了
+      done();
+      localStorage.setItem('ccm-demo', '1');
+      location.href = `/ui/a/${r.id}?k=${encodeURIComponent(r.key)}`;
+    } catch (e) {
+      // **不要**把引导标记成已完成。这一步失败多半是服务出了问题，
+      // 标记完成会让人下次打开直接落到一个同样坏掉的首页上，还少了这条线索
+      this.disabled = false;
+      this.textContent = '继续';
+      $('err').hidden = false;
+      $('err').textContent = '没能创建测试审批，确认 Mac 上的服务还在运行。也可以先跳过。';
+    }
+  };
+}
+</script>
+</body>
+</html>
