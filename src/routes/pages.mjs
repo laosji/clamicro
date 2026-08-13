@@ -5,6 +5,8 @@ import { readBody, json, html, inlineJson } from '../http/respond.mjs'
 import { safeEq, cookieToken } from '../auth/token.mjs'
 import { requireDeps } from './deps.mjs'
 import { showHud } from '../hud.mjs'
+import { confirmPairing } from '../confirm.mjs'
+import { isLoopback } from '../http/security.mjs'
 
 /**
  * 页面、静态资源、配对。
@@ -124,8 +126,9 @@ export function pageRoutes(ctx) {
     /**
      * 配对：扫码落到这里，换发一个该设备专属的令牌。
      *
-     * 未认证可达是必须的——还没配对呢。安全性来自 id 本身：
-     * 一次性、60 秒过期。事后翻到截图里的那张码一律无效。
+     * 未认证可达是必须的——还没配对呢。安全性来自两层：
+     *   1. id 本身：一次性、60 秒过期，事后翻到截图里的那张码一律无效
+     *   2. **Mac 上的授权确认**：见下
      */
     const pairMatch = path.match(/^\/ui\/pair\/([\w-]+)$/)
     if (req.method === 'GET' && pairMatch) {
@@ -133,7 +136,37 @@ export function pageRoutes(ctx) {
         html(res, 410, page('pair-expired.html'))
         return true
       }
-      const device = addDevice(config, { name: deviceNameOf(req) })
+
+      /**
+       * 券兑掉之后、发令牌之前，先问一句 Mac。
+       *
+       * 只有券的话，「谁扫到码谁就拿到设备令牌」——而码在那 60 秒里可能被
+       * 屏幕共享、投屏、旁边的镜头看到，开着公网隧道时更是任何拿到隧道 URL
+       * 的人都能试。这一道把「看到码」和「拿到令牌」拆开：后者需要有人坐在
+       * 这台 Mac 前面按一下。
+       *
+       * **顺序是故意的**：先 redeem 再确认，所以被拒的那次也会把券烧掉。
+       * 攻击者拿不到重试机会；正主误点了就重新要一张码，代价小得多。
+       */
+      const tunnelHost = (() => {
+        try { return new URL(config.tunnelUrl).host.toLowerCase() } catch { return null }
+      })()
+      const viaTunnel = !!tunnelHost && String(req.headers.host ?? '').toLowerCase() === tunnelHost
+      const name = deviceNameOf(req) || '未命名设备'
+      const okToPair = await confirmPairing({
+        name,
+        loopback: isLoopback(req),
+        tunnel: viaTunnel,
+        ip: req.socket?.remoteAddress ?? null,
+      })
+      if (!okToPair) {
+        // 被拒必须留痕。有人在你不知情时试过配对，这件事本身就值得看见——
+        // 而静默失败会让它看起来只是「码过期了」
+        console.warn(`[pair] 已拒绝「${name}」的配对请求（${viaTunnel ? '经隧道' : '局域网/本机'}）`)
+        html(res, 403, page('pair-expired.html'))
+        return true
+      }
+      const device = addDevice(config, { name })
       saveConfig(config)
 
       // 顶替必须**高声**说出来。设备上限的全部价值就是可检测性——
