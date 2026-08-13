@@ -365,6 +365,11 @@
   #topusage .pc{flex:0 0 auto; width:30px; text-align:right}
   #topusage .rs{flex:0 0 auto; white-space:nowrap; opacity:.8}
   #topusage .tu.d7{opacity:.62}
+  /* 过期：把条压灰、整体降透明。它仍然可读（旧数据也是信息），
+     但一眼就知道不是当前值 */
+  #topusage.stale{opacity:.55}
+  #topusage.stale .tb i, .cusage.stale .bar i{background:var(--dim) !important}
+  .cusage.stale{opacity:.6}
 
   main{
     flex:1 1 auto; overflow-y:auto; overflow-x:hidden; -webkit-overflow-scrolling:touch;
@@ -650,9 +655,12 @@ function renderTopUsage() {
     return `<div class="tu${dim ? ' d7' : ''}"><b>${label}</b>
       <span class="tb"><i class="${cls}" style="width:${v}%"></i></span>
       <span class="pc">${Math.round(v)}%</span>
-      <span class="rs">${until(w?.resets_at)}</span></div>`;
+      <span class="rs">${resetCell(w)}</span></div>`;
   };
   el.innerHTML = row('5h', quota.five_hour, false) + row('7d', quota.seven_day, true);
+  // 过期的数字要看得出来是过期的。只在右边写一行小字不够——人是先看条和
+  // 百分比的，那两样看着永远像当前值
+  el.classList.toggle('stale', quotaStale());
 }
 
 const fmtLeft = (s) => (s >= 60 ? `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}` : `${s}s`);
@@ -817,11 +825,11 @@ function quotaBody() {
       ? '暂无额度数据 —— 已收到上报，但这次没有额度字段'
       : 'Claude Code 只在会话<b>启动时</b>读取 statusLine，装 Clamicro 之前就开着的会话不会上报。下次新开会话时这里会出现数字。'}</div>`;
   }
-  return `<div class="cusage">
+  return `<div class="cusage${quotaStale() ? ' stale' : ''}">
     <div class="uline"><div class="um">${meter('5h', quota.five_hour?.pct)}</div>
-      <span class="ur">${until(quota.five_hour?.resets_at)}</span></div>
+      <span class="ur">${resetCell(quota.five_hour)}</span></div>
     <div class="uline u7"><div class="um">${meter('7d', quota.seven_day?.pct)}</div>
-      <span class="ur">${until(quota.seven_day?.resets_at)}</span></div>
+      <span class="ur">${resetCell(quota.seven_day)}</span></div>
   </div>`;
 }
 
@@ -839,6 +847,29 @@ function quotaMeta() {
     : '';
 }
 
+/**
+ * 这份用量是不是已经过期了。
+ *
+ * statusLine 在活跃会话里每次响应都上报，秒级新鲜；超过 10 分钟没动静就说明
+ * 没有会话在报。判据和 quotaMeta 同源，不能各判各的。
+ */
+function quotaStale() {
+  return !!quota && Date.now() - quota.at > 600_000;
+}
+
+/**
+ * 右侧那一格：**新鲜时说「还有多久重置」，过期时说「这是多久以前的数据」。**
+ *
+ * 不这么分的话会出现一句彻头彻尾的假话：数据是四天前的，resets_at 早就过去了，
+ * until() 于是显示「即将重置」——它在说一件马上要发生的事，而真相是那个窗口
+ * 几天前就滚过去了，屏幕上那个百分比也早已不是当前值。
+ * 拿不准的时候要说「我不知道」，不能说一个听起来确定的错答案。
+ */
+function resetCell(w) {
+  if (quotaStale()) return `${ago(quota.at)}的数据`;
+  return until(w?.resets_at);
+}
+
 function until(ts) {
   if (!ts) return '';
   const ms = ts * 1000 - Date.now();
@@ -852,7 +883,10 @@ function ago(ts) {
   const s = Math.round((Date.now() - ts) / 1000);
   if (s < 60) return `${s} 秒前`;
   if (s < 3600) return `${Math.round(s / 60)} 分钟前`;
-  return `${Math.round(s / 3600)} 小时前`;
+  if (s < 86400) return `${Math.round(s / 3600)} 小时前`;
+  // 到小时就封顶的话，四天前的数据会写成「96 小时前」——那个数字要在脑子里
+  // 除一下才知道有多久，而这一行的全部作用就是让人一眼判断「还能不能信」
+  return `${Math.round(s / 86400)} 天前`;
 }
 
 const dirOf = (s) => (s.cwd || '').split('/').filter(Boolean).pop() || s.session_id.slice(0, 8);

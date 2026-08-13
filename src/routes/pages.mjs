@@ -357,6 +357,18 @@ export function pageRoutes(ctx) {
         html(res, 403, '<h1>链接无效</h1>')
         return true
       }
+      /**
+       * 打开详情页 = 有人在看 = 停表。
+       *
+       * 必须在算 boot **之前**做，否则页面上的倒计时用的还是旧的 expires_at，
+       * 屏幕上写着「10 秒后自动通过」而服务端其实已经给了 3 分钟——那比不延长
+       * 更糟，人会因为看到一个吓人的数字而慌着乱滑。
+       *
+       * 时限用 config.approval.timeoutMs（默认 3 分钟）：够你读完命令再决定，
+       * 又不至于让一次走神把会话冻住太久。
+       */
+      approvals.extend(ap.id, config.approval?.timeoutMs ?? 180_000)
+
       const boot = inlineJson({
         ...publicApproval(ap, true),
         /**

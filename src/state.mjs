@@ -1,5 +1,6 @@
 import { EventEmitter } from 'node:events'
 import { noRedact } from './redact.mjs'
+import { plainText } from './text.mjs'
 
 // 状态机（对应计划 §3）
 export const STATE = {
@@ -166,7 +167,18 @@ export class Store extends EventEmitter {
   #touch(s, patch) {
     // last_message 和事件明细是同一个来源（助手回复原文），一样要抹
     if (typeof patch.last_message === 'string') {
-      patch = { ...patch, last_message: this.#redact(patch.last_message) }
+      /**
+       * 在**源头**清洗，不是在某一个消费端。
+       *
+       * 原来 markdown 只在 notify 那一层剥（plainText），于是网页看板拿到的
+       * 还是原文：首页「已完成」卡片上直接显示出 `**粗体**` 和 `## 标题`，
+       * 看着就是个半成品。同一个 bug 的第二处——只在一处修，下一个消费端
+       * 出现时还会再犯一次。
+       *
+       * 顺序：先剥 markdown 再抹凭证。反过来的话，`***` 被抹成的 `***`
+       * 可能被斜体规则再吃掉一层。
+       */
+      patch = { ...patch, last_message: this.#redact(plainText(patch.last_message)) }
     }
     Object.assign(s, patch, { updated_at: Date.now() })
     this.emit('session', s)

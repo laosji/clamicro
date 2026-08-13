@@ -156,7 +156,7 @@ test('专注模式：静音但不隐藏', async (t) => {
 })
 
 test('通知正文剥掉 markdown', async (t) => {
-  const { plainText } = await import('../src/notify.mjs')
+  const { plainText } = await import('../src/text.mjs')
 
   await t.test('标题标记不该出现在通知里', () => {
     // 用户实际看到过的那条：「## 改了什么…」——半成品，第一眼就是没做完

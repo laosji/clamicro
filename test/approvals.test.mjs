@@ -149,3 +149,74 @@ test('截断不得把命中风险的内容藏起来', () => {
     '用户看到的内容必须包含判定所依据的那一行，否则等于让人对着看不见的东西签字',
   )
 })
+
+/**
+ * 有人在看的时候，时钟要停。
+ *
+ * 这一条是被真实故障推出来的：普通风险默认 10 秒自动通过（目的是别为
+ * `npm run build` 打扰你），但我们**同时**还推一条通知请你去决定。于是
+ *
+ *   手机震动 → 解锁 → 点通知 → 页面加载 → 读命令 → 滑动
+ *   → 客户端还要等 3 秒撤销窗口 → 才真正发出决策
+ *
+ * 10 秒早过了。历史数据里每一条普通审批都是 `by=timeout` 在整 10 秒结的，
+ * **人不可能赢**。用户看到的是「我明明手动批了，却提示已自动通过」。
+ *
+ * 所以详情页一打开就 extend。这些用例钉的是 extend 的三条性质。
+ */
+test('extend：有人在看就停表', async (t) => {
+  const mk = (policy) => {
+    const s = new ApprovalStore()
+    return { s, ap: s.create({ session_id: 'x', tool_name: 'Bash', tool_input: { command: 'ls' } }, policy) }
+  }
+
+  await t.test('把时限推到新的截止点', () => {
+    const { s, ap } = mk({ autoApproveMs: 10_000 })
+    const before = ap.expires_at
+    s.extend(ap.id, 180_000)
+    assert.ok(s.get(ap.id).expires_at > before + 100_000, '10 秒的窗口应该被推到 3 分钟量级')
+  })
+
+  await t.test('只延长不缩短', () => {
+    // 高危默认 3 分钟。反复打开页面不能把它一次次砍回 10 秒
+    const { s, ap } = mk({ timeoutMs: 180_000 })
+    const before = s.get(ap.id).expires_at
+    s.extend(ap.id, 10_000)
+    assert.equal(s.get(ap.id).expires_at, before, '短的目标时限必须被忽略')
+  })
+
+  await t.test('auto_decision 不变——变的是「你有多久插手」，不是「不插手会怎样」', () => {
+    const { s, ap } = mk({ autoApproveMs: 10_000 })
+    const before = ap.auto_decision
+    s.extend(ap.id, 180_000)
+    assert.equal(s.get(ap.id).auto_decision, before)
+  })
+
+  await t.test('已经结掉的不动', () => {
+    const { s, ap } = mk({})
+    s.decide(ap.id, 'allow')
+    const after = s.get(ap.id).expires_at
+    assert.equal(s.extend(ap.id, 999_000), null)
+    assert.equal(s.get(ap.id).expires_at, after)
+  })
+
+  await t.test('不存在的 id 不抛', () => {
+    assert.equal(new ApprovalStore().extend('nope', 1000), null)
+  })
+
+  await t.test('延长之后，等待中的那个真的会晚点到期', async () => {
+    // 只改 expires_at 是不够的——定时器在创建那一刻就把延迟算死了，
+    // 不重新排期的话它照样在原来的时间点开火，延长等于没做
+    const s = new ApprovalStore()
+    const ap = s.create({ session_id: 'x', tool_name: 'Bash', tool_input: { command: 'ls' } },
+      { autoApproveMs: 60 })
+    const waited = s.wait(ap.id)
+    s.extend(ap.id, 5_000)
+    const raced = await Promise.race([
+      waited.then(() => 'settled'),
+      new Promise((r) => setTimeout(() => r('still-pending'), 300)),
+    ])
+    assert.equal(raced, 'still-pending', '定时器没有被重新排期，延长没生效')
+    assert.equal(s.get(ap.id).status, 'pending')
+  })
+})

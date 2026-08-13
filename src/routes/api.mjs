@@ -36,8 +36,13 @@ export function apiRoutes(ctx) {
   const ROUTES = [
     // ---- 审批：?k= 可进 ----
     {
+      // 详情页每隔几秒会 sync 一次这条。它和「打开页面」是同一个信号：
+      // 有人正盯着这一条，那就不该在他读命令的时候自己通过掉
       method: 'GET', path: /^\/api\/approvals\/([\w-]+)$/, auth: 'approval',
-      handler: ({ res, approval }) => json(res, 200, { approval: publicApproval(approval) }),
+      handler: ({ res, approval }) => {
+        approvals.extend(approval.id, config.approval?.timeoutMs ?? 180_000)
+        json(res, 200, { approval: publicApproval(approval) })
+      },
     },
     {
       method: 'POST', path: /^\/api\/approvals\/([\w-]+)\/decide$/, auth: 'approval',
