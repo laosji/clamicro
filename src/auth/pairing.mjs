@@ -68,6 +68,81 @@ export class PairingStore {
 }
 
 /**
+ * 等待 Mac 确认的那一段。
+ *
+ * ## 为什么需要它
+ *
+ * 加了 Mac 授权确认之后，`/ui/pair/:id` 会阻塞到有人点按钮为止——最长 60 秒。
+ * 手机那边就是一个**白屏加载页**，Safari 只有一根细进度条。人会以为「扫了
+ * 没反应」，于是返回、重扫，把一张张券烧掉，最后得出「这东西是坏的」。
+ *
+ * 所以改成：扫码请求**立刻**返回一个等待页，确认在后台跑，页面轮询结果。
+ *
+ * ## 凭据是 watch，不是配对 id
+ *
+ * 轮询接口按 **watch** 取结果，而 watch 只写进那一次响应的 httpOnly cookie。
+ * 用配对 id 做键的话，那个 id 曾出现在二维码里——见过屏幕的人就能去轮询，
+ * 把令牌接走。watch 只有真正扫了码的那个浏览器有。
+ *
+ * ## 设备在**领取**时才创建
+ *
+ * 不是确认通过的那一刻。扫完就切走的标签页不会留下一台幽灵设备——而
+ * maxDevices 默认是 1，一台幽灵设备就会把你顶下线。
+ */
+const CONFIRM_TTL_MS = 180_000
+
+export class ConfirmStore {
+  #items = new Map() // watch -> { state, meta, expiresAt }
+
+  /** 开一条等待记录，返回给浏览器的 watch 凭据 */
+  begin(meta = {}, now = Date.now()) {
+    this.sweep(now)
+    const watch = randomBytes(24).toString('base64url')
+    this.#items.set(watch, { state: 'pending', meta, expiresAt: now + CONFIRM_TTL_MS })
+    return watch
+  }
+
+  /** 确认有结果了。已经不在表里（超时被清）就什么都不做。 */
+  settle(watch, allowed, now = Date.now()) {
+    const it = this.#items.get(watch)
+    if (!it || it.state !== 'pending') return false
+    it.state = allowed ? 'allowed' : 'denied'
+    it.settledAt = now
+    return true
+  }
+
+  /** 查状态，不消费 */
+  peek(watch, now = Date.now()) {
+    const it = this.#items.get(watch)
+    if (!it) return { state: 'unknown' }
+    if (it.expiresAt <= now) {
+      this.#items.delete(watch)
+      return { state: 'unknown' }
+    }
+    return { state: it.state, meta: it.meta }
+  }
+
+  /**
+   * 领取。**只有 allowed 能被领，且只能领一次**——领完即删。
+   * 一次性在这里同样要紧：否则同一个 watch 能反复换设备令牌。
+   */
+  claim(watch, now = Date.now()) {
+    const st = this.peek(watch, now)
+    if (st.state !== 'allowed') return null
+    this.#items.delete(watch)
+    return st.meta ?? {}
+  }
+
+  sweep(now = Date.now()) {
+    for (const [k, v] of this.#items) if (v.expiresAt <= now) this.#items.delete(k)
+  }
+
+  get size() {
+    return this.#items.size
+  }
+}
+
+/**
  * 已配对设备的令牌簿。
  *
  * 和「一个全局令牌」的区别只在能不能**单独**吊销和识别。丢一台手机时，

@@ -15,13 +15,18 @@ export function safeEq(a, b) {
   return x.length === y.length && timingSafeEqual(x, y)
 }
 
-export function cookieToken(req) {
+/** 按名字取 cookie。配对等待用的是 ccm_w，和登录用的 ccm 是两回事。 */
+export function cookieNamed(req, name) {
   const raw = req.headers.cookie ?? ''
   for (const part of raw.split(';')) {
     const [k, ...v] = part.trim().split('=')
-    if (k === 'ccm') return decodeURIComponent(v.join('='))
+    if (k === name) return decodeURIComponent(v.join('='))
   }
   return null
+}
+
+export function cookieToken(req) {
+  return cookieNamed(req, 'ccm')
 }
 
 /**

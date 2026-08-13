@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b0d10" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f7f8fa" media="(prefers-color-scheme: light)">
+<title>等待确认 · Clamicro</title>
+<style>
+  :root{
+    --bg:#f7f8fa; --card:#fff; --fg:#12151a; --dim:#6b7280; --line:#e4e7ec;
+    --monobg:#f0f2f5; --accent:#1570ef; --ok:#0a7d34; --no:#b42318;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --bg:#0b0d10; --card:#14181d; --fg:#e8eaed; --dim:#8b93a1; --line:#242a32;
+      --monobg:#0f1318; --accent:#60a5fa; --ok:#4ade80; --no:#ff6b6b;
+    }
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html{touch-action:manipulation; -webkit-text-size-adjust:100%}
+  body{
+    margin:0; background:var(--bg); color:var(--fg); min-height:100vh;
+    font:16px/1.6 -apple-system,BlinkMacSystemFont,"PingFang SC","Helvetica Neue",sans-serif;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    text-align:center;
+    padding:calc(40px + env(safe-area-inset-top)) 24px calc(32px + env(safe-area-inset-bottom));
+  }
+  /* 转圈是这一屏唯一说「它还在动」的东西。停下来就等于告诉你结束了，
+     所以只有在真的有结果时才换掉它 */
+  .ring{
+    width:56px; height:56px; border-radius:50%; margin-bottom:26px;
+    border:3px solid var(--line); border-top-color:var(--accent);
+    animation:spin 1s linear infinite;
+  }
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .glyph{
+    width:56px; height:56px; border-radius:50%; margin-bottom:26px;
+    display:flex; align-items:center; justify-content:center; font-size:26px;
+    border:1px solid currentColor;
+  }
+  .glyph.ok{color:var(--ok); background:color-mix(in srgb,var(--ok) 10%,transparent)}
+  .glyph.no{color:var(--no); background:color-mix(in srgb,var(--no) 10%,transparent)}
+  h1{font-size:20px; margin:0 0 10px}
+  p{color:var(--dim); font-size:14.5px; margin:0; max-width:300px}
+  .sub{margin-top:10px; font-size:13px; opacity:.8}
+  a.btn{
+    display:inline-block; margin-top:26px; padding:14px 26px; border-radius:12px;
+    text-decoration:none; font:600 15px -apple-system,"PingFang SC",sans-serif;
+    background:var(--card); border:1.5px solid color-mix(in srgb,var(--accent) 45%,transparent);
+    color:var(--accent);
+  }
+  /* !important 是必须的：a.btn 的权重（0,1,1）压过 .hidden（0,1,0），
+     没有它「重新配对」在等待中就一直显示着——而那会诱导人在配对正在正常
+     进行时放弃重来。渲染出来才发现的，光看代码看不出。 */
+  .hidden{display:none !important}
+  @media (prefers-reduced-motion: reduce){ .ring{animation-duration:2.4s} }
+</style>
+<link rel="manifest" href="/ui/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/ui/icons/icon-180.png">
+<!-- 加到主屏幕后全屏打开，不显示 Safari 的地址栏——这是「像个 App」和
+     「像个网页快捷方式」之间唯一肉眼可见的差别 -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Clamicro">
+</head>
+<body>
+
+<div id="spin" class="ring"></div>
+<div id="icon" class="glyph hidden"></div>
+<h1 id="title">等你在 Mac 上确认</h1>
+<p id="desc">你的 Mac 上弹出了一个确认框。点「允许」，这台手机就配对好了。</p>
+<p class="sub" id="sub"></p>
+<a id="again" class="btn hidden" href="/ui">重新配对</a>
+
+<script>
+/**
+ * 扫完码之后，Mac 上的确认框最长会等 60 秒。
+ *
+ * 在这个页面之前，那 60 秒里手机停在一个白屏加载页上——Safari 只有一根细
+ * 进度条。人会以为「扫了没反应」，于是返回、重扫，把券一张张烧掉，最后
+ * 得出「这东西是坏的」。所以扫码请求立刻返回这一页，确认在后台跑，这里轮询。
+ *
+ * 轮询凭据是服务端在上一步种下的 httpOnly cookie，不在这个页面里，
+ * 所以这段 JS 不持有任何秘密。
+ */
+const $ = (id) => document.getElementById(id);
+const t0 = Date.now();
+
+function show(kind, title, desc, sub) {
+  $('spin').classList.add('hidden');
+  const g = $('icon');
+  g.className = 'glyph ' + kind;
+  g.textContent = kind === 'ok' ? '✓' : '✕';
+  $('title').textContent = title;
+  $('desc').textContent = desc;
+  $('sub').textContent = sub || '';
+  if (kind !== 'ok') $('again').classList.remove('hidden');
+}
+
+async function poll() {
+  let r;
+  try {
+    r = await fetch('/api/pair/status', { headers: { 'X-CCM': '1' } }).then((x) => x.json());
+  } catch {
+    // 网断了不等于配对失败，继续轮询；真失败会由服务端给出明确状态
+    $('sub').textContent = '连接不稳定，还在重试…';
+    return setTimeout(poll, 1500);
+  }
+
+  if (r.state === 'allowed') {
+    // 令牌已经写进 cookie 了，直接进看板
+    show('ok', '配对成功', '正在进入…');
+    return void (location.href = '/ui');
+  }
+  if (r.state === 'denied') {
+    return show('no', '已拒绝', 'Mac 上点了「拒绝」，或者等太久自动拒绝了。',
+      '重新配对会生成一张新的二维码。');
+  }
+  if (r.state === 'unknown') {
+    // 这条券已经过期或被领走了。多半是这个页面在后台待太久
+    return show('no', '这次配对已失效', '这张二维码已经过期或用过了。', '重新配对试试。');
+  }
+
+  // 还在等。把已经等了多久说出来——一个不动的转圈让人无法判断是「在等」
+  // 还是「卡住了」，而一个在走的秒数至少证明这一页是活的
+  const s = Math.round((Date.now() - t0) / 1000);
+  $('sub').textContent = s >= 3 ? `已等待 ${s} 秒 · 去 Mac 上看看` : '';
+  setTimeout(poll, 1000);
+}
+
+poll();
+</script>
+</body>
+</html>

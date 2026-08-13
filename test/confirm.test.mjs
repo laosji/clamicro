@@ -80,10 +80,15 @@ test('对话框里必须带上「它从哪来」', async (t) => {
     assert.match(ask.calls[0].script, /192\.168\.0\.7/)
   })
 
-  await t.test('默认按钮是拒绝——回车和 Esc 都走向拒绝', async () => {
+  await t.test('「允许」高亮，但 Esc 和超时仍然走向拒绝', async () => {
+    // 明知的取舍：高亮给主路径（你自己发起的流程），代价是「误按回车」不再
+    // 安全。但真正要防的是「你不在场时有人悄悄配对」——那时没人按回车，
+    // 超时自动拒绝仍然成立。cancel button 保证 Esc 也是拒绝。
     const ask = spy('button returned:拒绝, gave up:false')
     await createConfirmer(ask)({ name: 'iPhone' })
-    assert.match(ask.calls[0].script, /default button "拒绝"/)
+    const s = ask.calls[0].script
+    assert.match(s, /default button "允许"/, '允许应当是高亮的那个')
+    assert.match(s, /cancel button "拒绝"/, 'Esc 必须仍然走向拒绝')
   })
 
   await t.test('脚本里带 giving up，osascript 不会永远挂着', async () => {

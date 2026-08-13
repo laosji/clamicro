@@ -52,11 +52,14 @@ export function text(res, code, body) {
   res.end(body)
 }
 
-export function html(res, code, body) {
+export function html(res, code, body, extra) {
   res.writeHead(code, {
     'Content-Type': 'text/html; charset=utf-8',
     'Content-Length': Buffer.byteLength(body),
     'Cache-Control': 'no-store',
+    // 配对等待页要在返回 HTML 的**同一个响应**里种下 watch cookie，
+    // 不能先跳一次再种——那就多一次往返，白屏也多一截
+    ...(extra ?? {}),
   })
   res.end(body)
 }

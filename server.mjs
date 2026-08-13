@@ -15,7 +15,7 @@ import { watchNetwork } from './src/netwatch.mjs'
 import { json } from './src/http/respond.mjs'
 import { allowedHosts, hostAllowed, isLoopback, applySecurityHeaders } from './src/http/security.mjs'
 import { makeAuth } from './src/auth/token.mjs'
-import { PairingStore, addDevice, removeDevice } from './src/auth/pairing.mjs'
+import { PairingStore, ConfirmStore, addDevice, removeDevice } from './src/auth/pairing.mjs'
 import { hookRoutes } from './src/routes/hooks.mjs'
 import { pageRoutes } from './src/routes/pages.mjs'
 import { apiRoutes } from './src/routes/api.mjs'
@@ -444,6 +444,8 @@ function publicApproval(a, withKey = false) {
 // 网络变了由 netwatch 收缩监听——都不需要在运行期改这个集合。
 const ALLOWED_HOSTS = allowedHosts(config)
 const pairing = new PairingStore()
+// 等 Mac 确认的那一段。扫码请求立刻返回等待页，结果落这里，手机轮询取。
+const confirms = new ConfirmStore()
 // 传函数不是数组：配对成功会往 config.devices 里加，鉴权必须看到最新的那份
 const auth0 = makeAuth(config.token, () => config.devices ?? [])
 const { sameToken, authorized, loginCookie } = auth0
@@ -454,7 +456,7 @@ const handleHooks = hookRoutes({
 })
 const handlePages = pageRoutes({
   config, approvals, notify, auth, publicApproval, HERE,
-  pairing, addDevice, saveConfig,
+  pairing, confirms, addDevice, saveConfig,
 })
 const handleApi = apiRoutes({
   config, store, approvals, control, inbox, notify, saveConfig,

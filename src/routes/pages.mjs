@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { readBody, json, html, inlineJson } from '../http/respond.mjs'
-import { safeEq, cookieToken } from '../auth/token.mjs'
+import { safeEq, cookieToken, cookieNamed } from '../auth/token.mjs'
 import { requireDeps } from './deps.mjs'
 import { showHud } from '../hud.mjs'
 import { confirmPairing } from '../confirm.mjs'
@@ -21,9 +21,9 @@ import { isLoopback } from '../http/security.mjs'
 export function pageRoutes(ctx) {
   requireDeps('pageRoutes', ctx, [
     'config', 'approvals', 'notify', 'auth', 'publicApproval', 'HERE',
-    'pairing', 'addDevice', 'saveConfig',
+    'pairing', 'confirms', 'addDevice', 'saveConfig',
   ])
-  const { config, approvals, notify, auth, publicApproval, HERE, pairing, addDevice, saveConfig } = ctx
+  const { config, approvals, notify, auth, publicApproval, HERE, pairing, confirms, addDevice, saveConfig } = ctx
   const { sameToken, matchDevice, authorized, loginCookie } = auth
 
   // 配对请求限流，避免局域网上有人刷屏
@@ -124,11 +124,16 @@ export function pageRoutes(ctx) {
     }
 
     /**
-     * 配对：扫码落到这里，换发一个该设备专属的令牌。
+     * 配对第一步：扫码落到这里。
      *
-     * 未认证可达是必须的——还没配对呢。安全性来自两层：
-     *   1. id 本身：一次性、60 秒过期，事后翻到截图里的那张码一律无效
-     *   2. **Mac 上的授权确认**：见下
+     * **立刻返回一个等待页，确认在后台跑。** 之前是同步等 Mac 的确认框，
+     * 手机那边就是最长 60 秒的白屏加载页——Safari 只有一根细进度条。人会以为
+     * 「扫了没反应」，于是返回、重扫，把券一张张烧掉，最后得出「这东西是坏的」。
+     *
+     * 未认证可达是必须的——还没配对呢。安全性来自三层：
+     *   1. 配对 id：一次性、60 秒过期，事后翻到截图里的那张码一律无效
+     *   2. Mac 上的授权确认（见 confirm.mjs）
+     *   3. watch 凭据：结果只发给**真正扫了码的那个浏览器**，见下
      */
     const pairMatch = path.match(/^\/ui\/pair\/([\w-]+)$/)
     if (req.method === 'GET' && pairMatch) {
@@ -137,62 +142,111 @@ export function pageRoutes(ctx) {
         return true
       }
 
-      /**
-       * 券兑掉之后、发令牌之前，先问一句 Mac。
-       *
-       * 只有券的话，「谁扫到码谁就拿到设备令牌」——而码在那 60 秒里可能被
-       * 屏幕共享、投屏、旁边的镜头看到，开着公网隧道时更是任何拿到隧道 URL
-       * 的人都能试。这一道把「看到码」和「拿到令牌」拆开：后者需要有人坐在
-       * 这台 Mac 前面按一下。
-       *
-       * **顺序是故意的**：先 redeem 再确认，所以被拒的那次也会把券烧掉。
-       * 攻击者拿不到重试机会；正主误点了就重新要一张码，代价小得多。
-       */
       const tunnelHost = (() => {
         try { return new URL(config.tunnelUrl).host.toLowerCase() } catch { return null }
       })()
       const viaTunnel = !!tunnelHost && String(req.headers.host ?? '').toLowerCase() === tunnelHost
       const name = deviceNameOf(req) || '未命名设备'
-      const okToPair = await confirmPairing({
+
+      /**
+       * 轮询凭据按 **watch** 取结果，不按配对 id。
+       *
+       * 用 id 做键的话，那个 id 曾经出现在二维码里——见过 Mac 屏幕的人就能去
+       * 轮询把令牌接走，而这道 Mac 确认恰恰就是为了防这种人。watch 只写进
+       * 这一次响应的 httpOnly cookie，只有真正扫了码的那个浏览器有。
+       */
+      const watch = confirms.begin({ name, viaTunnel })
+
+      // 不 await：这个请求要立刻返回。确认在后台跑，结果落进 confirms
+      confirmPairing({
         name,
         loopback: isLoopback(req),
         tunnel: viaTunnel,
         ip: req.socket?.remoteAddress ?? null,
       })
-      if (!okToPair) {
-        // 被拒必须留痕。有人在你不知情时试过配对，这件事本身就值得看见——
-        // 而静默失败会让它看起来只是「码过期了」
-        console.warn(`[pair] 已拒绝「${name}」的配对请求（${viaTunnel ? '经隧道' : '局域网/本机'}）`)
-        html(res, 403, page('pair-expired.html'))
+        .then((ok) => {
+          confirms.settle(watch, ok)
+          if (!ok) {
+            // 被拒必须留痕。有人在你不知情时试过配对，这件事本身值得看见——
+            // 静默失败会让它看起来只是「码过期了」
+            console.warn(`[pair] 已拒绝「${name}」的配对请求（${viaTunnel ? '经隧道' : '局域网/本机'}）`)
+          }
+        })
+        .catch(() => confirms.settle(watch, false))
+
+      html(res, 200, page('pair-wait.html'), {
+        // watch 和登录 cookie 用不同的名字，否则会互相覆盖；
+        // 5 分钟就够——它只服务于这一次等待，之后一文不值
+        'Set-Cookie': [
+          `ccm_w=${encodeURIComponent(watch)}`,
+          'HttpOnly', 'SameSite=Lax', 'Path=/', 'Max-Age=300',
+          ...(String(config.baseUrl).startsWith('https:') ? ['Secure'] : []),
+        ].join('; '),
+      })
+      return true
+    }
+
+    /**
+     * 配对第二步：等待页轮询这里。
+     *
+     * 设备在**领取时**才创建，不是确认通过的那一刻——扫完就切走的标签页
+     * 不该留下一台幽灵设备，而 maxDevices 默认是 1，一台幽灵就能把你顶下线。
+     */
+    if (req.method === 'GET' && path === '/api/pair/status') {
+      // 和 /api/pair 同样的理由：跨站「简单请求」带不了自定义头，
+      // 否则你访问的任意网站都能替你轮询这个接口
+      if (req.headers['x-ccm'] !== '1') {
+        json(res, 403, { error: 'forbidden' })
         return true
       }
-      const device = addDevice(config, { name })
+      const watch = cookieNamed(req, 'ccm_w')
+      if (!watch) {
+        json(res, 200, { state: 'unknown' })
+        return true
+      }
+      const st = confirms.peek(watch)
+      if (st.state !== 'allowed') {
+        json(res, 200, { state: st.state })
+        return true
+      }
+
+      const meta = confirms.claim(watch) // 一次性：领完即删
+      if (!meta) {
+        json(res, 200, { state: 'unknown' })
+        return true
+      }
+      const device = addDevice(config, { name: meta.name })
       saveConfig(config)
 
       // 顶替必须**高声**说出来。设备上限的全部价值就是可检测性——
       // 多出来的那台一定会顶掉你，而你只有在被明确告知时才会发现。
-      // 悄悄顶替等于既失去了多设备能力，又没换来任何东西。
       const kicked = device.evicted.map((d) => d.name).join('、')
       console.log(
         `[pair] 已配对「${device.name}」 ${device.id}` + (kicked ? `，顶掉了 ${kicked}` : ''),
       )
-      // HUD 负责「此刻正在发生的事」——你人就在屏幕前等着配对结果。
-      // 但它划过去就没了，所以顶替这种**你必须知道**的事同时也发标准通知，
-      // 那条会留在通知中心，错过了还能回头看见。
       showHud({
         icon: kicked ? '⚠️' : '📱',
         title: kicked ? '新设备已顶替原设备' : '已配对',
         subtitle: kicked ? `${device.name} 接入 · ${kicked} 已下线` : `${device.name} · ${device.id}`,
       })
       if (kicked) {
+        // HUD 划过去就没了，顶替这种**你必须知道**的事同时发标准通知，
+        // 那条会留在通知中心，错过了还能回头看见
         notify({
           title: 'Clamicro',
           subtitle: '⚠️ 新设备已顶替原设备',
           body: `${device.name} 接入，${kicked} 已下线。不是你操作的话立刻 npx clamicro forget all`,
         }).catch(() => {})
       }
-      res.writeHead(302, { Location: '/ui', 'Set-Cookie': loginCookie(config.baseUrl, device.token) })
-      res.end()
+      res.writeHead(200, {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Set-Cookie': [
+          loginCookie(config.baseUrl, device.token),
+          // watch 用完就地作废，别让它在浏览器里多留 5 分钟
+          'ccm_w=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0',
+        ],
+      })
+      res.end(JSON.stringify({ state: 'allowed' }))
       return true
     }
 
@@ -206,6 +260,35 @@ export function pageRoutes(ctx) {
           : 'text/css; charset=utf-8',
         'Content-Length': Buffer.byteLength(body),
         'Cache-Control': 'no-cache',
+      })
+      res.end(body)
+      return true
+    }
+
+    /**
+     * 图标和 manifest —— 「添加到主屏幕」要用。
+     *
+     * **未认证也要能取**：iOS 是在你按下「添加到主屏幕」时去抓图标的，那一刻
+     * 请求不一定带 cookie；抓不到就退化成一张页面截图，桌面上那个图标会很难看。
+     * 这几个文件里没有任何秘密，公开无所谓。
+     *
+     * 图标缓存一天：它几乎不变，而每次进首页都重取一遍纯属浪费。
+     */
+    const staticFile = path.match(/^\/ui\/(manifest\.webmanifest|icons\/icon-\d{2,4}\.png)$/)
+    if (req.method === 'GET' && staticFile) {
+      const name = staticFile[1]
+      const png = name.endsWith('.png')
+      let body
+      try {
+        body = readFileSync(join(HERE, 'ui', name))
+      } catch {
+        json(res, 404, { error: 'not found' })
+        return true
+      }
+      res.writeHead(200, {
+        'Content-Type': png ? 'image/png' : 'application/manifest+json; charset=utf-8',
+        'Content-Length': body.length,
+        'Cache-Control': png ? 'public, max-age=86400' : 'no-cache',
       })
       res.end(body)
       return true

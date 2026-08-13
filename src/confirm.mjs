@@ -79,11 +79,26 @@ export function createConfirmer(ask) {
       tunnel ? '不认识这个请求就拒绝。' : '',
     ].filter(Boolean).join('\\n')
 
-    // default button 是「拒绝」：回车、Esc、超时，三条路都走向拒绝
+    /**
+     * 「允许」是高亮的那个（default button），「拒绝」绑 Esc（cancel button）。
+     *
+     * 这是一个**明知的取舍**。更安全的排法是把 default 给「拒绝」，那样回车、
+     * Esc、超时三条路全部走向拒绝。代价是主路径——你自己在手机上点了按钮、
+     * 正等着配对——反而要多瞄一眼才知道该点哪个，而高亮的那个还是「不要」。
+     *
+     * 现在的分布：
+     *   回车 → 允许（这是你**主动发起**的流程，回车确认符合预期）
+     *   Esc  → 拒绝
+     *   超时 → 拒绝（见下面对 gave up 的显式检查）
+     *
+     * 也就是说，**放弃的只有「误按回车」这一种情况**，而「不理它」和「按 Esc」
+     * 仍然是安全的。真正要防的是「你不在场时有人悄悄配对」，那种情况下没有人
+     * 会去按回车，超时自动拒绝仍然成立。
+     */
     const script =
       `tell application "System Events" to display dialog "${body}" ` +
       `with title "${escapeAppleScript(title)}" ` +
-      `buttons {"拒绝", "允许"} default button "拒绝" ` +
+      `buttons {"拒绝", "允许"} default button "允许" cancel button "拒绝" ` +
       `with icon ${tunnel ? 'caution' : 'note'} ` +
       `giving up after ${Math.round(timeoutMs / 1000)}`
 
