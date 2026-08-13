@@ -207,8 +207,7 @@ function run(argv) {
     badge.layer.setBorderColor($.CGColorCreateGenericRGB(tint[0], tint[1], tint[2], 0.45))
     box.addSubview(badge)
 
-    const ic = label(icon, $.NSMakeRect(PAD_X, midY - 11, BADGE, 22), 14, $.NSFontWeightSemibold, 1, tint)
-    ic.setAlignment($.NSTextAlignmentCenter)
+    centeredGlyph(box, icon, PAD_X + BADGE / 2, midY, 14, tint)
 
     const textX = PAD_X + BADGE + BADGE_GAP
     const tw = W - textX - PAD_X
@@ -238,8 +237,7 @@ function run(argv) {
      * 注意 emoji（⚠️ ⚡️ 📱）自带颜色不受 textColor 影响，只有 ✓ ✕ 这类
      * **字形**图标会跟着变——所以状态类的图标优先用字形。
      */
-    const ic = label(icon, $.NSMakeRect(TOP_R + 6, midY - 13, 30, 26), 17, $.NSFontWeightRegular, 1, tint)
-    ic.setAlignment($.NSTextAlignmentCenter)
+    centeredGlyph(box, icon, TOP_R + 6 + 15, midY, 17, tint)
     const textX = TOP_R + SIDE_ICON + notchW
     const t = label(title, $.NSMakeRect(textX, midY - 9, SIDE_TEXT - 12, 18), 12.5, $.NSFontWeightMedium, 1, tint)
     t.setAlignment($.NSTextAlignmentLeft)
@@ -439,6 +437,51 @@ function notchSize(screen) {
   } catch {
     return { w: 0, h: 0 }
   }
+}
+
+/**
+ * 把一个字形**居中**放到指定的圆心上。
+ *
+ * 不能直接给它一个和徽章一样大的框然后 setAlignment(center)——那样两个轴都会偏。
+ * 实测（在徽章正中心画十字做基准）偏了 dx=+3.5pt、dy=-1.75pt，连完全对称的 ●
+ * 也一样偏，所以不是字形的锅：
+ *
+ *   · 竖直：NSTextField 的单行文本是**顶对齐**的。26pt 的框里放 16.5pt 的行高，
+ *     文字整体贴着框顶，于是比框中心高出约 (26-16.5)/2。
+ *   · 水平：居中对齐居的是**排版框**，而框比字宽得多时残留的空隙并不对称。
+ *
+ * 所以反过来做：先把框裁到文字自己的尺寸（宽=实测字宽，高=行高），
+ * 再把这个刚好包住文字的框摆到圆心上。框和字一样大时，「框居中」就是「字居中」。
+ */
+function centeredGlyph(box, text, cx, cy, size, rgb, alpha = 1) {
+  const font = $.NSFont.systemFontOfSizeWeight(size, $.NSFontWeightSemibold)
+  const lineH = Number(font.ascender) - Number(font.descender)
+  const gw = measureText(text, size) + 2
+  /**
+   * 竖直再抬一点点。
+   *
+   * 把框裁到行高之后水平已经准了（实测 dx 0.00pt），但竖直还偏下 1.5~2.0pt：
+   * 行框底部留着一段 descender 的空白，而 ● ✓ ⚠ 这些字形都没有下伸部，
+   * 墨迹于是整体坐在框的上半部——框居中不等于墨迹居中。
+   *
+   * 0.125em 是**实测标定**出来的，不是推导的。复现方法记在这儿，换字号或换
+   * 系统字体后可以照做：在徽章正中心画一条白竖线和一条品红横线当基准，
+   * 截图后比较字形墨迹外接框的中心和基准线的偏移。
+   * 标定后：● 偏 -0.25pt，✓ 偏 +0.25pt —— 都在半个物理像素以内（2x 屏）。
+   */
+  const f = $.NSTextField.alloc.initWithFrame(
+    $.NSMakeRect(cx - gw / 2, cy - lineH / 2 + size * 0.125, gw, lineH))
+  f.setStringValue(String(text ?? ''))
+  f.setBezeled(false)
+  f.setDrawsBackground(false)
+  f.setEditable(false)
+  f.setSelectable(false)
+  f.setFont(font)
+  f.setAlignment($.NSTextAlignmentCenter)
+  const [r, g, b] = rgb ?? [1, 1, 1]
+  f.setTextColor($.NSColor.colorWithSRGBRedGreenBlueAlpha(r, g, b, alpha))
+  box.addSubview(f)
+  return f
 }
 
 /**
