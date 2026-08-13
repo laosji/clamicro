@@ -225,3 +225,45 @@ test('组合：真机上的两种常见误触', async (t) => {
     assert.equal(shouldCommit(gesture({ dx: 150, th, vx: 0.3, mode: 'high' })).go, false)
   })
 })
+
+/**
+ * 阈值必须落在把手走得到的范围里。
+ *
+ * 这一条是实测出来的，不是推演：390 宽的手机上决策条净宽 352、把手 52，
+ * 可用行程 144px；而 computeThreshold 的 320 下限（那是给「视口宽度」
+ * 准备的）会把高危阈值抬到 176px。于是把手顶在轨道尽头，进度条停在 82%
+ * 永远不满，**高危审批在界面上根本走不完**——只能凭猜把手指拖到控件外面。
+ *
+ * 而高危恰恰是最需要人能确凿完成这个动作的场合。
+ */
+test('阈值不得超过控件真正走得到的行程', async (t) => {
+  const PHONE_TRAVEL = 144 // 390 宽手机上实测：352/2 - 52/2 - 6
+
+  await t.test('高危右滑在小屏上够得着', () => {
+    const th = computeThreshold(PHONE_TRAVEL * 2, true, 'high', PHONE_TRAVEL)
+    assert.ok(th < PHONE_TRAVEL, `阈值 ${th} 应当小于可用行程 ${PHONE_TRAVEL}`)
+  })
+
+  await t.test('过线之后还得剩一段行程', () => {
+    // 「已过线」和「顶到头」必须在手感上分得开——那一跳是松手前唯一的确认
+    const th = computeThreshold(PHONE_TRAVEL * 2, true, 'high', PHONE_TRAVEL)
+    assert.ok(PHONE_TRAVEL - th >= 12, `只剩 ${PHONE_TRAVEL - th}px 余量，过线跳变会被顶到头淹掉`)
+  })
+
+  await t.test('封顶不会把阈值压到 MIN_PX 以下', () => {
+    // 行程极小时宁可够不着也不能变成「碰一下就批准」
+    const th = computeThreshold(120, true, 'high', 20)
+    assert.ok(th >= MIN_PX, `阈值 ${th} 掉到了绝对下限 ${MIN_PX} 以下`)
+  })
+
+  await t.test('不传 maxTravel 时行为完全不变', () => {
+    // 整卡片滑动那条路径传的是视口宽度，本来就没有「行程上限」这回事
+    for (const [w, right, mode] of [[375, true, 'high'], [375, false, 'normal'], [800, true, 'normal']]) {
+      assert.equal(computeThreshold(w, right, mode), computeThreshold(w, right, mode, 0))
+    }
+  })
+
+  await t.test('行程够大时封顶不生效——不该顺手把正常屏幕的阈值也调松', () => {
+    assert.equal(computeThreshold(375, true, 'high', 900), computeThreshold(375, true, 'high'))
+  })
+})

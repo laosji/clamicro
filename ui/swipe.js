@@ -23,10 +23,21 @@
    * 上限 420：横屏时 innerWidth 可达 800+，32% 就要划半个屏幕。
    * 下限 320：**页面在后台渲染或旋转时 innerWidth 可能读到 0**，
    * 那会让阈值变成 0，任何一点点拖动都能放行操作。实测踩到过。
+   *
+   * maxTravel：控件真正走得到的行程。**决策条必须传**。
+   * 上面那个 320 下限是为「视口宽度」准备的，而决策条传进来的是一个
+   * 固定尺寸控件的半宽——390 的手机上只有 144px，被下限抬到 320 之后，
+   * 高危阈值算出 176px，比把手能走的距离还远：把手顶到轨道尽头，
+   * 进度条停在 82% 永远不满，人只能凭猜把手指拖出控件外面才提交得了。
+   * 实测过（travel 144 / 阈值 176），高危审批**在界面上是走不完的**。
    */
-  function computeThreshold(width, right, mode) {
+  function computeThreshold(width, right, mode, maxTravel) {
     const base = Math.min(Math.max(Number(width) || 375, 320), 420)
-    return right && mode === 'high' ? base * 0.55 : base * 0.32
+    const th = right && mode === 'high' ? base * 0.55 : base * 0.32
+    if (!maxTravel) return th
+    // 留 12% 余量：过线之后还得有一段能走，否则「已过线」这个状态
+    // 和「顶到头」在手感上分不开，而那一跳正是松手前唯一的确认
+    return Math.min(th, Math.max(MIN_PX, maxTravel * 0.88))
   }
 
   /**
@@ -253,7 +264,8 @@
 
     // 可用行程 = 半条轨道减去把手自身的一半，也就是把手能走到头的距离
     const travel = () => Math.max(60, bar.clientWidth / 2 - knob.offsetWidth / 2 - 6)
-    const threshold = (right) => computeThreshold(travel() * 2, right, mode)
+    // 把行程一起传进去：阈值再高也不能高过把手走得到的地方
+    const threshold = (right) => computeThreshold(travel() * 2, right, mode, travel())
 
     function paint() {
       const t = travel()
@@ -319,7 +331,24 @@
     knob.addEventListener('pointerup', release)
     knob.addEventListener('pointercancel', release)
 
-    return { destroy() { done = true } }
+    return {
+      /**
+       * 把控件放回可用状态。
+       *
+       * 必须有：撤销执行、以及提交失败重试，走的都是这个口子。少了它，
+       * 按下「撤销」之后 .committed 永远留在条上（opacity .5 + pointer-events
+       * none）——人取消了执行，却再也**做不了任何决定**，只能干等到超时
+       * 被自动拒绝。调用方一直在调 restore()，而这里只导出了 destroy，
+       * 于是那句调用一声不响什么也没干。
+       */
+      restore() {
+        done = false
+        tracking = false
+        bar.classList.remove('committed')
+        reset()
+      },
+      destroy() { done = true },
+    }
   }
 
   window.attachSwipe = attachSwipe

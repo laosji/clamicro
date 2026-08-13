@@ -723,7 +723,10 @@ async function decide(decision) {
   } catch {
     submitting = false;
     swipeHandle?.restore();
-    $('swipehint').innerHTML = '<b style="color:var(--no)">网络错误，请重试</b>';
+    // 报错写进提示行，**不能覆盖 #swipehint 的 innerHTML**——决策条就在
+    // 那个容器里。原来这一句会把整条控件从 DOM 里抹掉，然后显示「请重试」，
+    // 而人已经没有任何东西可以重试了
+    $('dbHint').innerHTML = '<b style="color:var(--no)">网络错误，请重新拖动</b>';
     $('swipehint').classList.remove('hidden');
   }
 }

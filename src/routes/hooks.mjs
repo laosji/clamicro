@@ -22,6 +22,24 @@ export const HOOK_EVENTS = new Set([
   'session-end',
 ])
 
+/**
+ * cwd 是否落在某个自排除目录里。
+ *
+ * 必须按**路径分段**比，不能裸 startsWith：`/Users/me/proj` 会连
+ * `/Users/me/project-x`、`/Users/me/proj-backup` 一起吞掉，而吞掉的后果是
+ * 那个项目的工具调用**一条都不再走审批**——返回 {} 等于「本 hook 无意见」，
+ * 直接落回 Claude Code 自己的权限流程。你以为在盯着它，其实没有，
+ * 而且不会有任何提示。静默漏审批比报错难查得多。
+ */
+export function underIgnored(cwd, dirs) {
+  if (typeof cwd !== 'string' || !cwd) return false
+  return (dirs ?? []).some((d) => {
+    if (typeof d !== 'string' || !d) return false
+    const base = d.endsWith('/') ? d.slice(0, -1) : d
+    return cwd === base || cwd.startsWith(base + '/')
+  })
+}
+
 /** 终端状态栏文本。放在服务端渲染，中继脚本就不必解析 JSON（省掉 jq 依赖）。 */
 function renderStatusLine(d, approvals) {
   const n = (v) => (typeof v === 'number' ? v : 0)
@@ -48,7 +66,7 @@ export function hookRoutes(ctx) {
 
       // 自排除：开发 clamicro 自身时，别把自己的工具调用卡住 570 秒。
       // 返回空对象 = 本 hook 无意见，走 Claude Code 正常权限流程。
-      if (config.ignoreCwds.some((d) => payload.cwd?.startsWith(d))) {
+      if (underIgnored(payload.cwd, config.ignoreCwds)) {
         json(res, 200, {})
         return true
       }
