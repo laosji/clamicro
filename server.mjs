@@ -575,11 +575,38 @@ let currentNetId = net.id
 const stopWatching = watchNetwork(() => {
   const ip = detectLanIp()
   const fp = fingerprint(ip)
+
+  /**
+   * **拿不到网关 ≠ 换到了陌生网络。**
+   *
+   * fingerprint 在取不到默认网关时返回 `id: null`（未联网）。而全隧道 VPN
+   * 周期性重连、Wi-Fi 抖一下，都会制造这么一个瞬间。以前这里把 null 当成
+   * 「一个不认识的新网络」，于是**摘掉局域网监听**——手机当场连不上，
+   * 而 `networks` 还显示当前网络已信任，看不出任何异常。
+   *
+   * 收缩是有代价的动作，不能在证据不足时执行。信息缺失就什么都不做，
+   * 等下一次事件——网络真变了，下一次一样能判出来。
+   */
+  if (!fp.id) return
   if (fp.id === currentNetId) return
   currentNetId = fp.id
 
   if (isTrusted(config, fp)) {
     console.log(`[clamicro] 网络变为「${fp.label}」（已信任）`)
+    /**
+     * **恢复必须和收缩对称。**
+     *
+     * 以前这条分支只打日志。于是任何一次误判（哪怕下一秒就纠正）都会让
+     * 局域网监听**永久消失**，直到进程重启——日志里「未被信任」和「已信任」
+     * 反复横跳，而实际状态一路单向退化成只剩回环。
+     *
+     * 「失败即收缩」是对的策略，但它的前提是「恢复也要真的发生」。
+     * 只有一半的策略不是保守，是坏掉。
+     */
+    if (ip && !servers.has(ip)) {
+      listenOn(ip)
+      console.log(`[clamicro] 已恢复局域网监听 ${ip}:${config.port}`)
+    }
     if (ip !== config.lanIp) {
       console.log(`[clamicro] 地址变了，新开一个 Claude Code 会话会自动重启到新地址`)
       console.log(`[clamicro] 之后重新生成二维码： npx clamicro qr`)
