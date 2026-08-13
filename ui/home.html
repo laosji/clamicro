@@ -373,7 +373,7 @@ const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 
 let tab = sessionStorage.getItem('ccm-tab') || 'home';
-let sessions = [], pending = [], cfg = null, quota = null, inbox = {}, slSeen = null, recentlyExpired = [], recentTools = [];
+let sessions = [], pending = [], cfg = null, quota = null, inbox = {}, slSeen = null, recentlyExpired = [], recentTools = [], doneTimer = null;
 
 function meter(label, pct) {
   const v = Math.min(100, Math.max(0, pct ?? 0));
@@ -451,7 +451,19 @@ function statusConsole() {
   const off = offlineSince !== null && Date.now() - offlineSince > 5000;
   const busy = sessions.filter((s) => s.state === 'Running' || s.state === 'Waiting Approval');
   const err = sessions.find((s) => s.state === 'Error');
-  const done = sessions.find((s) => s.state === 'Done');
+  /**
+   * 「已完成」是**一闪而过的状态**，不是一个可以停住的状态。
+   *
+   * 会话的 state 会一直停在 Done 直到下一轮开始，所以不加时间窗的话
+   * 卡片就永远显示「已完成」，再也回不到用量——而任务早就结束了，
+   * 那条信息也早就没用了，却一直占着屏幕上最显眼的位置。
+   *
+   * 窗口取 60 秒而不是设计稿的 3 秒：通知响了你才掏手机，3 秒到手时
+   * 早就切走了，那这个状态等于没做。60 秒覆盖「听见→拿起→解锁→看一眼」，
+   * 过了就该让位给用量。
+   */
+  const DONE_WINDOW = 60_000;
+  const done = sessions.find((s) => s.state === 'Done' && Date.now() - s.updated_at < DONE_WINDOW);
 
   let cls = '', dotLabel = '空闲', right = '', body = '', meta = '';
 
@@ -504,6 +516,14 @@ function statusConsole() {
     right = `<span class="ctag">${sessions.length} 个会话</span>`;
     body = quotaBody();
     meta = quotaMeta();
+  }
+
+  // 窗口到点时主动重画一次。不然要等下一个 30 秒轮询，
+  // 「已完成」会多赖 30 秒——用户看到的是它没按说好的时间走
+  if (done) {
+    const leftMs = DONE_WINDOW - (Date.now() - done.updated_at);
+    clearTimeout(doneTimer);
+    doneTimer = setTimeout(() => { if (tab === 'home') render(); }, Math.max(500, leftMs + 200));
   }
 
   return `<div class="console ${cls}">
