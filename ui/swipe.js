@@ -222,7 +222,108 @@
     }
   }
 
+  /**
+   * 决策条：中心一个把手，往左拖是拒绝，往右拖是批准。
+   *
+   * ## 为什么换掉整卡片左右滑
+   *
+   * 整卡片滑动有两个毛病：滑动起点在哪都行，所以**在页面上滚动阅读命令原文
+   * 时很容易蹭出一次决策**；而且行程没有可见的参照物，你不知道还差多远。
+   * 中心把手把「决策」收进一个明确的控件里——起点固定、行程可见、
+   * 阅读区域不再是操作区域。
+   *
+   * ## 判定逻辑一行没重写
+   *
+   * 复用 shouldCommit / computeThreshold。那 44 个测试钉的是
+   * **「什么算一次有效批准」**，和交互长什么样无关：高危右滑要划更远、
+   * 高危不给甩出快捷方式、MIN_PX 绝对下限、人手门槛挡住合成事件——
+   * 换了外壳这些一条都不能松。
+   *
+   * 唯一的适配：这里的可用行程是「半条轨道」而不是「整屏宽」，
+   * 所以把轨道半宽当作 computeThreshold 的 width 传进去。
+   */
+  function attachDecisionBar(bar, opts) {
+    const { mode = 'normal', onCommit } = opts
+    const knob = bar.querySelector('.db-knob')
+    const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches
+    if (!knob) return { destroy() {} }
+
+    let tracking = false, done = false, dx = 0, vx = 0
+    let startX = 0, lastX = 0, lastT = 0, moves = 0, firstMoveT = 0
+
+    // 可用行程 = 半条轨道减去把手自身的一半，也就是把手能走到头的距离
+    const travel = () => Math.max(60, bar.clientWidth / 2 - knob.offsetWidth / 2 - 6)
+    const threshold = (right) => computeThreshold(travel() * 2, right, mode)
+
+    function paint() {
+      const t = travel()
+      const clamped = Math.max(-t, Math.min(t, dx))
+      knob.style.transform = `translate(calc(-50% + ${clamped}px), -50%)`
+      const p = Math.min(1, Math.abs(clamped) / Math.max(1, threshold(dx > 0)))
+      bar.classList.toggle('to-allow', dx > 0 && p > 0.15)
+      bar.classList.toggle('to-deny', dx < 0 && p > 0.15)
+      bar.style.setProperty('--p', p.toFixed(3))
+    }
+
+    function reset() {
+      dx = 0
+      if (!REDUCED) knob.style.transition = 'transform .22s cubic-bezier(.2,.9,.3,1)'
+      knob.style.transform = 'translate(-50%, -50%)'
+      bar.classList.remove('to-allow', 'to-deny')
+      bar.style.setProperty('--p', 0)
+      setTimeout(() => { knob.style.transition = '' }, 240)
+    }
+
+    knob.addEventListener('pointerdown', (e) => {
+      if (done) return
+      tracking = true; moves = 0; dx = 0; vx = 0
+      startX = lastX = e.clientX; lastT = performance.now(); firstMoveT = 0
+      knob.setPointerCapture?.(e.pointerId)
+      knob.style.transition = ''
+    })
+
+    knob.addEventListener('pointermove', (e) => {
+      if (!tracking || done) return
+      if (!moves) firstMoveT = performance.now()
+      moves++
+      const now = performance.now()
+      vx = vx * 0.7 + ((e.clientX - lastX) / Math.max(1, now - lastT)) * 0.3
+      lastX = e.clientX; lastT = now
+      dx = e.clientX - startX
+      paint()
+    })
+
+    function release() {
+      if (done || !tracking) return
+      tracking = false
+      const right = dx > 0
+      const d = shouldCommit({
+        dx, vx,
+        axis: 'x', // 把手只沿轨道走，没有轴锁定问题
+        th: threshold(right),
+        moves,
+        dtMs: performance.now() - firstMoveT,
+        mode,
+        rightBlocked: mode === 'denyOnly',
+      })
+      window.__swipeDebug = { dx, vx, th: threshold(right), moves, mode, ...d }
+      if (d.go) {
+        done = true
+        bar.classList.add('committed')
+        onCommit?.(right ? 'allow' : 'deny')
+      } else {
+        reset()
+      }
+    }
+
+    knob.addEventListener('pointerup', release)
+    knob.addEventListener('pointercancel', release)
+
+    return { destroy() { done = true } }
+  }
+
   window.attachSwipe = attachSwipe
+  window.attachDecisionBar = attachDecisionBar
   // 纯判定逻辑单独导出，好让 test/swipe.test.mjs 直接打在真实实现上，
   // 而不是维护一份会漂移的拷贝
   window.__swipeLogic = { MIN_PX, computeThreshold, shouldCommit }

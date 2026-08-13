@@ -64,7 +64,55 @@
   .console.is-wait .cdot{animation:breathe 2s ease-in-out infinite}
   @keyframes breathe{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.45;transform:scale(.78)}}
 
+  /* ── 运行态的呼吸光晕 ──
+     只在**运行中**出现。它是这一屏唯一持续动的东西，所以它就是「有事正在
+     发生」这句话本身——空闲/完成/出错都不给，否则它退化成装饰。
+
+     实现上动的是一个固定光晕伪元素的 opacity，不是 box-shadow 本身：
+     动 box-shadow 每帧都要重新计算模糊并重绘，手机上很费电；动 opacity
+     可以交给合成器。 */
   .console.is-run{border-color:color-mix(in srgb,var(--run) 38%,transparent)}
+  .console.is-run::after{
+    content:""; position:absolute; inset:-1px; border-radius:inherit;
+    pointer-events:none; z-index:0;
+    box-shadow:0 0 0 1px color-mix(in srgb,var(--run) 22%,transparent),
+               0 0 30px -6px color-mix(in srgb,var(--run) 55%,transparent),
+               inset 0 0 40px -22px color-mix(in srgb,var(--run) 70%,transparent);
+    opacity:.35;
+    animation:glow-breathe 3.6s ease-in-out infinite;
+  }
+  @keyframes glow-breathe{0%,100%{opacity:.3}50%{opacity:1}}
+  /* 主控台内部元素要浮在光晕之上 */
+  .console > *{position:relative; z-index:1}
+
+  /* 圆点向外扩散的涟漪——「神经网络」那种感觉来自这一层，
+     两个环错开半个周期，看起来是连续在往外推 */
+  .console.is-run .cdot::before,
+  .console.is-run .cdot::after{
+    content:""; position:absolute; left:50%; top:50%;
+    width:8px; height:8px; border-radius:50%;
+    border:1px solid var(--run);
+    transform:translate(-50%,-50%) scale(1);
+    animation:ripple 2.6s cubic-bezier(.2,.6,.4,1) infinite;
+    pointer-events:none;
+  }
+  .console.is-run .cdot::after{animation-delay:1.3s}
+  .console.is-run .cdot{position:relative}
+  @keyframes ripple{
+    0%{transform:translate(-50%,-50%) scale(1); opacity:.65}
+    100%{transform:translate(-50%,-50%) scale(6); opacity:0}
+  }
+
+  /* 呼吸和涟漪正是 prefers-reduced-motion 要关掉的东西。
+     关掉之后光晕**保持在中等亮度**而不是消失——它承载的是「在运行」
+     这个信息，不能因为用户不想看动画就把信息一起拿走 */
+  @media (prefers-reduced-motion: reduce){
+    .console.is-run::after{animation:none; opacity:.6}
+    .console.is-run .cdot::before,
+    .console.is-run .cdot::after{display:none}
+    .console.is-run .cdot, .console.is-wait .cdot{animation:none}
+    .ctick.roll .tk{animation:none}
+  }
   .console.is-wait{border-color:color-mix(in srgb,var(--warn) 45%,transparent);
     box-shadow:0 0 26px -12px color-mix(in srgb,var(--warn) 70%,transparent)}
   .console.is-wait .cdot{background:var(--warn); box-shadow:0 0 10px var(--warn)}
@@ -298,7 +346,7 @@
 <body>
 <header>
   <span class="dot" id="dot"></span>
-  <h1 id="title">概览</h1>
+  <h1 id="title">Clamicro</h1>
   <a href="/ui/settings">设置</a>
 </header>
 
@@ -746,7 +794,9 @@ function renderSay() {
 }
 
 function render() {
-  $('title').textContent = { home: '概览', sess: '会话', say: '发消息' }[tab];
+  // 首页标题用产品名而不是「概览」：这是你打开时看到的第一个词，
+  // 「概览」描述的是这一屏的功能，而你已经在看这一屏了——它不提供信息。
+  $('title').textContent = { home: 'Clamicro', sess: '会话', say: '发消息' }[tab];
   for (const b of document.querySelectorAll('nav button')) b.classList.toggle('on', b.dataset.tab === tab);
   $('badge').textContent = pending.length;
   $('badge').classList.toggle('hidden', !pending.length);
