@@ -335,68 +335,58 @@
   #result{
     position:fixed; inset:0; z-index:10;
     display:flex; flex-direction:column; align-items:center; justify-content:center;
-    background:#05060a; color:#e8eaed; text-align:center; overflow:hidden;
+    background:var(--bg); color:var(--fg); text-align:center; overflow:hidden;
     padding:24px calc(24px + env(safe-area-inset-left)) calc(24px + env(safe-area-inset-bottom));
-    --neon:#39ff14; --neon2:#00f0ff;
+    /* 单一色相跟着状态走，用主题变量而不是写死的霓虹色——原来这一屏在
+       浅色模式下也是一整块 #05060a 的黑，跟前后两屏对不上 */
+    --neon:var(--ok);
   }
-  #result[data-s="auto_allowed"]{ --neon:#7dff9e; --neon2:#00f0ff }
-  #result[data-s="denied"]   { --neon:#ff2d78; --neon2:#ff6b9d }
-  #result[data-s="expired"]  { --neon:#ffb300; --neon2:#ffd166 }
-  #result[data-s="abandoned"]{ --neon:#7aa2f7; --neon2:#a6c1ff }
+  #result[data-s="auto_allowed"]{ --neon:var(--ok) }
+  #result[data-s="denied"]   { --neon:var(--no) }
+  #result[data-s="expired"]  { --neon:var(--warn) }
+  #result[data-s="abandoned"]{ --neon:var(--calm) }
+  #result[data-s="superseded"]{ --neon:var(--calm) }
 
-  /* 网格地平线 */
-  #result::before{
-    content:''; position:absolute; inset:0; pointer-events:none; opacity:.22;
-    background:
-      linear-gradient(transparent 0 calc(100% - 1px), color-mix(in srgb,var(--neon2) 60%,transparent) 100%) 0 0/100% 34px,
-      linear-gradient(90deg, transparent 0 calc(100% - 1px), color-mix(in srgb,var(--neon2) 60%,transparent) 100%) 0 0/34px 100%;
-    mask-image:radial-gradient(120% 80% at 50% 45%, #000 20%, transparent 72%);
-  }
-  /* 扫描线 */
-  #result::after{
-    content:''; position:absolute; inset:0; pointer-events:none; opacity:.5;
-    background:repeating-linear-gradient(180deg, rgba(255,255,255,.035) 0 1px, transparent 1px 3px);
-  }
+  /* 网格地平线和扫描线删掉了。这一屏确实是整个流程唯一的仪式感时刻，但
+     仪式感来自**留白和一个干净的图形**，不是往背景里堆特效。其余各屏都是
+     克制的终端语气，这里独自喧哗会像换了个应用。 */
   #result > *{position:relative; z-index:1}
   #result .txt{display:flex; flex-direction:column; align-items:center}
 
+  /* 设计稿 .done-inline 的对勾圈放大成主视觉：淡底 + 一圈描边 + 居中符号。
+     外发光只留很轻的一层，够把视线钉住就行 */
   .glyph{
-    font-size:70px; line-height:1; margin-bottom:22px;
-    filter:drop-shadow(0 0 14px var(--neon)) drop-shadow(0 0 34px color-mix(in srgb,var(--neon) 55%,transparent));
+    width:82px; height:82px; border-radius:50%; margin-bottom:20px;
+    display:flex; align-items:center; justify-content:center;
+    font-size:34px; line-height:1; color:var(--neon);
+    background:color-mix(in srgb,var(--neon) 10%,transparent);
+    border:1px solid color-mix(in srgb,var(--neon) 40%,transparent);
+    box-shadow:0 0 34px -12px color-mix(in srgb,var(--neon) 70%,transparent);
     animation:pop .5s cubic-bezier(.2,1.5,.4,1) both;
   }
   @keyframes pop{from{transform:scale(.3);opacity:0}to{transform:scale(1);opacity:1}}
 
+  /* 状态码回到「小标签」的量级。原来它是个会抖的霓虹灯箱，抢在标题前面
+     喊了一句英文——而真正要读的是下面那句中文 */
   .code{
-    font:700 13px/1 ui-monospace,SFMono-Regular,Menlo,monospace;
-    letter-spacing:.34em; text-transform:uppercase; color:var(--neon);
-    text-shadow:0 0 10px var(--neon), 0 0 26px color-mix(in srgb,var(--neon) 60%,transparent);
-    padding:9px 16px; border:1px solid color-mix(in srgb,var(--neon) 45%,transparent);
-    border-radius:4px; background:color-mix(in srgb,var(--neon) 8%,transparent);
-    animation:flicker 2.4s steps(1) infinite;
+    font:600 10.5px/1 ui-monospace,SFMono-Regular,Menlo,monospace;
+    letter-spacing:.18em; text-transform:uppercase; color:var(--neon); opacity:.85;
   }
   @keyframes flicker{
     0%,94%,100%{opacity:1} 95%{opacity:.55} 96%{opacity:1} 97%{opacity:.7} 98%{opacity:1}
   }
 
-  #rtitle{margin:20px 0 6px; font-size:23px; font-weight:600; letter-spacing:.04em}
-  #rdesc{margin:0; color:#8b93a1; font-size:13.5px; letter-spacing:.02em}
+  #rtitle{margin:12px 0 6px; font-size:22px; font-weight:600; letter-spacing:.02em}
+  #rdesc{margin:0; color:var(--dim); font-size:13.5px; line-height:1.55; max-width:300px}
 
   /* 扫过一道光 */
-  .sweep{
-    position:absolute; left:0; right:0; height:2px; top:0; z-index:2;
-    background:linear-gradient(90deg,transparent,var(--neon2),transparent);
-    box-shadow:0 0 18px var(--neon2);
-    animation:sweep .85s ease-out both;
-  }
+  .sweep{display:none}
   @keyframes sweep{from{top:0;opacity:0}20%{opacity:1}to{top:100%;opacity:0}}
 
   #back{
-    display:inline-block; margin-top:34px; padding:12px 28px; border-radius:4px;
-    background:transparent; border:1px solid color-mix(in srgb,var(--neon2) 50%,transparent);
-    color:var(--neon2); text-decoration:none;
-    font:600 13px/1 ui-monospace,Menlo,monospace; letter-spacing:.18em; text-transform:uppercase;
-    text-shadow:0 0 10px color-mix(in srgb,var(--neon2) 70%,transparent);
+    display:inline-block; margin-top:28px; padding:12px 26px; border-radius:8px;
+    background:var(--monobg); border:1px solid var(--line); color:var(--dim);
+    text-decoration:none; font:600 12.5px/1 ui-monospace,Menlo,monospace; letter-spacing:.1em;
   }
   @media (prefers-reduced-motion:reduce){
     .glyph,.code,.sweep{animation:none}
@@ -672,13 +662,18 @@ async function sync(force = false) {
   }
 }
 
+/**
+ * 图形要能一眼读出「成了 / 没成」，不需要先解码。
+ * 原来清一色是几何菱形（◈ ◇ ◐），四个状态长得几乎一样，全靠颜色区分——
+ * 而颜色恰恰是色觉差异下最先丢的那一维。
+ */
 const RESULTS = {
-  allowed:      ['◈', 'access granted', '已批准', '操作正在执行'],
-  auto_allowed: ['◈', 'auto-approved', '已自动通过', '无人操作，按预授权规则放行'],
-  denied:    ['◇', 'access denied',  '已拒绝', 'Claude Code 已收到拒绝'],
+  allowed:      ['✓', 'access granted', '已批准', '操作正在执行'],
+  auto_allowed: ['✓', 'auto-approved', '已自动通过', '无人操作，按预授权规则放行'],
+  denied:    ['✕', 'access denied',  '已拒绝', 'Claude Code 已收到拒绝'],
   expired:   ['◷', 'session expired', '已超时', '超时未决策，已自动拒绝'],
-  abandoned:  ['◐', 'handled elsewhere', '已在别处处理', '这条请求已由终端处理或会话已结束'],
-  superseded: ['◐', 'already granted', '已在别处放行', '这个操作已经由终端或权限规则批准并执行了'],
+  abandoned:  ['↗', 'handled elsewhere', '已在别处处理', '这条请求已由终端处理或会话已结束'],
+  superseded: ['↗', 'already granted', '已在别处放行', '这个操作已经由终端或权限规则批准并执行了'],
 };
 
 function renderResult(a) {
