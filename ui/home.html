@@ -10,13 +10,13 @@
 <style>
   :root{
     --bg:#f7f8fa; --card:#fff; --fg:#12151a; --dim:#6b7280; --line:#e4e7ec; --monobg:#f0f2f5;
-    --ok:#0a7d34; --no:#b42318; --warn:#b54708; --run:#1570ef;
+    --ok:#0a7d34; --no:#b42318; --warn:#b54708; --run:#0a7d34;
     --tabbg:rgba(255,255,255,.82);
   }
   @media (prefers-color-scheme:dark){
     :root{
       --bg:#0b0d10; --card:#14181d; --fg:#e8eaed; --dim:#8b93a1; --line:#242a32; --monobg:#0f1318;
-      --ok:#4ade80; --no:#f87171; --warn:#fbbf24; --run:#60a5fa;
+      --ok:#4ade80; --no:#f87171; --warn:#fbbf24; --run:#39ff8a;
       --tabbg:rgba(14,18,23,.82);
     }
   }
@@ -44,35 +44,74 @@
   .dot.live{background:var(--ok)}
   header a{margin-left:auto; font-size:14px; color:var(--run); text-decoration:none}
 
-  /* sticky：滚动时始终可见。不粘住的话只是换了个位置，算不上状态栏 */
-  #quotabar{
-    position:sticky; top:0; z-index:20; flex:0 0 auto;
-    width:100%; max-width:592px; margin:0 auto; padding:7px 18px 9px;
-    background:color-mix(in srgb, var(--bg) 88%, transparent);
-    backdrop-filter:saturate(180%) blur(14px);
-    -webkit-backdrop-filter:saturate(180%) blur(14px);
-    border-bottom:1px solid var(--line);
+  /* ── 状态主控台 ──
+     把「用量 / 运行状态 / 待审批」合成一个组件。它们本来就是同一个问题的
+     不同侧面：此刻值不值得我看一眼手机。分成三张卡片时，眼睛要扫三个地方
+     才能拼出答案。 */
+  .console{
+    background:var(--card); border:1px solid var(--line); border-radius:16px;
+    padding:16px; margin-bottom:16px; position:relative; overflow:hidden;
+    transition:border-color .3s, box-shadow .3s;
   }
-  /* 两行而不是并排：并排时进度条被挤到一半宽，10% 和 20% 看着差不多；
-     而且右边放不下重置时间——那是「还要等多久」的唯一来源 */
-  #quotabar .qline{display:flex; align-items:center; gap:10px}
-  #quotabar .qline + .qline{margin-top:5px}
-  #quotabar .qline > .qm{flex:1; min-width:0}
-  #quotabar .qreset{
-    flex:0 0 auto; font-size:11px; color:var(--dim);
-    white-space:nowrap; font-variant-numeric:tabular-nums;
-  }
-  /* 5h 是主角：真正影响「还能不能再跑一轮」的是它。7d 以天计，小一档 */
-  #quotabar .q7{opacity:.62}
-  #quotabar .q7 .meter{font-size:11px}
-  #quotabar .q7 .bar{height:4px}
-  /* 陈旧：整条变暗 + 一个感叹号，点开才展开解释——信息不丢，只是折叠 */
-  #quotabar.stale{cursor:pointer}
-  #quotabar.stale .qline{opacity:.5}
-  #quotabar .qbang{display:none; font-size:13px; color:var(--warn); font-weight:700; flex:0 0 auto}
-  #quotabar.stale .qbang{display:inline}
-  #quotabar .qwarn{display:none; margin-top:7px; font-size:11.5px; line-height:1.5; color:var(--warn)}
-  #quotabar.stale.open .qwarn{display:block}
+  .console .ctop{display:flex; justify-content:space-between; align-items:center; margin-bottom:12px}
+  .console .cleft{display:flex; align-items:center; gap:9px}
+  .console .clabel{font-size:15px; font-weight:600}
+  .console .cmeta{font-size:11.5px; color:var(--dim); margin-top:10px; font-variant-numeric:tabular-nums}
+  .cdot{width:8px; height:8px; border-radius:50%; background:var(--run); box-shadow:0 0 10px var(--run); flex:0 0 auto}
+  /* 呼吸：只在「有事在发生」时动。静止的界面上一个动的东西 = 注意力锚点，
+     所以空闲态不能动，否则它就不再是信号 */
+  .console.is-run .cdot,
+  .console.is-wait .cdot{animation:breathe 2s ease-in-out infinite}
+  @keyframes breathe{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.45;transform:scale(.78)}}
+
+  .console.is-run{border-color:color-mix(in srgb,var(--run) 38%,transparent)}
+  .console.is-wait{border-color:color-mix(in srgb,var(--warn) 45%,transparent);
+    box-shadow:0 0 26px -12px color-mix(in srgb,var(--warn) 70%,transparent)}
+  .console.is-wait .cdot{background:var(--warn); box-shadow:0 0 10px var(--warn)}
+  .console.is-wait .clabel{color:var(--warn)}
+  .console.is-err{border-color:color-mix(in srgb,var(--no) 45%,transparent)}
+  .console.is-err .cdot{background:var(--no); box-shadow:0 0 10px var(--no)}
+  .console.is-err .clabel{color:var(--no)}
+  .console.is-done .cdot{animation:none}
+  /* 断线用灰：它**不是 Claude 的状态**，是连接问题。混进红/黄会让人
+     以为任务出事了，实际是手机自己联系不上 Mac */
+  .console.is-off{opacity:.9}
+  .console.is-off .cdot{background:transparent; border:1.5px solid var(--dim); box-shadow:none; animation:none}
+  .console.is-off .clabel{color:var(--dim)}
+
+  .ctag{font-size:11px; padding:3px 9px; border-radius:20px; background:var(--monobg);
+    color:var(--dim); border:1px solid var(--line); font-variant-numeric:tabular-nums}
+  .ctag.warn{color:var(--warn); border-color:color-mix(in srgb,var(--warn) 35%,transparent);
+    background:color-mix(in srgb,var(--warn) 10%,transparent)}
+
+  /* 空闲态：用量是此刻唯一值得看的信息，所以它折进主控台而不是单独占一屏 */
+  .cusage .uline{display:flex; align-items:center; gap:10px}
+  .cusage .uline + .uline{margin-top:8px}
+  .cusage .um{flex:1; min-width:0}
+  .cusage .ur{font-size:11px; color:var(--dim); white-space:nowrap; font-variant-numeric:tabular-nums}
+  .cusage .u7{opacity:.62}
+  .cusage .u7 .meter{font-size:11px}
+  .cusage .u7 .bar{height:4px}
+
+  /* 运行态：显示 Claude 此刻在做什么。数据来自 sub_state，不编造 */
+  .crun{display:flex; align-items:center; gap:8px; font-size:13.5px; margin-bottom:2px}
+  .crun .cf{color:var(--dim); overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .tdots{display:inline-flex; gap:3px; flex:0 0 auto}
+  .tdots i{width:4px; height:4px; border-radius:50%; background:var(--run); animation:td 1.2s ease-in-out infinite}
+  .tdots i:nth-child(2){animation-delay:.15s} .tdots i:nth-child(3){animation-delay:.3s}
+  @keyframes td{0%,60%,100%{opacity:.25}30%{opacity:1}}
+
+  .cdone{display:flex; align-items:center; gap:10px}
+  .cdone .ck{width:28px; height:28px; border-radius:50%; flex:0 0 auto;
+    background:color-mix(in srgb,var(--run) 12%,transparent);
+    border:1px solid color-mix(in srgb,var(--run) 40%,transparent);
+    display:flex; align-items:center; justify-content:center; color:var(--run); font-size:14px}
+  .cdone .ct{font-size:13.5px; color:var(--dim); line-height:1.5}
+  .cdone .ct b{color:var(--fg); font-weight:600}
+
+  .coff .om{font-size:13px; color:var(--dim); line-height:1.55; margin-bottom:8px}
+  .coff .oh{font-size:11.5px; color:var(--dim); border-top:1px solid var(--line);
+    padding-top:9px; line-height:1.7; opacity:.85}
 
   main{
     flex:1 1 auto; overflow-y:auto; overflow-x:hidden; -webkit-overflow-scrolling:touch;
@@ -220,14 +259,6 @@
   <a href="/ui/settings">设置</a>
 </header>
 
-<!--
-  用量状态条。放这儿而不是正文里，是因为它**不是操作**：首页的职责是
-  决策（批/拒）和感知（什么在跑），用量只是你瞟一眼的背景信息。
-  它以前是正文中部的一整张卡片，既抢手机上最贵的垂直空间，又因为数字
-  变化频繁而让下面的内容不停跳动。
--->
-<div id="quotabar" hidden></div>
-
 <main id="view"></main>
 
 <nav>
@@ -260,43 +291,111 @@ function meter(label, pct) {
 }
 
 /**
- * 顶部用量条。
+ * 状态主控台：一个组件回答「此刻值不值得我看一眼手机」。
  *
- * 没数据时**整条不显示**（不占位）：首次安装、statusLine 还没上报过时，
- * 一条空条比没有更让人困惑；那种情况的解释留在「设置」页。
+ * 用量、运行状态、待审批本来就是同一个问题的不同侧面，分成三张卡片时
+ * 眼睛要扫三个地方才能拼出答案。合成一个之后，**颜色和那一个圆点就是答案**。
  *
- * statusLine 在活跃会话里每次响应更新都上报，秒级新鲜。超过 10 分钟没动静
- * 就说明没有会话在报——**此时把旧数字当成当前值展示是在骗人**，所以整条
- * 变暗、挂一个感叹号，点开才展开完整解释。信息不丢，只是折叠。
+ * 优先级是有讲究的：
+ *   断线 > 待审批 > 出错 > 运行中 > 刚完成 > 空闲
+ *
+ * 断线排第一，因为**断线时下面显示的一切都是旧的**——先说清这一点，
+ * 否则用户会盯着一个早就结束的待审批以为系统卡死。它也刻意用灰色而不是
+ * 红黄：那不是 Claude 的状态，是手机联系不上 Mac。
  */
-function renderQuotaBar() {
-  const el = $('quotabar');
-  if (!quota) { el.hidden = true; return; }
-  el.hidden = false;
+function statusConsole() {
+  const off = offlineSince !== null && Date.now() - offlineSince > 5000;
+  const busy = sessions.filter((s) => s.state === 'Running' || s.state === 'Waiting Approval');
+  const err = sessions.find((s) => s.state === 'Error');
+  const done = sessions.find((s) => s.state === 'Done');
 
-  const stale = Date.now() - quota.at > 600000;
-  el.classList.toggle('stale', stale);
-  if (!stale) el.classList.remove('open');
+  let cls = '', dotLabel = '空闲', right = '', body = '', meta = '';
 
-  el.innerHTML = `<div class="qline">
-      <div class="qm">${meter('5h', quota.five_hour?.pct)}</div>
-      <span class="qreset">${until(quota.five_hour?.resets_at)}</span>
-      <span class="qbang">!</span>
-    </div>
-    <div class="qline q7">
-      <div class="qm">${meter('7d', quota.seven_day?.pct)}</div>
-      <span class="qreset">${until(quota.seven_day?.resets_at)}</span>
-    </div>
-    <div class="qwarn">
-      这是 ${ago(quota.at)}的旧数据，当前没有会话在上报。
-      statusLine 是会话<b>启动时</b>读取的，新开一个 Claude Code 会话才会刷新。
+  if (off) {
+    cls = 'is-off'; dotLabel = '连接已断开';
+    body = `<div class="coff">
+      <div class="om">已经 ${Math.round((Date.now() - offlineSince) / 1000)} 秒没有收到 Mac 的消息了。
+        <b>下面显示的是断开前的旧状态。</b></div>
+      <div class="oh">1. Mac 是否还开着、Clamicro 是否还在运行<br>
+        2. 手机和 Mac 是否仍在同一网络<br>
+        3. Mac 的局域网 IP 是否变了 —— 在 Mac 上跑 <code>npx clamicro qr</code> 重新扫码</div>
     </div>`;
+  } else if (pending.length) {
+    // 有事等你做决定 —— 这是整个产品存在的理由，压过其他一切状态
+    const a = pending[0];
+    cls = 'is-wait'; dotLabel = '等待批准';
+    right = `${pending.length > 1 ? `<span class="ctag warn">1 / ${pending.length}</span>` : ''}`;
+    body = `<div style="font-size:14px;font-weight:600;margin-bottom:5px">${esc(a.headline || a.summary)}</div>
+      <div style="font-size:12.5px;color:var(--dim)">${esc(a.tool_name)}${a.risk.level === 'high' ? ' · <b style="color:var(--no)">高风险</b>' : ''}</div>`;
+    meta = pending.length > 1 ? '处理完一条会自动显示下一条' : '';
+  } else if (err) {
+    cls = 'is-err'; dotLabel = '出错';
+    body = `<div style="font-size:13.5px;color:var(--dim);line-height:1.5">${esc(err.last_message || '会话异常终止')}</div>`;
+    meta = esc(dirOf(err));
+  } else if (busy.length) {
+    cls = 'is-run'; dotLabel = '运行中';
+    const s0 = busy[0];
+    right = s0.turn_started_at ? `<span class="ctag">${elapsed(s0.turn_started_at)}</span>` : '';
+    // sub_state 是从 tool_name 推导的（Thinking / Editing / Running Command…），
+    // 不是编的；没有就只说「进行中」，不假装知道细节
+    body = `<div class="crun">
+      <span class="cf">${esc(dirOf(s0))}${s0.sub_state ? ' · ' + esc(s0.sub_state) : ''}</span>
+      <span class="tdots"><i></i><i></i><i></i></span>
+    </div>`;
+    meta = busy.length > 1 ? `另有 ${busy.length - 1} 个会话在跑` : '';
+  } else if (done) {
+    cls = 'is-done'; dotLabel = '已完成';
+    body = `<div class="cdone"><div class="ck">✓</div>
+      <div class="ct"><b>${esc(dirOf(done))}</b> 已完成${done.last_message ? ' · ' + esc(done.last_message.slice(0, 40)) : ''}</div></div>`;
+  } else {
+    // 空闲：没有更多要处理的事，用量是此刻唯一值得看的信息
+    right = `<span class="ctag">${sessions.length} 个会话</span>`;
+    body = quotaBody();
+    meta = quotaMeta();
+  }
+
+  return `<div class="console ${cls}">
+    <div class="ctop"><div class="cleft"><div class="cdot"></div><div class="clabel">${dotLabel}</div></div>${right}</div>
+    ${body}
+    ${meta ? `<div class="cmeta">${meta}</div>` : ''}
+  </div>`;
 }
 
-// 点一下展开陈旧说明。只在 stale 时有意义，CSS 里也只有 stale 才显示。
-document.getElementById('quotabar').addEventListener('click', function () {
-  if (this.classList.contains('stale')) this.classList.toggle('open');
-});
+function elapsed(from) {
+  const s = Math.max(0, Math.round((Date.now() - from) / 1000));
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), ss = s % 60;
+  const p = (n) => String(n).padStart(2, '0');
+  return h ? `${p(h)}:${p(m)}:${p(ss)}` : `${p(m)}:${p(ss)}`;
+}
+
+/** 空闲态里的用量两行。没数据就说清为什么没有，而不是留一片空白 */
+function quotaBody() {
+  if (!quota) {
+    return `<div style="font-size:12.5px;color:var(--dim);line-height:1.55">${slSeen
+      ? '暂无额度数据 —— 已收到上报，但这次没有额度字段'
+      : 'Claude Code 只在会话<b>启动时</b>读取 statusLine，装 Clamicro 之前就开着的会话不会上报。下次新开会话时这里会出现数字。'}</div>`;
+  }
+  return `<div class="cusage">
+    <div class="uline"><div class="um">${meter('5h', quota.five_hour?.pct)}</div>
+      <span class="ur">${until(quota.five_hour?.resets_at)}</span></div>
+    <div class="uline u7"><div class="um">${meter('7d', quota.seven_day?.pct)}</div>
+      <span class="ur">${until(quota.seven_day?.resets_at)}</span></div>
+  </div>`;
+}
+
+/**
+ * 额度陈旧提示。
+ *
+ * statusLine 在活跃会话里每次响应都上报，秒级新鲜；超过 10 分钟没动静
+ * 就说明没有会话在报——**这时候把旧数字当当前值展示是在骗人**。
+ */
+function quotaMeta() {
+  if (!quota) return '';
+  const stale = Date.now() - quota.at > 600000;
+  return stale
+    ? `⚠️ 这是 ${ago(quota.at)}的旧数据，当前没有会话在上报。新开一个 Claude Code 会话才会刷新。`
+    : '';
+}
 
 function until(ts) {
   if (!ts) return '';
@@ -372,12 +471,7 @@ function renderHome() {
       </div>`).join('');
   }
 
-  renderQuotaBar();
-  h += '<h2>状态</h2>';
-  h += `<div class="card"><div class="top">
-      <span class="name">${busy.length ? `${busy.length} 个会话进行中` : '空闲'}</span>
-      <span class="state ${busy.length ? 'Running' : ''}">${sessions.length} 个会话</span>
-    </div>${busy.length ? `<div class="path">${busy.map((s) => esc(dirOf(s))).join(' · ')}</div>` : ''}</div>`;
+  h += statusConsole();
 
   $('view').innerHTML = h;
 }
