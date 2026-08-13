@@ -51,6 +51,35 @@
   #clock{margin-left:auto; flex:0 0 auto; font-variant-numeric:tabular-nums}
   #clock.urgent{color:var(--no); font-weight:600}
 
+  /* ── 风险披露 ──
+     原来只有高风险时冒一行红字。设计稿要的是**分级可见**：任何风险等级
+     都给出等级、强度条和影响项，让「普通」也是一个明确的判断而不是空白。 */
+  .rk{margin:14px 0 16px}
+  .rk-row{display:flex; align-items:center; justify-content:space-between; margin-bottom:8px}
+  .rk-label{font:600 10.5px/1 ui-monospace,Menlo,monospace; letter-spacing:.08em;
+    color:var(--dim); text-transform:uppercase}
+  .rk-val{font:700 11px/1 ui-monospace,Menlo,monospace; padding:4px 9px; border-radius:5px}
+  .rk-val.high{color:var(--no); background:color-mix(in srgb,var(--no) 10%,transparent);
+    border:1px solid color-mix(in srgb,var(--no) 32%,transparent)}
+  .rk-val.medium{color:var(--warn); background:color-mix(in srgb,var(--warn) 10%,transparent);
+    border:1px solid color-mix(in srgb,var(--warn) 32%,transparent)}
+  .rk-val.low{color:var(--dim); background:var(--monobg); border:1px solid var(--line)}
+  /* **三格不是五格**：risk.level 只有 high/medium/low 三档，
+     画五格等于假装有五档精度，那是在编数据 */
+  .rk-meter{display:flex; gap:4px; margin-bottom:12px}
+  .rk-meter i{flex:1; height:4px; border-radius:2px; background:var(--monobg)}
+  .rk-meter i.on{background:var(--warn)}
+  .rk-meter.high i.on{background:var(--no)}
+  .rk-why{display:flex; flex-wrap:wrap; gap:7px}
+  .rk-why span{font-size:12px; padding:7px 10px; border-radius:8px; line-height:1.35;
+    background:color-mix(in srgb,var(--no) 5%,transparent);
+    border:1px solid color-mix(in srgb,var(--no) 16%,transparent); color:var(--fg)}
+  .rk-why.medium span{background:color-mix(in srgb,var(--warn) 6%,transparent);
+    border-color:color-mix(in srgb,var(--warn) 18%,transparent)}
+  .rk-why.low span{background:var(--monobg); border-color:var(--line); color:var(--dim)}
+  .desc-label{font:600 10.5px/1 ui-monospace,Menlo,monospace; letter-spacing:.1em;
+    color:var(--dim); text-transform:uppercase; margin-bottom:7px}
+
   main{
     flex:1 1 auto; overflow-y:auto; overflow-x:hidden; padding:14px;
     -webkit-overflow-scrolling:touch;
@@ -386,17 +415,14 @@ function render(a) {
     (a.impact || []).map((i) => `<span class="tag ${esc(i.tone)}">${esc(i.label)}</span>`).join('') +
     (a.rule ? `<span class="tag">规则 ${esc(a.rule)}</span>` : '');
 
-  $('headline').textContent = a.headline || a.summary;
+  // 明说这句是「模型写的」——它是链路里唯一由被审查方生成的文本，
+  // 不该看起来像系统的判断
+  $('headline').innerHTML = `<span class="desc-label">模型的描述</span>${esc(a.headline || a.summary)}`;
 
   // 限制只加在「批准」上，不加在「拒绝」上：
   // 拒绝永远是左滑这个轻动作，批准的重量随风险升级。
-  if (a.risk.level === 'high') {
-    $('risk').innerHTML = `<b>⚠️ 高风险操作</b>${esc(a.risk.reasons.join(' · '))}`;
-    $('risk').classList.remove('hidden');
-    armSwipe('high');
-  } else {
-    armSwipe('normal');
-  }
+  renderRisk(a);
+  armSwipe(a.risk.level === 'high' ? 'high' : 'normal');
 
   // 描述声称无害而命令并非如此。这条比「高风险」更需要显眼——
   // 高风险只是说这事危险，不符是说那句人话在骗你。
@@ -445,6 +471,33 @@ function highlight(text, spans) {
  * 对着模型自己写的一句话做决定，而真正要批的东西藏在一次点击之后。
  * 现在只有超长脚本才折叠，且折叠标题会写明命中了什么风险。
  */
+/**
+ * 风险披露。
+ *
+ * 原来只在高风险时冒一行红字，其余等级一片空白——而「没有警告」和
+ * 「判过了，是普通风险」在用户眼里长得一模一样。**沉默不是信息。**
+ * 现在任何等级都给出：等级、强度条、以及**为什么**。
+ *
+ * 强度条是**三格**不是设计稿的五格：risk.level 只有 high/medium/low 三档，
+ * 画五格等于假装有五档精度。设计稿里的「12 个文件 · 45.2 MB」同理——
+ * impact 只有标签没有数量，编一个数字出来是这个工具最不能犯的错。
+ */
+function renderRisk(a) {
+  const lv = a.risk?.level || 'low';
+  const on = lv === 'high' ? 3 : lv === 'medium' ? 2 : 1;
+  const name = lv === 'high' ? '高风险' : lv === 'medium' ? '中等风险' : '普通';
+  const why = (a.risk?.reasons || []);
+
+  $('risk').innerHTML = `<div class="rk">
+    <div class="rk-row"><span class="rk-label">风险等级</span><span class="rk-val ${lv}">${name}</span></div>
+    <div class="rk-meter ${lv}">${[0,1,2].map((i) => `<i class="${i < on ? 'on' : ''}"></i>`).join('')}</div>
+    ${why.length
+      ? `<div class="rk-why ${lv}">${why.map((r) => `<span>${esc(r)}</span>`).join('')}</div>`
+      : `<div class="rk-why low"><span>没有命中任何风险规则</span></div>`}
+  </div>`;
+  $('risk').classList.remove('hidden');
+}
+
 function renderCommand(a) {
   const d = a.detail || '';
   if (!d) return;

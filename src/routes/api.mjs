@@ -100,7 +100,25 @@ export function apiRoutes(ctx) {
     },
     {
       method: 'GET', path: '/api/approvals', auth: 'token',
-      handler: ({ res }) => json(res, 200, { approvals: approvals.pending().map((a) => publicApproval(a)) }),
+      /**
+       * 除了待审批，还回**刚刚因超时被自动拒绝**的那些。
+       *
+       * 这条信息用户以前完全无从得知：你走开二十分钟，某个高危操作等到
+       * 超时被拒、那一轮任务因此失败——回到手机上，界面干干净净，什么
+       * 痕迹都没有。「在你不在时替你做了决定」是这个工具最该说出口的事，
+       * 藏起来等于假装它没发生。
+       *
+       * 只回 30 分钟内的：再久就不是「刚才」，翻历史更合适。
+       */
+      handler: ({ res }) => json(res, 200, {
+        approvals: approvals.pending().map((a) => publicApproval(a)),
+        recentlyExpired: approvals
+          .all()
+          .filter((a) => a.status === 'expired' && a.decided_at && Date.now() - a.decided_at < 1_800_000)
+          .sort((x, y) => y.decided_at - x.decided_at)
+          .slice(0, 5)
+          .map((a) => publicApproval(a)),
+      }),
     },
 
     // ---- 设置：能在手机网页里改的，就别让人回终端敲命令 ----
