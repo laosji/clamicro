@@ -142,6 +142,20 @@
   .cbar{height:3px; background:var(--monobg); border-radius:2px; overflow:hidden; margin-top:11px}
   .cbar i{display:block; height:100%; background:var(--warn); transition:width 1s linear}
 
+  /* ── 活动履历 ──
+     「最近几步」和「这一刻」是不同的信息：一行当前动作只说得出它在做什么，
+     履历能看出它是在推进还是在原地打转。
+     只在运行态出现，且**只有放不下时才滚动**——手机上一个持续移动的东西
+     是很强的注意力磁铁，没必要时让它静止。 */
+  .ctick{margin-top:9px; height:17px; overflow:hidden; position:relative;
+    -webkit-mask-image:linear-gradient(90deg,#000 82%,transparent);
+    mask-image:linear-gradient(90deg,#000 82%,transparent)}
+  .ctick .tk{position:absolute; white-space:nowrap; font-size:11.5px; color:var(--dim); line-height:17px}
+  .ctick .tk .now{color:var(--run)}
+  .ctick .tk .sp{opacity:.45; margin:0 7px}
+  .ctick.roll .tk{animation:tick-roll 16s linear infinite}
+  @keyframes tick-roll{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+
   main{
     flex:1 1 auto; overflow-y:auto; overflow-x:hidden; -webkit-overflow-scrolling:touch;
     overscroll-behavior:contain;
@@ -311,7 +325,7 @@ const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 
 let tab = sessionStorage.getItem('ccm-tab') || 'home';
-let sessions = [], pending = [], cfg = null, quota = null, inbox = {}, slSeen = null, recentlyExpired = [];
+let sessions = [], pending = [], cfg = null, quota = null, inbox = {}, slSeen = null, recentlyExpired = [], recentTools = [];
 
 function meter(label, pct) {
   const v = Math.min(100, Math.max(0, pct ?? 0));
@@ -332,6 +346,31 @@ function meter(label, pct) {
  * 否则用户会盯着一个早就结束的待审批以为系统卡死。它也刻意用灰色而不是
  * 红黄：那不是 Claude 的状态，是手机联系不上 Mac。
  */
+/**
+ * 最近几步做了什么。
+ *
+ * 数据是**服务端真实的工具调用事件**（`Edit: src/foo.ts`、`Bash: npm test`），
+ * 不是客户端自己攒的 sub_state——后者刷新页面就空了，而且 `Editing` 远不如
+ * `Edit: src/api/handler.ts` 有信息量。
+ *
+ * 只取当前会话的、只留最近 4 条、去掉连续重复的。空的时候整块不出现，
+ * 不留一条空轨道占位。
+ */
+function activityTicker(sid) {
+  const rows = [];
+  for (let i = recentTools.length - 1; i >= 0 && rows.length < 4; i--) {
+    const e = recentTools[i];
+    if (sid && e.sid !== sid) continue;
+    if (rows.length && rows[rows.length - 1] === e.text) continue; // 连续重复的合成一条
+    rows.push(e.text);
+  }
+  if (!rows.length) return '';
+  const line = rows.map((t, i) => `<span class="${i === 0 ? 'now' : ''}">${esc(t)}</span>`)
+    .join('<span class="sp">›</span>');
+  // 内容复制一份是给滚动用的；放得下时不会滚，那一份也不会被看到
+  return `<div class="ctick"><div class="tk">${line}<span class="sp">›</span>${line}</div></div>`;
+}
+
 const fmtLeft = (s) => (s >= 60 ? `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}` : `${s}s`);
 
 /**
@@ -406,7 +445,7 @@ function statusConsole() {
     body = `<div class="crun">
       <span class="cf">${esc(dirOf(s0))}${s0.sub_state ? ' · ' + esc(s0.sub_state) : ''}</span>
       <span class="tdots"><i></i><i></i><i></i></span>
-    </div>`;
+    </div>${activityTicker(s0.session_id)}`;
     meta = busy.length > 1 ? `另有 ${busy.length - 1} 个会话在跑` : '';
   } else if (done) {
     cls = 'is-done'; dotLabel = '已完成';
@@ -541,6 +580,15 @@ function renderHome() {
   h += statusConsole();
 
   $('view').innerHTML = h;
+
+  // 只有真的放不下才滚动。手机上一个持续移动的东西是很强的注意力磁铁，
+  // 塞得下的时候让它静止——「有东西在动」本身应该是个信号，不是装饰。
+  const tk = $('view').querySelector('.ctick');
+  if (tk) {
+    const inner = tk.querySelector('.tk');
+    // 内容复制过一份，所以单份宽度是一半
+    tk.classList.toggle('roll', inner.scrollWidth / 2 > tk.clientWidth);
+  }
 
   // 关掉的是**这一批**（按最新一条的时间戳记），再有新的还会出现。
   // 一关永久静音就又变成了「悄悄替你决定」。
@@ -756,6 +804,22 @@ async function refresh() {
 // 排查这种「正常状态被显示成故障」最费时间。
 let offlineSince = null;
 
+/**
+ * 合并同一帧内的多次重绘请求。
+ *
+ * 事件是成批到的（SSE 重放、一轮里连续几个工具调用），逐条重绘既卡又没意义
+ * ——中间那些帧没人看得见。
+ */
+let renderPending = false;
+function scheduleRender() {
+  if (renderPending) return;
+  renderPending = true;
+  requestAnimationFrame(() => {
+    renderPending = false;
+    if (tab === 'home') render();
+  });
+}
+
 function connect() {
   const es = new EventSource('/api/stream');
   es.onopen = () => {
@@ -770,6 +834,30 @@ function connect() {
   };
   es.addEventListener('session', refresh);
   es.addEventListener('approval', refresh);
+  /**
+   * 工具调用事件 —— 履历的数据源。
+   *
+   * 这条流本来就在推（连上时会把历史事件一起送过来），首页以前只是没监听。
+   * 所以刷新页面立刻就有履历，不用等新事件发生。
+   */
+  es.addEventListener('event', (m) => {
+    try {
+      const e = JSON.parse(m.data);
+      if (e.type !== 'tool' && e.type !== 'tool-error') return;
+      // 命令常常是多行的（heredoc、带换行的脚本），压成一行再截断——
+      // 否则单行的履历轨道会被撑破
+      const text = String(e.detail || '').replace(/\s+/g, ' ').trim().slice(0, 52);
+      if (!text) return;
+      recentTools.push({ sid: e.session_id, text });
+      if (recentTools.length > 40) recentTools.splice(0, recentTools.length - 40);
+      /**
+       * **必须节流。** 服务端在连上时会把历史事件一次性重放（上限 3000 条），
+       * 每条都直接 render() 就是几千次整页重绘——页面一加载就卡死。
+       * 攒到下一帧再画一次，重放和实时都走同一条路。
+       */
+      scheduleRender();
+    } catch { /* 单条坏消息不该影响流 */ }
+  });
 }
 
 document.addEventListener('visibilitychange', () => {
