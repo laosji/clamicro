@@ -6,6 +6,16 @@ Watch Claude Code from your phone, and approve what it wants to run.
 
 Stop babysitting the terminal. When Claude Code needs permission, your Mac notifies you; open the page on your phone, read the command and a one-line summary, swipe to approve or reject — Claude Code continues immediately.
 
+<p align="center">
+  <img src="./docs/images/notch.png" width="620" alt="A notification capsule rendered at the Mac's notch: a green check badge, the project name, and the result line">
+</p>
+
+| Running | Something needs you | The decision |
+|:--:|:--:|:--:|
+| <img src="./docs/images/home-running.png" width="230" alt="Home screen while Claude Code is working: a breathing status console and a scrolling list of recent tool calls"> | <img src="./docs/images/home-pending.png" width="230" alt="Home screen with a pending approval at the top and a second one listed below"> | <img src="./docs/images/approval-detail.png" width="230" alt="Approval detail: risk level, impact, the command in full, and a drag-to-decide bar pinned to the bottom"> |
+
+*The screenshots are the real UI, not mockups. The notch capsule is a screen capture from a Mac.*
+
 **Be clear on the defaults before you assume it gates everything:**
 
 | | Waits | Then | Notifies you |
@@ -27,10 +37,20 @@ So out of the box it *tells you* about routine work and *stops* dangerous work. 
 npx clamicro install
 ```
 
-Two steps:
+Three steps:
 
-1. **In the terminal** — checks your environment, shows exactly what it will change in `~/.claude/settings.json`, waits for your confirmation, backs up and writes, asks whether to trust the current network, starts the service, prints a QR code.
-2. **Scan with your phone** — tap "Send a test approval" and approve it for real. That round-trip *is* the acceptance test.
+1. **In the terminal** — checks your environment, shows exactly what it will change in `~/.claude/settings.json`, waits for your confirmation, backs up and writes, asks whether to trust the current network, starts the service, and prints **a URL** (not a QR code — see below).
+2. **Open that URL on your phone**, on the same Wi-Fi. You get a pairing page. Tap "Show QR on the Mac"; the QR appears **on the Mac's screen only**. Scan it with your phone's camera.
+3. **Confirm on the Mac.** A dialog asks whether to let this device in, and shows where the request came from. Nothing is issued until you press Allow.
+
+Then walk through the built-in demo: it creates a fake approval so you can swipe one for real before anything real is at stake. That round-trip *is* the acceptance test.
+
+> **Why a URL and not a QR code in the terminal?** A QR in the terminal has to carry a credential,
+> and a terminal is a place things get *kept* — scrollback, screen recordings, screen sharing, the
+> phone camera of whoever is sitting next to you. Earlier versions printed a permanent master token
+> there; the version after that printed a 60-second pairing ticket, which was safe but usually
+> **expired before you got your phone out**. A URL carries nothing and never expires. The credential
+> is minted only after you tap the button, and it only ever appears on the Mac's screen.
 
 It works immediately after install: when approval is needed your Mac shows a notification and plays a sound, the terminal status line shows `⏳ N pending`, and the web UI is reachable from your phone.
 
@@ -113,12 +133,14 @@ The fingerprint combines **gateway IP + gateway MAC + subnet**. SSID needs Locat
 | Protection | What it stops |
 |---|---|
 | **Host header allowlist** | DNS rebinding. A malicious site rebinds its domain to your LAN IP; the browser treats it as same-origin, CORS is bypassed entirely, and it can read your dashboard and command text and approve operations — **without ever being on your Wi-Fi** |
-| **hooks / statusLine loopback-only** | Anyone on your subnet forging hook events: spamming approval notifications, injecting fake timeline entries, faking quota readings |
+| **hooks / statusLine / pair-new are local-only** | Anyone on your subnet forging hook events: spamming approval notifications, injecting fake timeline entries, faking quota readings — and, more seriously, minting themselves a pairing ticket. "Local" here means three things at once: loopback source **and** a loopback `Host` **and** no proxy headers. Source address alone is not enough: with a Cloudflare tunnel running, public traffic arrives from `127.0.0.1` |
+| **Mac-side confirmation on pairing** | Someone who merely *saw* the QR — over screen sharing, a projector, the phone camera of the person next to you, or the tunnel URL — getting a device token. Seeing the code is no longer enough; someone has to be sitting at the Mac and press Allow. Any failure of that dialog (timeout, no GUI session, a crash) counts as a **denial** |
 | **`/api/pair` requires a custom header** | CSRF. Cross-site "simple requests" are sent by the browser regardless — the side effect already happened — meaning any site you visit could make your Mac pop up a QR code |
 | **CSP `frame-ancestors 'none'`** | Clickjacking: a malicious page framing the approval screen and tricking you into swiping |
 | **Constant-time comparison** | Timing side channels on the token and per-approval keys |
 | **`SameSite=Lax` + `HttpOnly`** | CSRF, while still keeping you logged in when arriving from another app (`Strict` would force a re-scan every time) |
 | **Per-approval key** | A leaked deep link can only decide that one approval, and expires with it |
+| **Nothing credential-shaped in the terminal** | The installer prints a plain URL. It carries no token and never expires, so scrollback, screen recordings and shoulder-surfing get you nothing. The credential is minted only after you tap the button on the phone, and only ever renders on the Mac's screen |
 
 ### Risk detection is a hint, not a sandbox
 
@@ -150,11 +172,13 @@ Two consequences worth internalizing:
 If you need actual containment, that is a different tool: a VM, a container, or
 Claude Code's own permission rules restricting which tools may run at all.
 
-### In plain terms: that QR code is a key to your Mac
+### In plain terms: a paired phone is a key to your Mac
 
-**The token behind it grants permission to approve anything** — `rm -rf`, `sudo`, reading your `~/.ssh/id_rsa`. Treat it like a password:
+**A device token grants permission to approve anything** — `rm -rf`, `sudo`, reading your `~/.ssh/id_rsa`. Treat a paired phone like a key:
 
-- Don't leave the QR on screen where someone can photograph it; don't screenshot it into a group chat
+- The QR itself is no longer sufficient on its own: it is one-time, expires in 60 seconds, and pairing
+  additionally requires pressing **Allow** in a dialog on the Mac. Someone who photographs the code
+  still cannot pair without you. That said, don't leave it on screen — belt and braces
 - If you suspect it leaked, rotate immediately: `npx clamicro rotate-token` (every logged-in device is signed out at once)
 - The login cookie expires after 30 days; scan again then
 

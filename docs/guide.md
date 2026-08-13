@@ -63,7 +63,7 @@ Ordinary operations (`npm run build` and friends) **auto-approve after 10 second
 So:
 
 - you have to remember to open the page on your phone yourself
-- high-risk operations wait out the timeout (~9.5 min) and are **auto-rejected**, failing that turn
+- high-risk operations wait out the timeout (3 minutes by default) and are **auto-rejected**, failing that turn
 
 The second one sounds harsh, but the direction is right: while you're away, `rm -rf` should not get through.
 
@@ -182,7 +182,11 @@ There's only one channel — the macOS local notification — so there are only 
 - Settings → is "macOS notification" on? Tap "Send a test notification" to check directly
 - In macOS System Settings → Notifications, is "Script Editor" / `osascript` allowed?
 
-**Note**: operations that will auto-approve **deliberately don't notify** — 10 seconds is gone before you could look.
+**Note**: operations that will auto-approve **do still notify** — you should know what ran on
+your machine, even when nothing was asked of you. The notification is informational; the 10
+seconds are usually gone before you can act on it. If you do want to intervene, opening the
+approval's detail page **pauses the clock** and gives you the full timeout (3 minutes) to decide.
+You can silence these entirely with `notifyAutoApproved: false` in the config file.
 
 ### Claude Code is stuck
 
