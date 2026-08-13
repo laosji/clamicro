@@ -275,47 +275,45 @@ if (up) {
   )
 }
 
-// 6. 二维码
+// 6. 入口
 /**
- * 码里放**一次性配对券**，不放主令牌。
+ * 终端里给的是**一个网址**，不是二维码。
  *
- * 原来印的是 `/ui?t=<主令牌>`。那是一张永久、全权、吊销不掉的凭证，却被放进
- * 一个天然会被留存的载体里：终端回滚缓冲、屏幕录制、投屏、旁边人的手机镜头。
- * 一旦泄露，`clamicro forget <device>` 也收不回来——它根本不属于任何设备。
- * 这等于把新做的一次性配对和设备令牌整套机制绕开了。
+ * 上一版印的是一次性配对券的二维码。安全上没问题（券 60 秒过期、用一次作废），
+ * 但**时序上是坏的**：券在安装那一刻就开始倒数，而人还要读完输出、掏手机、
+ * 解锁、打开相机——等镜头对上去，码多半已经死了。然后你会以为是网络问题，
+ * 反复重装。
  *
- * 配对券：60 秒过期、用一次即作废、换出来的是可吊销的设备令牌。
+ * 更早那一版印的是 `/ui?t=<主令牌>`，没有有效期所以「能用」，代价是把一张
+ * 永久、全权、吊销不掉的凭证放进终端回滚缓冲、屏幕录制和旁人的镜头里。
+ *
+ * 网址两头都躲开了：**它不含任何凭证，所以不怕被留存；它不会过期，所以什么
+ * 时候掏手机都行。** 凭证在手机点了按钮之后才生成，而且只出现在 Mac 屏幕上。
+ *
+ * 完整链路：手机开网址 → 点「在 Mac 上显示二维码」 → Mac 弹码 → 手机扫 →
+ * Mac 弹确认框 → 点允许 → 手机拿到可吊销的设备令牌。
+ * 手机那一端全程不持有任何秘密。
  */
-say(`\n${c.b('  最后一步：手机扫码')}\n`)
+say(`\n${c.b('  最后一步：手机打开这个网址')}\n`)
 
-let pairId = null
-try {
-  const r = await fetch(`http://127.0.0.1:${config.port}/api/pair/new`, {
-    method: 'POST',
-    signal: AbortSignal.timeout(1500),
-  })
-  if (r.ok) pairId = (await r.json()).id
-} catch { /* 服务没起来，下面走兜底 */ }
-
-if (pairId) {
-  const loginUrl = `${base}/ui/pair/${pairId}`
-  const qr = spawnSync('qrencode', ['-t', 'ANSIUTF8', '-m', '2', loginUrl], { encoding: 'utf8' })
-  if (qr.stdout) say(qr.stdout)
-  else say(c.dim('  （装 qrencode 可直接扫码：brew install qrencode）'))
-  say(`  ${c.dim(loginUrl)}`)
-  if (config.altUrl) {
-    say(`  ${c.dim(`打不开的话用备用地址：${config.altUrl}/ui/pair/${pairId}`)}`)
-  }
-  // 必须说出有效期。扫不上的人会以为是网络问题，反复试一张已经过期的码
-  say(`  ${c.dim('这张码 60 秒内有效、只能用一次。过期就跑 npx clamicro qr 再要一张。')}`)
+if (config.lanIp) {
+  say(`     ${c.b(base)}`)
+  // .local 换 Wi-Fi、换 IP 之后依然有效，所以放在前面；但有些 Android 和
+  // Windows 解析不了 mDNS，必须同时给出 IP，否则那部分人会直接卡死在这里
+  if (config.altUrl) say(`     ${c.dim(`解析不了的话用：${config.altUrl}`)}`)
+  say('')
+  say(`  ${c.dim('打开后点「在 Mac 上显示二维码」，用手机相机扫 Mac 屏幕上那个码。')}`)
+  say(`  ${c.dim('然后 Mac 上会弹确认框 —— 点「允许」才会真的配对。')}`)
 } else {
-  // 拿不到券时**不能**退回去印主令牌——那正是这段代码要消灭的东西
-  say(`  ${c.y('!')} 服务还没起来，暂时给不了配对码`)
-  say(`  ${c.dim('服务起来后在 Mac 上跑：npx clamicro qr')}`)
+  // 没探测到局域网 IP 时这条路根本不通，别给一个打不开的网址让人白试
+  say(`  ${c.y('!')} 没探测到局域网 IP，手机暂时连不上`)
+  say(`  ${c.dim('确认 Mac 连着 Wi-Fi 后重跑安装；或在 Mac 上跑：npx clamicro qr')}`)
 }
 say('')
+say(`  ${c.dim('想直接看二维码：npx clamicro qr')}`)
+say('')
 
-say(`  扫码后点「发一条测试审批」，在手机上批一次 ${c.dim('—— 这就是验收')}`)
+say(`  配对完点「发一条测试审批」，在手机上批一次 ${c.dim('—— 这就是验收')}`)
 say(``)
 say(`  ${c.dim('现在已经能用了：需要审批时 Mac 会弹通知并响一声，终端状态栏也会显示待审批数。')}`)
 say('')

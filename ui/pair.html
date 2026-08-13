@@ -49,11 +49,31 @@
   /* 比 .note 再淡一档：它是「你需要知道的事」，不是「刚发生的事」 */
   .hint{font-size:12.5px; line-height:1.55; color:var(--dim); opacity:.72; margin:12px 0 0}
   .hint b{color:var(--fg); font-weight:600; opacity:.85}
+  .steps{
+    margin:0 0 22px; padding:14px 16px 14px 34px; border-radius:10px;
+    background:var(--monobg); border:1px solid var(--line);
+    font-size:14px; line-height:1.7; color:var(--dim);
+  }
+  .steps b{color:var(--fg); font-weight:600}
+  .steps li + li{margin-top:2px}
 </style>
 </head>
 <body>
 <h1>需要配对</h1>
-<p>这台设备还没有访问口令。点下面的按钮，<b>你的 Mac 上会弹出一个二维码</b>。</p>
+<p>这台设备还没有访问口令。三步，都在一分钟内。</p>
+
+<!--
+  三步必须**一次说完**。配对现在多了一道 Mac 上的确认框，而扫完码之后手机
+  会停在一个空白的加载页上等它——最长 60 秒。不预先说清楚的话，人会以为
+  「扫了没反应」，然后返回、重扫，把券一张张烧掉。
+
+  写成有序列表而不是一段话：它是**过程**，人需要知道自己走到哪一步了。
+-->
+<ol class="steps">
+  <li>点下面的按钮，<b>Mac 屏幕上</b>会弹出二维码</li>
+  <li>用手机<b>相机 App</b> 对着 Mac 屏幕扫</li>
+  <li>回到 Mac，在确认框上点<b>「允许」</b></li>
+</ol>
 
 <button id="pair">在 Mac 上显示二维码</button>
 <!--
@@ -63,7 +83,13 @@
   而且原生相机本来就是更好的路径——实时取景、自动对焦、扫完直接开 Safari。
   所以要解决的其实不是「没有扫码入口」，是「用户不知道该拿什么扫」。
 -->
-<p class="hint">二维码会出现在 <b>Mac 屏幕</b>上。用 iPhone 自带的<b>相机 App</b> 对着扫，会自动跳转登录。</p>
+<!--
+  这句解释的是「为什么不能在这个页面里直接扫」。答案不是做不到，是**故意的**：
+  这个页面未登录就能打开，所以它一旦能拿到二维码或配对券，那张券就等于公开了。
+  凭证只出现在 Mac 屏幕上——你得能看见那块屏，才拿得到。
+-->
+<p class="hint">二维码<b>不会</b>显示在这个页面上，只出现在 Mac 屏幕上。
+这个页面谁都能打开，所以它本身不含任何口令。</p>
 <p class="note" id="msg"></p>
 
 <div class="alt">
@@ -83,7 +109,9 @@ $('pair').onclick = async function () {
     if (r.ok) {
       this.textContent = '✓ 已在 Mac 上显示';
       this.classList.add('done');
-      $('msg').textContent = '去看你的 Mac 屏幕，用相机扫那个二维码。';
+      // 扫完之后手机会停在加载页上等 Mac 的确认框，这句先把它说出来
+      $('msg').innerHTML = '去看你的 Mac 屏幕，用相机扫那个二维码。<br>'
+        + '扫完手机会停一下 —— 那是在等你回 Mac 点「允许」。';
     } else {
       $('msg').textContent = r.error || '失败了，试试下面的命令';
       this.disabled = false;
