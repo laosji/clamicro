@@ -3,6 +3,7 @@ import { homedir, networkInterfaces } from 'node:os'
 import { join } from 'node:path'
 import { randomBytes } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
+import { SELF_DEADLINE_MS } from './limits.mjs'
 
 export const CONFIG_DIR = join(homedir(), '.claude', 'clamicro')
 export const CONFIG_FILE = join(CONFIG_DIR, 'config.json')
@@ -40,7 +41,7 @@ export function tunnelAlive() {
  * 这个值不是「建议」，是设置页和 API 写入时都要夹住的边界：用户在网页上
  * 把等待时间拉到 10 分钟，得到的不是「等更久」，是「审批失效」。
  */
-export const MAX_APPROVAL_TIMEOUT_MS = 570_000
+export const MAX_APPROVAL_TIMEOUT_MS = SELF_DEADLINE_MS
 /** 下限：短于这个时间人根本来不及看一眼手机 */
 export const MIN_APPROVAL_TIMEOUT_MS = 10_000
 
@@ -253,7 +254,7 @@ export function loadConfig() {
    * 删掉只会留下 undefined，默认值补不回来。赋回之后它等于默认，
    * saveConfig 的 pruneDefaults 自然就不再把它写盘了。
    */
-  if (config.approval?.timeoutMs === 570_000) {
+  if (config.approval?.timeoutMs === SELF_DEADLINE_MS) {
     config.approval.timeoutMs = DEFAULTS.approval.timeoutMs
     dirty = true
   }

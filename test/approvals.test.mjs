@@ -220,3 +220,35 @@ test('extend：有人在看就停表', async (t) => {
     assert.equal(s.get(ap.id).status, 'pending')
   })
 })
+
+test('extend 必须封顶在 hook 的系统超时之前', async (t) => {
+  const mk = () => {
+    const s = new ApprovalStore()
+    return { s, ap: s.create({ session_id: 'x', tool_name: 'Bash', tool_input: { command: 'ls' } },
+      { autoApproveMs: 10_000 }) }
+  }
+
+  await t.test('反复延长顶不过 570 秒', () => {
+    // 详情页每几秒 sync 一次，每次都 extend。没有天花板的话，在那个页面上
+    // 停留超过 570 秒这条审批就永远不会自己结掉——而那会走到 hook 的 600s
+    // 系统超时，被当成「非阻塞错误」放行到 Claude Code 自己的权限流程，
+    // 终端空挂着等一个没人看的弹框。570s 这条线的全部意义就是不让它发生。
+    const { s, ap } = mk()
+    for (let i = 0; i < 50; i++) s.extend(ap.id, 180_000)
+    const ttl = s.get(ap.id).expires_at - ap.created_at
+    assert.ok(ttl <= 570_000, `延长到了 ${Math.round(ttl / 1000)}s，越过了 570s 红线`)
+  })
+
+  await t.test('一次要一个超大的时限也顶不过去', () => {
+    const { s, ap } = mk()
+    s.extend(ap.id, 99_999_000)
+    assert.ok(s.get(ap.id).expires_at - ap.created_at <= 570_000)
+  })
+
+  await t.test('天花板从 created_at 算，不是从现在算', () => {
+    // 它是这条 hook 连接能活多久的上限，跟你什么时候点开页面无关
+    const { s, ap } = mk()
+    s.extend(ap.id, 570_000)
+    assert.ok(s.get(ap.id).expires_at <= ap.created_at + 570_000 + 50)
+  })
+})

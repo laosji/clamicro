@@ -1,4 +1,5 @@
 import { EventEmitter } from 'node:events'
+import { SELF_DEADLINE_MS } from './limits.mjs'
 
 /**
  * 会话级的 Pause / Resume / Cancel。
@@ -19,9 +20,9 @@ export const CONTROL = {
   CANCELLED: 'cancelled',
 }
 
-// 挂起最长时间。同样必须小于 hook 的 600s 超时，
-// 否则会被当成非阻塞错误、工具照常执行。
-const MAX_HOLD_MS = 570_000
+// 挂起最长时间。和审批的时限同源——都是「必须赶在 hook 的系统超时之前
+// 自己结掉」，越过去会被当成非阻塞错误、工具照常执行。
+const MAX_HOLD_MS = SELF_DEADLINE_MS
 
 export class ControlStore extends EventEmitter {
   #state = new Map() // sessionId -> 'none' | 'paused' | 'cancelled'
