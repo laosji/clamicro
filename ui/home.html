@@ -350,27 +350,59 @@
   }
   /* 头部区（标题 / 路径 / 用量）到此为止。没有这条界，运行中卡片直接怼在
      7d 那行下面，光环还会往上糊到用量条上——两块无关的信息看着像连在一起 */
-  /* ── 测试完成横幅 + 加到主屏幕（都只在引导刚走完时出现一次）── */
-  .testdone{
-    display:flex; align-items:flex-start; gap:11px; margin-bottom:16px;
-    background:color-mix(in srgb,var(--ok) 10%,var(--card));
-    border:1px solid color-mix(in srgb,var(--ok) 32%,transparent);
-    border-radius:14px; padding:14px 15px;
+  /* ── 加到主屏幕：底部弹层 ──
+     做成从底部升起的 sheet 而不是列表里的一张卡：它是一次性的建议，不属于
+     首页的常驻内容。内联卡片会把主控台和待审批往下挤，而这个建议**任何时候
+     都没有它们重要**；弹层浮在上面，关掉之后首页一个像素都没变过。 */
+  .a2hs-scrim{
+    position:fixed; inset:0; z-index:40; background:rgba(0,0,0,.45);
+    animation:scrim-in .22s ease-out both;
   }
-  .testdone .ti{font-size:17px; color:var(--ok); flex:0 0 auto; line-height:1.3}
-  .testdone .tt{font-size:14px; font-weight:600; margin-bottom:3px}
-  .testdone .tm{font-size:12.5px; color:var(--dim); line-height:1.5}
-
   .a2hs{
-    background:var(--card); border:1px solid var(--line); border-radius:16px;
-    padding:20px 18px 18px; position:relative; margin-bottom:16px;
+    position:fixed; left:0; right:0; bottom:0; z-index:41;
+    background:var(--card); border-top:1px solid var(--line);
+    border-radius:20px 20px 0 0;
+    padding:22px 20px calc(20px + env(safe-area-inset-bottom));
+    animation:sheet-up .26s cubic-bezier(.2,.9,.3,1) both;
+    /* 小屏上内容可能顶到屏幕外，最后那个安装按钮就点不着了。
+       留 15vh 给背景，超出的部分自己滚 */
+    max-height:85vh; overflow-y:auto;
+  }
+  /* 宽屏上别拉成一整条：手机是主场，但桌面浏览器打开时一条横贯全屏的
+     弹层会显得莫名其妙 */
+  @media (min-width:600px){
+    .a2hs{
+      left:50%; right:auto; transform:translateX(-50%);
+      width:min(520px, 92vw); border-radius:20px; bottom:24px;
+      border:1px solid var(--line);
+    }
+    @keyframes sheet-up{from{transform:translate(-50%,18px); opacity:0}
+                        to{transform:translate(-50%,0); opacity:1}}
+  }
+  @keyframes sheet-up{from{transform:translateY(100%)} to{transform:translateY(0)}}
+  @keyframes scrim-in{from{opacity:0} to{opacity:1}}
+  @media (prefers-reduced-motion: reduce){
+    .a2hs, .a2hs-scrim{animation:none}
+  }
+  /* 抓握条：告诉人这是一层可以关掉的东西，不是页面的一部分 */
+  .a2hs .grip{
+    width:36px; height:4px; border-radius:2px; background:var(--line);
+    margin:-8px auto 16px;
   }
   .a2hs .close{
-    position:absolute; top:8px; right:8px; width:34px; height:34px;
+    position:absolute; top:10px; right:10px; width:36px; height:36px;
     font-size:15px; color:var(--dim); background:none; border:none; cursor:pointer;
   }
   .a2hs .icon-row{display:flex; align-items:center; gap:12px; margin-bottom:4px}
-  .a2hs .appicon{width:52px; height:52px; border-radius:13px; flex:0 0 auto}
+  /* 这里放的是**你要去按的那个键**，不是我们自己的 App 图标。
+     App 图标在这一刻不提供信息——你已经在这个应用里了；而「哪个键」正是
+     这条提示唯一要回答的问题。 */
+  .a2hs .appicon{
+    width:52px; height:52px; border-radius:13px; flex:0 0 auto;
+    background:var(--monobg); border:1px solid var(--line);
+    display:flex; align-items:center; justify-content:center; color:var(--run);
+  }
+  .a2hs .appicon svg{width:26px; height:26px}
   .a2hs h2{font-size:16.5px; margin:0 0 2px}
   .a2hs .sub{font-size:12.5px; color:var(--dim); line-height:1.45}
   .a2hs .steps{margin-top:16px; padding-top:14px; border-top:1px solid var(--line)}
@@ -383,8 +415,9 @@
   }
   .a2hs .step .ic{
     display:inline-flex; align-items:center; justify-content:center; width:26px; height:26px;
-    border-radius:7px; background:var(--monobg); flex:0 0 auto; font-size:14px;
+    border-radius:7px; background:var(--monobg); flex:0 0 auto; color:var(--dim);
   }
+  .a2hs .step .ic svg{width:15px; height:15px}
   /* 箭头指向 Safari 底部工具栏里的分享按钮。网页够不到系统 UI，只能这样引导
      ——所以它只在**分享键真的在底部**的 iOS Safari 上出现 */
   .a2hs .point{
@@ -998,34 +1031,120 @@ function renderPathBar() {
  * 引导卡片的行为。必须在每次 render 之后重新接——innerHTML 一换，
  * 上一批 DOM 连同它们的监听器就都没了。
  */
-function wireOnboardCards() {
-  const card = $('a2hs');
+/**
+ * 「加到主屏幕」的底部弹层。
+ *
+ * ## 为什么是弹层，不是首页里的一张卡
+ *
+ * 它是**一次性的建议**，不属于首页的常驻内容。做成内联卡片的话，它会把主控台
+ * 和待审批往下挤，而这个建议任何时候都没有它们重要；弹层浮在上面，关掉之后
+ * 首页一个像素都没变过。
+ *
+ * ## 为什么在 render 之外
+ *
+ * 首页每来一条 SSE 事件就整块重画。跟着 render 走的话，弹层会**每次重新挂载**、
+ * 升起动画一遍遍重放，看着像在抽搐。所以它只挂一次，直接挂在 body 上，
+ * `$('view').innerHTML = h` 碰不到它。
+ */
+/* iOS 的分享键：一个开口向上的托盘，加一支往外的箭头。
+   用内联 SVG 而不是 emoji——emoji 的字形随系统版本变，而这里要的是
+   「跟你屏幕上那个键长得一样」 */
+const SHARE_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+  stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M12 3.5v11"/><path d="M8.2 7.3 12 3.5l3.8 3.8"/>
+  <path d="M7 11H5.6A1.6 1.6 0 0 0 4 12.6v6.8A1.6 1.6 0 0 0 5.6 21h12.8a1.6 1.6 0 0 0 1.6-1.6v-6.8A1.6 1.6 0 0 0 18.4 11H17"/>
+</svg>`;
+
+/* 加号：第二步「添加到主屏幕」那一项 */
+const PLUS_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+  stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>`;
+
+/* Android/桌面 Chrome 是右上角的三点菜单 */
+const MENU_SVG = `<svg viewBox="0 0 24 24" fill="currentColor">
+  <circle cx="12" cy="5" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="12" cy="19" r="1.8"/>
+</svg>`;
+
+function maybeShowA2HS() {
+  if (document.getElementById('a2hs')) return; // 已经挂过了
 
   /**
-   * 「测试完成」横幅显示过一次就把标记清掉。
+   * 有待审批时**不弹**，等它处理完再说。
    *
-   * 清的时机是**这一次渲染已经完成**，不是渲染之前——否则同一次 render 里
-   * onboardCards() 读到的就是空的，横幅根本不会出现。
+   * 这是一个会盖住半屏、带遮罩的模态层，而屏幕上可能正躺着一条要你决定的
+   * 高危操作。「以后怎么再打开这个页面」在任何时候都没有它重要。
    *
-   * 但如果 a2hs 卡片还在，就先不清：清了下次 render（比如来了条 SSE 事件、
-   * 或者切个 tab 再回来）整块就消失了，人还没来得及点那两步。
+   * 必须在**消费 ccm-demo 之前**就返回——否则标记被用掉，等审批处理完就
+   * 再也不会弹了。maybeShowA2HS 每次 render 都会调，所以推迟不会丢。
    */
-  if (!card) {
-    try { localStorage.removeItem('ccm-demo'); } catch {}
-    return;
-  }
+  if (pending.length) return;
 
-  $('a2hsX').onclick = () => {
-    try {
-      localStorage.setItem('ccm-a2hs-dismissed', '1');
-      localStorage.removeItem('ccm-demo');
-    } catch {}
-    render();
+  let ok = false;
+  try {
+    // ccm-demo：刚走完引导的演示审批。弹层只在那一次之后出现
+    if (localStorage.getItem('ccm-demo') !== '1') return;
+    // 已经是从主屏幕图标打开的就永远不提示——它已经装好了
+    const standalone = matchMedia('(display-mode: standalone)').matches
+      || navigator.standalone === true;
+    ok = !standalone && localStorage.getItem('ccm-a2hs-dismissed') !== '1';
+    // 无论弹不弹，这个标记都用掉：它标的是「刚做完演示」，那件事已经过去了
+    localStorage.removeItem('ccm-demo');
+  } catch { return; /* 隐私模式：不弹，不影响主功能 */ }
+  if (!ok) return;
+
+  const iOS = /iPad|iPhone|iPod/.test(navigator.userAgent)
+    || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  // 图标记住的是你当时打开的那个地址，用 IP 加的话路由器重新分配之后就打不开了
+  const warn = location.hostname.endsWith('.local') ? ''
+    : `<div class="sub" style="margin-top:8px">你现在用的是 IP 地址。图标会记住它，
+       而路由器重新分配 IP 之后那个图标就打不开了——换成 <b>.local</b> 那个地址再添加更稳。</div>`;
+  // 箭头只在 iOS 出现：那里分享键确实在屏幕最下方，指下去才是对的。
+  // Android 的菜单在右上角，一个向下的箭头会把人指到错的地方
+  // 步骤里的图标和上面那个大图标必须是**同一个字形**：同一个键画成两种样子
+  // （一个蓝底 emoji、一个描边 SVG）会让人以为是两个不同的按钮
+  const how = iOS
+    ? `<div class="step"><span class="num">1</span><span class="ic">${SHARE_SVG}</span>点底部的分享按钮</div>
+       <div class="step"><span class="num">2</span><span class="ic">${PLUS_SVG}</span>选「添加到主屏幕」</div>`
+    : `<div class="step"><span class="num">1</span><span class="ic">${MENU_SVG}</span>打开浏览器菜单</div>
+       <div class="step"><span class="num">2</span><span class="ic">${PLUS_SVG}</span>选「添加到主屏幕」或「安装应用」</div>`;
+
+  const scrim = document.createElement('div');
+  scrim.className = 'a2hs-scrim';
+  const sheet = document.createElement('div');
+  sheet.className = 'a2hs';
+  sheet.id = 'a2hs';
+  sheet.setAttribute('role', 'dialog');
+  sheet.setAttribute('aria-label', '加到主屏幕');
+  sheet.innerHTML = `
+    <div class="grip"></div>
+    <button class="close" id="a2hsX" aria-label="关闭">✕</button>
+    <div class="icon-row">
+      <div class="appicon" aria-hidden="true">${iOS ? SHARE_SVG : MENU_SVG}</div>
+      <div><h2>加到主屏幕</h2>
+        <div class="sub">像打开一个 App 一样打开它，不用每次找网址</div></div>
+    </div>
+    ${warn}
+    <div class="steps">${how}</div>
+    ${iOS ? `<div class="point"><div class="arrow">↓</div>
+      <div class="pt">就是屏幕最下面那个按钮</div></div>` : ''}
+    <button class="install hidden" id="a2hsGo">添加到主屏幕</button>`;
+
+  const close = () => {
+    try { localStorage.setItem('ccm-a2hs-dismissed', '1'); } catch {}
+    scrim.remove();
+    sheet.remove();
   };
+  // 三条路都能关掉：✕、点遮罩、Esc。少给一条就会有人被困在弹层里
+  sheet.querySelector('#a2hsX').onclick = close;
+  scrim.onclick = close;
+  document.addEventListener('keydown', function esc(e) {
+    if (e.key !== 'Escape') return;
+    document.removeEventListener('keydown', esc);
+    close();
+  });
 
   // Android/Chrome 能直接弹系统安装框；iOS 没有这个事件，只能给操作说明。
-  // 事件可能在这个页面加载之前就发过了，所以在 window 上存一份
-  const go = $('a2hsGo');
+  // 事件可能在弹层挂上来之前就发过了，所以在 window 上存一份
+  const go = sheet.querySelector('#a2hsGo');
   if (window.__ccmInstallPrompt) go.classList.remove('hidden');
   go.onclick = async () => {
     const p = window.__ccmInstallPrompt;
@@ -1034,7 +1153,10 @@ function wireOnboardCards() {
     p.prompt();
     await p.userChoice;
     window.__ccmInstallPrompt = null;
+    close();
   };
+
+  document.body.append(scrim, sheet);
 }
 
 window.addEventListener('beforeinstallprompt', (e) => {
@@ -1044,53 +1166,6 @@ window.addEventListener('beforeinstallprompt', (e) => {
   if (go) go.classList.remove('hidden');
 });
 
-function onboardCards(which) {
-  let demo = false, a2hs = false;
-  try {
-    demo = localStorage.getItem('ccm-demo') === '1';
-    // 已经是从主屏幕图标打开的（standalone）就永远不提示——它已经装好了
-    const standalone = matchMedia('(display-mode: standalone)').matches
-      || navigator.standalone === true;
-    a2hs = demo && !standalone && localStorage.getItem('ccm-a2hs-dismissed') !== '1';
-  } catch { /* 隐私模式：两张卡都不显示，不影响主功能 */ }
-  if (!demo) return '';
-  if (which === 'a2hs') return a2hs ? a2hsCard() : '';
-
-  return `<div class="testdone">
-    <div class="ti">✓</div>
-    <div><div class="tt">测试完成</div>
-      <div class="tm">以后 Claude 真的需要你时，就是刚才那个样子——划一下就好。</div></div>
-  </div>`;
-}
-
-function a2hsCard() {
-  const iOS = /iPad|iPhone|iPod/.test(navigator.userAgent)
-    || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-  // 图标记住的是你当时打开的那个地址，用 IP 加的话路由器重新分配之后就打不开了
-  const warn = location.hostname.endsWith('.local') ? ''
-    : `<div class="sub" style="margin-top:8px">你现在用的是 IP 地址。图标会记住它，
-       而路由器重新分配 IP 之后那个图标就打不开了——换成 <b>.local</b> 那个地址再添加更稳。</div>`;
-  // 箭头只在 iOS 出现：那里分享键确实在屏幕最下方，指下去才是对的。
-  // Android 的菜单在右上角，一个向下的箭头会把人指到错的地方
-  const how = iOS
-    ? `<div class="step"><span class="num">1</span><span class="ic">⬆️</span>点底部的分享按钮</div>
-       <div class="step"><span class="num">2</span><span class="ic">➕</span>选「添加到主屏幕」</div>`
-    : `<div class="step"><span class="num">1</span><span class="ic">⋮</span>打开浏览器菜单</div>
-       <div class="step"><span class="num">2</span><span class="ic">➕</span>选「添加到主屏幕」或「安装应用」</div>`;
-  return `<div class="a2hs" id="a2hs">
-    <button class="close" id="a2hsX" aria-label="关闭">✕</button>
-    <div class="icon-row">
-      <img class="appicon" src="/ui/icons/icon-180.png" alt="">
-      <div><h2>加到主屏幕</h2>
-        <div class="sub">像打开一个 App 一样打开它，不用每次找网址</div></div>
-    </div>
-    ${warn}
-    <div class="steps">${how}</div>
-    ${iOS ? `<div class="point"><div class="arrow">↓</div>
-      <div class="pt">就是屏幕最下面那个按钮</div></div>` : ''}
-    <button class="install hidden" id="a2hsGo">添加到主屏幕</button>
-  </div>`;
-}
 function renderHome() {
   const busy = sessions.filter((s) => s.state === 'Running' || s.state === 'Waiting Approval');
   const off = offlineSince !== null && Date.now() - offlineSince > 5000;
@@ -1126,7 +1201,6 @@ function renderHome() {
     }
   }
 
-  h += onboardCards('banner');
   h += autoDenyBanner();
 
   // 主控台先于列表：它是「现在什么情况」的答案，列表是「都有哪些」的明细。
@@ -1177,14 +1251,6 @@ function renderHome() {
       </div>`).join('');
   }
 
-  /**
-   * 主屏幕卡片放在**最后**，不是跟着横幅一起放顶部。
-   *
-   * 它讲的是「以后怎么再打开这个页面」，属于闲事。放在主控台前面的话，这时
-   * 万一来了一条待审批，那条真正紧急的东西会被一张推广卡片推下去——那是
-   * 这个产品最不能出的错。
-   */
-  h += onboardCards('a2hs');
   renderTopUsage();
 
   $('view').innerHTML = h;
@@ -1372,7 +1438,7 @@ function render() {
     $('view').innerHTML = `<div class="empty"><b>页面渲染出错</b>${String(err && err.message || err)}</div>`;
     console.error(err);
   }
-  if (tab === 'home') { attachListSwipes(); tickDeadlines(); wireOnboardCards(); }
+  if (tab === 'home') { attachListSwipes(); tickDeadlines(); maybeShowA2HS(); }
   for (const b of document.querySelectorAll('.notice .x')) {
     b.onclick = (e) => {
       e.preventDefault();
