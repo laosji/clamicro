@@ -14,7 +14,6 @@
     --tabbg:rgba(255,255,255,.82);
   }
   @media (prefers-color-scheme:dark){
-  .glow .orb{mix-blend-mode:screen}
     :root{
       --bg:#0b0d10; --card:#14181d; --fg:#e8eaed; --dim:#8b93a1; --line:#242a32; --monobg:#0f1318;
       --ok:#4ade80; --no:#f87171; --warn:#fbbf24; --run:#39ff8a;
@@ -43,7 +42,13 @@
   header h1{font-size:19px; margin:0; font-weight:600}
   .dot{width:8px;height:8px;border-radius:50%;background:var(--dim);flex:0 0 auto;transition:background .3s}
   .dot.live{background:var(--ok)}
-  header a{margin-left:auto; font-size:14px; color:var(--run); text-decoration:none}
+  header a{
+    margin-left:auto; font-size:19px; line-height:1; color:var(--dim); text-decoration:none;
+    /* 44×44 是拇指可靠命中的最小面积；图标视觉尺寸不用跟着一起变大 */
+    display:flex; align-items:center; justify-content:center;
+    width:44px; height:44px; margin-right:-10px;
+  }
+  header a:active{color:var(--fg)}
 
   /* ── 状态主控台 ──
      把「用量 / 运行状态 / 待审批」合成一个组件。它们本来就是同一个问题的
@@ -116,35 +121,45 @@
   }
 
 
-  /* ── 漂移光球 ──
-     「Apple Intelligence 那种感觉」真正的来源；卡片自身的描边辉光只是底子。
-     三个大尺寸高斯模糊的球各自按不同周期漂移，周期互质（7 / 8.5 / 6.2 秒）
-     所以合成节奏不重复——看起来像在思考，而不是在闪。
+  /* ── 流动光环 ──
+     Apple Intelligence 那种观感来自**沿着边界流动的极光**，不是一圈静止的
+     辉光：亮部绕着卡片走，永远不停在同一处。
 
-     性能：blur 是**静态**的（每个球的模糊半径不变），只有 transform 和
-     opacity 在动，两者都能交给合成器。动 filter 才是真的贵。 */
+     动的是**渐变自己的角度**，不是元素。先试过给整个 ::before 加 rotate——
+     宽卡片一转对角线远大于高，绿雾直接甩出去半屏。改用 @property 让 conic
+     的 from 角连续插值：几何完全不动，只有亮部在转。没有 @property 的浏览器
+     退化成一圈静止极光，下面那层明暗呼吸还在，不会变成死图。
+
+     色相只在 绿→薄荷→青→天蓝 这一段里走。产品的语汇是单色终端，整条彩虹
+     会变成另一个产品；相邻色相已经足够让人看出「它在流动」。 */
+  @property --aura{ syntax:'<angle>'; initial-value:0deg; inherits:false }
   .glow{position:relative; isolation:isolate}
+  .glow::before{
+    content:""; position:absolute; inset:-14px; border-radius:28px;
+    z-index:0; pointer-events:none;
+    background:conic-gradient(from var(--aura),
+      #39ff8a, #4affc8, #35d9ff, #6ad0ff, #57ffb0, #39ff8a);
+    filter:blur(24px); opacity:.36;
+    animation:aura-spin 9s linear infinite;
+  }
+  /* 明暗呼吸叠在自转之上。两个周期互质（9s / 3.6s），合成节奏不重复——
+     重复的节奏会被看成「一段循环动画」，而不是「它在思考」 */
+  .glow::after{
+    content:""; position:absolute; inset:-14px; border-radius:28px;
+    z-index:0; pointer-events:none;
+    background:radial-gradient(ellipse at 50% 50%,
+      color-mix(in srgb,var(--run) 26%,transparent), transparent 70%);
+    filter:blur(18px);
+    animation:aura-pulse 3.6s ease-in-out infinite;
+  }
+  @keyframes aura-spin{to{--aura:360deg}}
+  @keyframes aura-pulse{0%,100%{opacity:.18}50%{opacity:.5}}
   .glow > .console{position:relative; z-index:1}
-  .glow .orb{position:absolute; border-radius:50%; pointer-events:none; z-index:0;
-    filter:blur(30px); will-change:transform, opacity}
-  .glow .o1{width:150px; height:150px; left:-34px; top:-30px;
-    background:radial-gradient(circle, color-mix(in srgb,var(--run) 55%,transparent), transparent 70%);
-    animation:orb1 7s ease-in-out infinite}
-  .glow .o2{width:126px; height:126px; right:-24px; top:8px;
-    background:radial-gradient(circle, color-mix(in srgb,var(--run) 42%,transparent), transparent 70%);
-    animation:orb2 8.5s ease-in-out infinite}
-  .glow .o3{width:110px; height:110px; left:38%; bottom:-38px;
-    background:radial-gradient(circle, color-mix(in srgb,var(--run) 38%,transparent), transparent 70%);
-    animation:orb3 6.2s ease-in-out infinite}
-  @keyframes orb1{0%,100%{transform:translate(0,0) scale(1); opacity:.5}
-                  50%{transform:translate(20px,14px) scale(1.28); opacity:.95}}
-  @keyframes orb2{0%,100%{transform:translate(0,0) scale(1); opacity:.35}
-                  50%{transform:translate(-16px,12px) scale(1.18); opacity:.8}}
-  @keyframes orb3{0%,100%{transform:translate(0,0) scale(1); opacity:.3}
-                  50%{transform:translate(12px,-12px) scale(1.32); opacity:.72}}
-  /* screen 是「加光」，只在深色底上成立；浅色底加光=变白，光球会糊成
-     一团灰白，所以浅色模式不用混合模式，只压低透明度 */
-  @media (prefers-color-scheme:light){ .glow .orb{opacity:.45; filter:blur(34px)} }
+  /* 浅色底上加光会糊成灰白，压低就行 */
+  @media (prefers-color-scheme:light){
+    .glow::before{opacity:.24; filter:blur(28px)}
+    .glow::after{opacity:.16}
+  }
   /* 主控台内部元素要浮在光晕之上 */
   .console > *{position:relative; z-index:1}
 
@@ -169,14 +184,21 @@
   /* 呼吸和涟漪正是 prefers-reduced-motion 要关掉的东西。
      关掉之后光晕**保持在中等亮度**而不是消失——它承载的是「在运行」
      这个信息，不能因为用户不想看动画就把信息一起拿走 */
+  /**
+   * 「减弱动态效果」要停的是**位移和缩放**，不是全部动效。
+   *
+   * 之前这里一刀切 animation:none。实测（CDP 模拟 prefers-reduced-motion）：
+   * 开关一开，光标 blink、卡片 card-breathe、状态点 dot-breathe 三个动画
+   * 全部消失，运行态变成一张完全静止的卡片——而「有东西在动」正是这一屏
+   * 唯一在说「它还活着」的信号，恰恰是最不该被抹掉的那个。
+   *
+   * 停：涟漪向外扩张（scale 到 6.5 倍）、光环绕圈、履历横向滚动。
+   * 留：原地明暗呼吸。它不改变任何东西的位置和大小，那个开关针对的是会
+   *     引起前庭不适的大幅运动，不是所有会变化的像素。
+   */
   @media (prefers-reduced-motion: reduce){
-    .console.is-run{animation:none; border-color:color-mix(in srgb,var(--run) 45%,transparent)}
-    .console.is-run .cdot{animation:none}
-    .console.is-run .cdot::before, .console.is-run .cdot::after{animation:none; opacity:0}
-    .glow .orb{animation:none; opacity:.45}
-    .console.is-run .cdot::before,
-    .console.is-run .cdot::after{display:none}
-    .console.is-run .cdot, .console.is-wait .cdot{animation:none}
+    .console.is-run .cdot::before, .console.is-run .cdot::after{display:none}
+    .glow::before{animation:none; opacity:.28}
     .ctick.roll .tk{animation:none}
   }
   .console.is-wait{border-color:color-mix(in srgb,var(--warn) 45%,transparent);
@@ -313,7 +335,10 @@
   }
   .pathbar.is-off .conn{color:var(--dim)}
   .pathbar.is-off .conn::before{background:transparent; box-shadow:none; border:1px solid var(--dim)}
-  @media (prefers-reduced-motion: reduce){ .pathbar .cursor{animation:none} }
+  /* 光标**不**跟着「减弱动态效果」停。
+     iOS 自己的文本插入符在开着那个开关时照样闪；一个 7px 方块原地明暗
+     交替不会引起前庭不适。更要紧的是这里闪烁**就是信息**——页面还活着。
+     停掉它等于把状态指示器变成一张静态图，而那正是它要否定的东西。 */
 
   #topusage{
     flex:0 0 auto; width:100%; max-width:592px; margin:0 auto;
@@ -475,7 +500,7 @@
 <header>
   <span class="dot" id="dot"></span>
   <h1 id="title">Clamicro</h1>
-  <a href="/ui/settings">设置</a>
+  <a href="/ui/settings" aria-label="设置" title="设置">⚙︎</a>
 </header>
 <!-- 终端路径行。左边是「你在哪」，右边是「连得上吗」。
      光标不是装饰：它的颜色和节奏就是连接状态本身，见 #cursor 的注释。 -->
@@ -657,15 +682,22 @@ function statusConsole() {
     const left = Math.max(0, Math.round((a.expires_at - Date.now()) / 1000));
     const span = Math.max(1, a.expires_at - a.created_at);
     const pctLeft = Math.max(0, Math.min(100, ((a.expires_at - Date.now()) / span) * 100));
-    right = `${pending.length > 1 ? `<span class="ctag warn">1 / ${pending.length}</span>` : ''}
-      <span class="ctag warn">${fmtLeft(left)}</span>`;
-    body = `<div style="font-size:14px;font-weight:600;margin-bottom:5px">${esc(a.headline || a.summary)}</div>
-      <div style="font-size:12.5px;color:var(--dim)">${esc(a.tool_name)}${a.risk.level === 'high' ? ' · <b style="color:var(--no)">高风险</b>' : ''}</div>
-      <div class="cbar"><i style="width:${pctLeft}%"></i></div>
-      ${pending.length > 1 ? `<div class="qdots">${pending.slice(0, 6).map((_, i) => `<i class="${i === 0 ? 'on' : ''}"></i>`).join('')}</div>` : ''}`;
-    // 到点会发生什么必须写出来 ——「等着」和「等着然后自动放行」是两回事
-    meta = `${fmtLeft(left)}后${a.auto_decision === 'allow' ? '自动通过' : '自动拒绝'}` +
-      (pending.length > 1 ? ' · 处理完一条自动显示下一条' : '');
+    /**
+     * 等待态只说**系统层面的事实**：Claude 停住了，有几条在等你。
+     *
+     * 标题、风险、倒计时都不在这儿复述——它们就在下面那张卡片上，而那张
+     * 卡片才是能滑能点的那一份。两处各画一遍的话，同一条会带着两个各自
+     * 倒数的进度条（秒数还会因为渲染时机差一秒），读的人只会怀疑这是不是
+     * 两条。主控台在这里提供的是列表给不了的东西：**现在什么情况**。
+     */
+    right = `<span class="ctag warn">${pending.length} 条</span>`;
+    body = `<div style="font-size:13.5px;color:var(--dim);line-height:1.5">
+      Claude 停在这儿等你的决定${pending.length > 1 ? '，处理完一条自动显示下一条' : ''}。</div>`;
+    // 高危在列表里只给左滑拒绝，批准必须点进详情页。一句笼统的「左右滑」
+    // 对高危就是半句假话——照着做会滑不动，然后以为是页面坏了
+    meta = pending.every((x) => x.risk.level === 'high')
+      ? '往下看 · 左滑可拒绝，批准要点进详情页'
+      : '往下看，每条都能直接左右滑';
   } else if (err) {
     cls = 'is-err'; dotLabel = '出错';
     body = `<div style="font-size:13.5px;color:var(--dim);line-height:1.5">${esc(err.last_message || '会话异常终止')}</div>`;
@@ -709,7 +741,7 @@ function statusConsole() {
   // 光球只给运行态：它是这一屏唯一持续动的东西，代表「有事正在发生」。
   // 给了别的状态就退化成装饰，那时它反而在稀释这个信号
   return cls === 'is-run'
-    ? `<div class="glow"><div class="orb o1"></div><div class="orb o2"></div><div class="orb o3"></div>${card}</div>`
+    ? `<div class="glow">${card}</div>`
     : card;
 }
 
@@ -797,19 +829,6 @@ function renderHome() {
   const busy = sessions.filter((s) => s.state === 'Running' || s.state === 'Waiting Approval');
   const off = offlineSince !== null && Date.now() - offlineSince > 5000;
 
-  /**
-   * 主控台正在展示的那一条，列表里就不要再出现一遍。
-   *
-   * 之前两边各画各的，于是同一条「删除项目根目录 dist · 1:56 后自动拒绝」
-   * 在一屏上出现两次，还各带一个自己倒数的进度条。重复不会更醒目，只会
-   * **让人怀疑这是不是两条**——尤其两处的秒数还会因为渲染时机差上一秒。
-   *
-   * 判据必须和 statusConsole 的分支同源：离线时主控台让位给离线提示，
-   * 那一条并没有被展示，列表就得把它列全。
-   */
-  const inConsole = !off && pending.length ? pending[0].id : null;
-  const rest = pending.filter((a) => a.id !== inConsole);
-
   let h = '';
 
   // 连不上服务时，页面上的一切都是旧的。这条必须排在最前面，
@@ -847,8 +866,20 @@ function renderHome() {
   // 明细排在结论前面，人得先读完才知道该不该关心
   h += statusConsole();
 
-  if (rest.length) {
-    h += `<h2>${inConsole ? `还有 ${rest.length} 条待审批` : '待审批'}</h2>` + rest.map((a) => undoing.has(a.id) ? `
+  /**
+   * 列表必须列全。
+   *
+   * 上一版为了去重把主控台展示的那条从列表里摘掉了——结果**只有一条待审批
+   * 时列表整个空掉**，而主控台既不能滑也没有链接、`.dl` 元素为 0 所以
+   * tickDeadlines 无事可做，倒计时看起来是冻住的。一条待审批恰恰是最常见
+   * 的情况，于是最常见的情况成了死路。
+   *
+   * 去重要去掉的是**重复的读数**，不是能操作的那一份。所以改成主控台那边
+   * 收敛（见 is-wait 分支：只报「有几条在等」，不复述标题和倒计时），
+   * 操作和明细都留在列表里。
+   */
+  if (pending.length) {
+    h += '<h2>待审批</h2>' + pending.map((a) => undoing.has(a.id) ? `
       <div class="undoline">
         <span>已批准 · <b id="undo-${a.id}">3</b> 秒后执行</span>
         <button onclick="cancelUndo('${a.id}')">撤销</button>
