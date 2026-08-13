@@ -105,18 +105,32 @@
      扩散并淡出，错开半个周期，看起来像一次次发出的信号。光球是环境光，
      涟漪才是**心跳**——有节拍，能数得出来。 */
   .console.is-run .cdot{position:relative; animation:dot-breathe 1s ease-in-out infinite}
+  /* 涟漪铺满整张卡片，但**锚点仍在状态点上**。
+     换成从卡片中心发散的话，「这圈波是那个绿点发出来的」这层因果就断了，
+     它会退化成一个背景装饰；留在点上，卡片才像是被那个信号点亮的。
+
+     用径向渐变而不是 border：1px 描边放大 16 倍就是 16px 的硬边圆环——那是
+     个膨胀的甜甜圈，不是涟漪。软边在扩散中自然变淡变宽，才像波。
+
+     周期取 5.2s：和光环的 9s、卡片呼吸的 3.6s 都不成整数比，三层不会周期性
+     地撞在一起。撞上了就会被看成「一段循环动画」，而不是「它在思考」。
+     卡片自身的 overflow:hidden 顺手把涟漪裁在卡片里——正是它读起来像
+     「卡片背景」而不是一团飘出来的光的原因。 */
   .console.is-run .cdot::before,
   .console.is-run .cdot::after{
     content:""; position:absolute; left:50%; top:50%;
-    width:8px; height:8px; border-radius:50%;
-    border:1px solid var(--run); pointer-events:none;
-    transform:translate(-50%,-50%) scale(1);
-    animation:pulse-ring 2.4s cubic-bezier(.2,.6,.4,1) infinite;
+    width:40px; height:40px; border-radius:50%; pointer-events:none;
+    background:radial-gradient(circle,
+      transparent 44%,
+      color-mix(in srgb,var(--run) 50%,transparent) 60%,
+      transparent 74%);
+    transform:translate(-50%,-50%) scale(.2);
+    animation:pulse-ring 5.2s cubic-bezier(.2,.6,.4,1) infinite;
   }
-  .console.is-run .cdot::after{animation-delay:1.2s}
+  .console.is-run .cdot::after{animation-delay:2.6s}
   @keyframes pulse-ring{
-    0%{transform:translate(-50%,-50%) scale(1); opacity:.7}
-    100%{transform:translate(-50%,-50%) scale(6.5); opacity:0}
+    0%{transform:translate(-50%,-50%) scale(.2); opacity:.6}
+    100%{transform:translate(-50%,-50%) scale(16); opacity:0}
   }
   @keyframes dot-breathe{
     0%,100%{opacity:1; transform:scale(1)}
@@ -168,21 +182,7 @@
 
   /* 圆点向外扩散的涟漪——「神经网络」那种感觉来自这一层，
      两个环错开半个周期，看起来是连续在往外推 */
-  .console.is-run .cdot::before,
-  .console.is-run .cdot::after{
-    content:""; position:absolute; left:50%; top:50%;
-    width:8px; height:8px; border-radius:50%;
-    border:1px solid var(--run);
-    transform:translate(-50%,-50%) scale(1);
-    animation:ripple 2.6s cubic-bezier(.2,.6,.4,1) infinite;
-    pointer-events:none;
-  }
-  .console.is-run .cdot::after{animation-delay:1.3s}
   .console.is-run .cdot{position:relative}
-  @keyframes ripple{
-    0%{transform:translate(-50%,-50%) scale(1); opacity:.65}
-    100%{transform:translate(-50%,-50%) scale(6); opacity:0}
-  }
 
   /* 呼吸和涟漪正是 prefers-reduced-motion 要关掉的东西。
      关掉之后光晕**保持在中等亮度**而不是消失——它承载的是「在运行」
