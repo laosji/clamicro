@@ -38,17 +38,53 @@ export function hostAllowed(req, allowed) {
   return allowed.has(h.toLowerCase())
 }
 
+/** 一次本机直连会带的 Host，全部小写、端口已剥掉 */
+const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1', '[::1]'])
+
 /**
- * hooks 和 statusLine 只接受本机来源。
+ * 这些头只要出现，就说明请求经过了代理/隧道，不是本机直连。
+ * cloudflared 会带 cf-connecting-ip / cf-ray，通用反代带 x-forwarded-*。
+ */
+const PROXY_HEADERS = [
+  'x-forwarded-for', 'x-forwarded-host', 'x-forwarded-proto',
+  'cf-connecting-ip', 'cf-ray', 'forwarded',
+]
+
+/**
+ * hooks / statusLine / pair-new 只接受**本机直连**。
  *
- * 这两组端点没有 token（Claude Code 的 http hook 传 header 很别扭）。
- * 原本的假设是「只监听回环」——但服务同时绑了局域网网卡，假设并不成立：
- * 同一 Wi-Fi 上任何人都能伪造 hook 事件，往你手机刷审批通知、
- * 往时间线注入假记录、伪造额度读数。按来源地址挡住。
+ * 这几组端点没有 token（Claude Code 的 http hook 传 header 很别扭），
+ * 保护完全靠来源判定。最初只看 remoteAddress——但那个判据在开着
+ * Cloudflare 隧道时是**假的**：
+ *
+ *   公网 → cloudflared → 从 127.0.0.1 转发进来 → remoteAddress 是 127.0.0.1
+ *
+ * 而隧道域名启动时会被加进 Host 白名单（不然隧道根本不能用），于是两道
+ * 检查全部放行。后果不是「多暴露一点」，是**整个信任模型失效**：拿到隧道
+ * URL 的任何人都能 POST /api/pair/new 造一张配对券，再访问 /ui/pair/:id
+ * 换到设备 cookie，从此以一台合法设备的身份批准任何操作。顺带还能伪造
+ * hook 事件和额度读数。
+ *
+ * 所以再加两道，三条都成立才算本机：
+ *   1. remoteAddress 是回环（隧道也满足，单独不够用）
+ *   2. **Host 是回环名** —— 本机 hook 全都请求 http://127.0.0.1:<port>/…，
+ *      而隧道进来的 Host 是 xxx.trycloudflare.com。这是真正区分得开的那一条
+ *   3. 没有任何代理/转发头 —— 真正的本机直连不会有
+ *
+ * 缺 Host 头的放行：HTTP/1.0 没有 Host，那只可能来自本机脚本
+ * （hostAllowed 也是同样的处理，两边保持一致）。
  */
 export function isLoopback(req) {
-  const a = req.socket.remoteAddress ?? ''
-  return a === '127.0.0.1' || a === '::1' || a === '::ffff:127.0.0.1'
+  const a = req.socket?.remoteAddress ?? ''
+  if (a !== '127.0.0.1' && a !== '::1' && a !== '::ffff:127.0.0.1') return false
+
+  for (const k of PROXY_HEADERS) if (req.headers?.[k]) return false
+
+  const raw = req.headers?.host
+  if (!raw) return true
+  // 端口无所谓；IPv6 字面量是 [::1]:8765，剥端口不能把方括号一起剥掉
+  const host = String(raw).toLowerCase().replace(/:\d+$/, '')
+  return LOOPBACK_HOSTS.has(host)
 }
 
 /**

@@ -276,14 +276,42 @@ if (up) {
 }
 
 // 6. 二维码
+/**
+ * 码里放**一次性配对券**，不放主令牌。
+ *
+ * 原来印的是 `/ui?t=<主令牌>`。那是一张永久、全权、吊销不掉的凭证，却被放进
+ * 一个天然会被留存的载体里：终端回滚缓冲、屏幕录制、投屏、旁边人的手机镜头。
+ * 一旦泄露，`clamicro forget <device>` 也收不回来——它根本不属于任何设备。
+ * 这等于把新做的一次性配对和设备令牌整套机制绕开了。
+ *
+ * 配对券：60 秒过期、用一次即作废、换出来的是可吊销的设备令牌。
+ */
 say(`\n${c.b('  最后一步：手机扫码')}\n`)
-const loginUrl = `${base}/ui?t=${config.token}`
-const qr = spawnSync('qrencode', ['-t', 'ANSIUTF8', '-m', '2', loginUrl], { encoding: 'utf8' })
-if (qr.stdout) say(qr.stdout)
-else say(c.dim('  （装 qrencode 可直接扫码：brew install qrencode）'))
-say(`  ${c.dim(loginUrl)}`)
-if (config.altUrl) {
-  say(`  ${c.dim(`打不开的话用备用地址：${config.altUrl}/ui?t=${config.token}`)}`)
+
+let pairId = null
+try {
+  const r = await fetch(`http://127.0.0.1:${config.port}/api/pair/new`, {
+    method: 'POST',
+    signal: AbortSignal.timeout(1500),
+  })
+  if (r.ok) pairId = (await r.json()).id
+} catch { /* 服务没起来，下面走兜底 */ }
+
+if (pairId) {
+  const loginUrl = `${base}/ui/pair/${pairId}`
+  const qr = spawnSync('qrencode', ['-t', 'ANSIUTF8', '-m', '2', loginUrl], { encoding: 'utf8' })
+  if (qr.stdout) say(qr.stdout)
+  else say(c.dim('  （装 qrencode 可直接扫码：brew install qrencode）'))
+  say(`  ${c.dim(loginUrl)}`)
+  if (config.altUrl) {
+    say(`  ${c.dim(`打不开的话用备用地址：${config.altUrl}/ui/pair/${pairId}`)}`)
+  }
+  // 必须说出有效期。扫不上的人会以为是网络问题，反复试一张已经过期的码
+  say(`  ${c.dim('这张码 60 秒内有效、只能用一次。过期就跑 npx clamicro qr 再要一张。')}`)
+} else {
+  // 拿不到券时**不能**退回去印主令牌——那正是这段代码要消灭的东西
+  say(`  ${c.y('!')} 服务还没起来，暂时给不了配对码`)
+  say(`  ${c.dim('服务起来后在 Mac 上跑：npx clamicro qr')}`)
 }
 say('')
 

@@ -43,11 +43,14 @@
   .dot{width:8px;height:8px;border-radius:50%;background:var(--dim);flex:0 0 auto;transition:background .3s}
   .dot.live{background:var(--ok)}
   header a{
-    margin-left:auto; font-size:19px; line-height:1; color:var(--dim); text-decoration:none;
-    /* 44×44 是拇指可靠命中的最小面积；图标视觉尺寸不用跟着一起变大 */
+    margin-left:auto; color:var(--dim); text-decoration:none;
+    /* 44×44 是拇指可靠命中的最小面积。图形本身 24px——用内联 SVG 而不是
+       ⚙ 字形：字形的实际大小随字体族和平台走，同一个 font-size 在 iOS 和
+       Android 上能差一大截，而这里要的是一个确定的视觉尺寸 */
     display:flex; align-items:center; justify-content:center;
     width:44px; height:44px; margin-right:-10px;
   }
+  header a svg{width:24px; height:24px; display:block}
   header a:active{color:var(--fg)}
 
   /* ── 状态主控台 ──
@@ -342,8 +345,14 @@
 
   #topusage{
     flex:0 0 auto; width:100%; max-width:592px; margin:0 auto;
-    padding:0 18px 9px; font-size:11px; color:var(--dim);
+    padding:0 18px 12px; font-size:11px; color:var(--dim);
     font-variant-numeric:tabular-nums;
+  }
+  /* 头部区（标题 / 路径 / 用量）到此为止。没有这条界，运行中卡片直接怼在
+     7d 那行下面，光环还会往上糊到用量条上——两块无关的信息看着像连在一起 */
+  .headsep{
+    flex:0 0 auto; width:100%; max-width:592px; margin:0 auto;
+    height:1px; background:var(--line);
   }
   /* 两行而不是并排：并排时进度条被挤到一半宽，10% 和 20% 看着差不多，
      而右边也放不下重置时间——「还要等多久」只有那一处来源 */
@@ -360,7 +369,9 @@
   main{
     flex:1 1 auto; overflow-y:auto; overflow-x:hidden; -webkit-overflow-scrolling:touch;
     overscroll-behavior:contain;
-    padding:0 16px calc(80px + env(safe-area-inset-bottom));
+    /* 顶部这 20px 不只是排版留白，是**给光环让位**：.glow 的 ::before 从卡片
+       边界外扩 14px，留白不够它就会盖到上面那条界线和用量条上 */
+    padding:20px 16px calc(80px + env(safe-area-inset-bottom));
   }
   h2{font-size:13px; color:var(--dim); font-weight:600; margin:20px 2px 8px; letter-spacing:.02em}
 
@@ -468,6 +479,17 @@
   }
 
   /* 那 10 秒是你唯一能否决的窗口，卡片上必须看得见还剩多久、到点会怎样 */
+  /* ── 等待态主控台的内容 ── */
+  .cwtitle{font-size:15px; font-weight:600; margin-bottom:6px; line-height:1.4}
+  .cwsub{font-size:12.5px; color:var(--dim); margin-bottom:2px}
+  .cwmis{font-size:12px; color:var(--warn); margin-bottom:6px; line-height:1.45}
+  .cwmore{color:var(--run); text-decoration:none; font-weight:600}
+  /* 倒计时读数放在条的**上面**而不是右边：右边放不下「2:37 后自动拒绝」
+     这么长的话，挤成两行反而比分两层更乱 */
+  .cdl{flex-direction:column; align-items:stretch; gap:7px}
+  .cdl .dltext{align-self:flex-end}
+  .cdl .dlbar{flex:0 0 auto; width:100%}
+
   .dl{
     display:flex; align-items:center; gap:9px; margin-top:11px;
     padding-top:10px; border-top:1px solid var(--line);
@@ -500,7 +522,13 @@
 <header>
   <span class="dot" id="dot"></span>
   <h1 id="title">Clamicro</h1>
-  <a href="/ui/settings" aria-label="设置" title="设置">⚙︎</a>
+  <a href="/ui/settings" aria-label="设置" title="设置">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+         stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="3.2"/>
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1.08-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+    </svg>
+  </a>
 </header>
 <!-- 终端路径行。左边是「你在哪」，右边是「连得上吗」。
      光标不是装饰：它的颜色和节奏就是连接状态本身，见 #cursor 的注释。 -->
@@ -516,6 +544,7 @@
 -->
 <div id="topusage" hidden></div>
 
+<div class="headsep"></div>
 <main id="view"></main>
 
 <nav>
@@ -683,21 +712,37 @@ function statusConsole() {
     const span = Math.max(1, a.expires_at - a.created_at);
     const pctLeft = Math.max(0, Math.min(100, ((a.expires_at - Date.now()) / span) * 100));
     /**
-     * 等待态只说**系统层面的事实**：Claude 停住了，有几条在等你。
+     * 等待态是**完整且可操作**的那一份，不是一个摘要。
      *
-     * 标题、风险、倒计时都不在这儿复述——它们就在下面那张卡片上，而那张
-     * 卡片才是能滑能点的那一份。两处各画一遍的话，同一条会带着两个各自
-     * 倒数的进度条（秒数还会因为渲染时机差一秒），读的人只会怀疑这是不是
-     * 两条。主控台在这里提供的是列表给不了的东西：**现在什么情况**。
+     * 中间踩过两个坑，都记在这儿：
+     *
+     * 1. 一开始主控台和列表各画一遍同一条，屏幕上出现两个各自倒数的进度条
+     *    （秒数还会因为渲染时机差一秒），读的人只会怀疑这是不是两条。
+     * 2. 于是把它从列表里摘掉——结果**只有一条待审批时列表整个空掉**，而
+     *    当时的主控台既不能滑也没有链接、`.dl` 元素为 0 所以 tickDeadlines
+     *    无事可做，倒计时看着是冻住的。一条恰恰是最常见的情况。
+     *
+     * 结论：要么两边都完整（重复），要么主控台完整且能操作、列表不再重复。
+     * 取后者——这也正是设计稿的做法（合并成一个组件）。所以这里必须同时
+     * 满足三件事，缺一件就退回坑里：
+     *   · 倒计时走 `.dl` 那套 data 属性，由 tickDeadlines 每秒驱动
+     *   · 带 swipecard/data-ap/data-risk，让 attachListSwipes 接上手势
+     *   · 留一个「详情 →」，因为高危不给右滑批准，必须有路进详情页
      */
-    right = `<span class="ctag warn">${pending.length} 条</span>`;
-    body = `<div style="font-size:13.5px;color:var(--dim);line-height:1.5">
-      Claude 停在这儿等你的决定${pending.length > 1 ? '，处理完一条自动显示下一条' : ''}。</div>`;
-    // 高危在列表里只给左滑拒绝，批准必须点进详情页。一句笼统的「左右滑」
-    // 对高危就是半句假话——照着做会滑不动，然后以为是页面坏了
-    meta = pending.every((x) => x.risk.level === 'high')
-      ? '往下看 · 左滑可拒绝，批准要点进详情页'
-      : '往下看，每条都能直接左右滑';
+    const impact = (a.impact || []).map((i) => i.label).filter(Boolean).slice(0, 2).join(' · ');
+    // 右上角**不放倒计时**。它由 render() 画，30 秒才刷一次，而下面那行由
+    // tickDeadlines 每秒走——同一个数、两条代码路径，必然会被看到对不上。
+    // 一个数只能有一个来源。这里只留「第几条 / 共几条」，那是队列信息。
+    right = pending.length > 1 ? `<span class="ctag warn">1 / ${pending.length}</span>` : '';
+    body = `<div class="cwtitle">${a.risk.level === 'high' ? '⚠️ ' : '🔒 '}${esc(a.headline || a.summary)}</div>
+      ${a.mismatch ? `<div class="cwmis">⚠️ 这句描述与命令不符，点进去看原文</div>` : ''}
+      <div class="cwsub">${esc(a.tool_name)}${impact ? ` · ${esc(impact)}` : ''}${
+        a.risk.level === 'high' ? ' · <b style="color:var(--no)">高风险</b>' : ''}</div>
+      <div class="dl cdl" data-exp="${a.expires_at}" data-born="${a.created_at}" data-auto="${a.auto_decision}">
+        <span class="dltext">—</span><span class="dlbar"><i></i></span>
+      </div>
+      ${pending.length > 1 ? `<div class="qdots">${pending.slice(0, 6).map((_, i) => `<i class="${i === 0 ? 'on' : ''}"></i>`).join('')}</div>` : ''}`;
+    meta = `${pending.length > 1 ? '处理完一条自动显示下一条 · ' : ''}<a class="cwmore" href="/ui/a/${a.id}">详情 →</a>`;
   } else if (err) {
     cls = 'is-err'; dotLabel = '出错';
     body = `<div style="font-size:13.5px;color:var(--dim);line-height:1.5">${esc(err.last_message || '会话异常终止')}</div>`;
@@ -732,7 +777,12 @@ function statusConsole() {
     doneTimer = setTimeout(() => { if (tab === 'home') render(); }, Math.max(500, leftMs + 200));
   }
 
-  const card = `<div class="console ${cls}">
+  // 等待态的主控台**就是那张待办卡片**，所以带上 attachListSwipes 认的标记。
+  // 高危给 denyOnly：密集界面里滑一下就批准 rm -rf 太容易了，批准得进详情页
+  const swipeAttr = cls.startsWith('is-wait') && pending.length
+    ? ` swipecard" data-ap="${pending[0].id}" data-risk="${esc(pending[0].risk.level)}`
+    : '';
+  const card = `<div class="console ${cls}${swipeAttr}">
     <div class="ctop"><div class="cleft"><div class="cdot"></div><div class="clabel">${dotLabel}</div></div>${right}</div>
     ${body}
     ${meta ? `<div class="cmeta">${meta}</div>` : ''}
@@ -878,8 +928,18 @@ function renderHome() {
    * 收敛（见 is-wait 分支：只报「有几条在等」，不复述标题和倒计时），
    * 操作和明细都留在列表里。
    */
-  if (pending.length) {
-    h += '<h2>待审批</h2>' + pending.map((a) => undoing.has(a.id) ? `
+  /**
+   * 主控台展示的那条不在列表里再画一遍——**前提是它现在真的能操作**：
+   * 带 swipecard 接了手势、带 .dl 每秒在走、带「详情 →」。上一版摘掉它时
+   * 这三件都没有，于是一条待审批时整屏没有任何可操作的东西。
+   * 判据和 statusConsole 的分支同源：离线时主控台让位给离线提示，那条
+   * 并没有被展示，列表就得列全。
+   */
+  const inConsole = !off && pending.length ? pending[0].id : null;
+  const rest = pending.filter((a) => a.id !== inConsole);
+
+  if (rest.length) {
+    h += `<h2>${inConsole ? `还有 ${rest.length} 条待审批` : '待审批'}</h2>` + rest.map((a) => undoing.has(a.id) ? `
       <div class="undoline">
         <span>已批准 · <b id="undo-${a.id}">3</b> 秒后执行</span>
         <button onclick="cancelUndo('${a.id}')">撤销</button>

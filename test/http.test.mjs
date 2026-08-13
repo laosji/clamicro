@@ -324,3 +324,36 @@ test('?t= 登录：谁递进来的令牌，cookie 就写谁', async (t) => {
     assert.equal((await S.raw('/ui')).status, 401)
   })
 })
+
+/**
+ * 安装器不得把主令牌写进任何可被留存的地方。
+ *
+ * 原来 install.mjs 印的是 `/ui?t=<主令牌>` 的二维码 + 明文 URL。那是一张
+ * **永久、全权、吊销不掉**的凭证，被放进了天然会被留存的载体：终端回滚
+ * 缓冲、屏幕录制、投屏、旁边人的手机镜头。泄露之后 `clamicro forget` 也
+ * 收不回来——主令牌不属于任何设备。这等于把一次性配对和设备令牌整套机制
+ * 绕开了。
+ *
+ * 这条测试盯的是**源码本身**而不是运行结果：这类回归最可能的形态是有人
+ * 为了「装完就能用」顺手把那行 URL 加回去，而那在任何功能测试里都不会红。
+ */
+test('安装器不输出主令牌', async (t) => {
+  const { readFileSync } = await import('node:fs')
+  const { join, dirname } = await import('node:path')
+  const { fileURLToPath } = await import('node:url')
+  const root = join(dirname(fileURLToPath(import.meta.url)), '..')
+  const src = readFileSync(join(root, 'install.mjs'), 'utf8')
+
+  await t.test('没有 ?t=<token> 形式的登录 URL', () => {
+    assert.doesNotMatch(src, /\?t=\$\{[^}]*token[^}]*\}/, '主令牌又被拼进 URL 了')
+  })
+
+  await t.test('根本不引用 config.token', () => {
+    assert.doesNotMatch(src, /config\.token/, '安装器不该碰主令牌')
+  })
+
+  await t.test('走的是一次性配对券', () => {
+    assert.match(src, /\/api\/pair\/new/, '应当向服务申请一次性配对 id')
+    assert.match(src, /\/ui\/pair\//, '码里应当是配对链接')
+  })
+})

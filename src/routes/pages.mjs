@@ -243,7 +243,17 @@ export function pageRoutes(ctx) {
       }
       const boot = inlineJson({
         ...publicApproval(ap, true),
-        hasSession: sameToken(cookieToken(req)),
+        /**
+         * 这个字段问的是「**这个浏览器能不能回看板**」，所以判据是
+         * authorized（主令牌**或**设备令牌），不是 sameToken。
+         *
+         * 原来用 sameToken 只认主令牌，于是**配过对的手机永远是 false**——
+         * 而配过对的手机正是这个产品的主要用户。表现：处理完一条审批后
+         * 结果页既不显示「返回首页」也不自动跳转，人卡在一个死页面上，
+         * 只能手动改地址栏。从通知深链（?k=）进来、还没配对的浏览器才
+         * 应该是 false：那个 key 的作用域只有这一条审批，它确实回不去看板。
+         */
+        hasSession: authorized(req),
       })
       // 必须用**函数式**替换。审批内容是 shell 命令，$ 遍地都是，而 replace 的
       // 替换串里 $' 表示「匹配之后的全部内容」、$& 表示匹配本身——直接传字符串
