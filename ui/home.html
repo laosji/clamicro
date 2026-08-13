@@ -14,6 +14,7 @@
     --tabbg:rgba(255,255,255,.82);
   }
   @media (prefers-color-scheme:dark){
+  .glow .orb{mix-blend-mode:screen}
     :root{
       --bg:#0b0d10; --card:#14181d; --fg:#e8eaed; --dim:#8b93a1; --line:#242a32; --monobg:#0f1318;
       --ok:#4ade80; --no:#f87171; --warn:#fbbf24; --run:#39ff8a;
@@ -81,7 +82,37 @@
     opacity:.35;
     animation:glow-breathe 3.6s ease-in-out infinite;
   }
-  @keyframes glow-breathe{0%,100%{opacity:.3}50%{opacity:1}}
+  @keyframes glow-breathe{0%,100%{opacity:.45}50%{opacity:1}}
+
+  /* ── 漂移光球 ──
+     「Apple Intelligence 那种感觉」真正的来源；卡片自身的描边辉光只是底子。
+     三个大尺寸高斯模糊的球各自按不同周期漂移，周期互质（7 / 8.5 / 6.2 秒）
+     所以合成节奏不重复——看起来像在思考，而不是在闪。
+
+     性能：blur 是**静态**的（每个球的模糊半径不变），只有 transform 和
+     opacity 在动，两者都能交给合成器。动 filter 才是真的贵。 */
+  .glow{position:relative; isolation:isolate}
+  .glow > .console{position:relative; z-index:1}
+  .glow .orb{position:absolute; border-radius:50%; pointer-events:none; z-index:0;
+    filter:blur(30px); will-change:transform, opacity}
+  .glow .o1{width:150px; height:150px; left:-34px; top:-30px;
+    background:radial-gradient(circle, color-mix(in srgb,var(--run) 55%,transparent), transparent 70%);
+    animation:orb1 7s ease-in-out infinite}
+  .glow .o2{width:126px; height:126px; right:-24px; top:8px;
+    background:radial-gradient(circle, color-mix(in srgb,var(--run) 42%,transparent), transparent 70%);
+    animation:orb2 8.5s ease-in-out infinite}
+  .glow .o3{width:110px; height:110px; left:38%; bottom:-38px;
+    background:radial-gradient(circle, color-mix(in srgb,var(--run) 38%,transparent), transparent 70%);
+    animation:orb3 6.2s ease-in-out infinite}
+  @keyframes orb1{0%,100%{transform:translate(0,0) scale(1); opacity:.5}
+                  50%{transform:translate(20px,14px) scale(1.28); opacity:.95}}
+  @keyframes orb2{0%,100%{transform:translate(0,0) scale(1); opacity:.35}
+                  50%{transform:translate(-16px,12px) scale(1.18); opacity:.8}}
+  @keyframes orb3{0%,100%{transform:translate(0,0) scale(1); opacity:.3}
+                  50%{transform:translate(12px,-12px) scale(1.32); opacity:.72}}
+  /* screen 是「加光」，只在深色底上成立；浅色底加光=变白，光球会糊成
+     一团灰白，所以浅色模式不用混合模式，只压低透明度 */
+  @media (prefers-color-scheme:light){ .glow .orb{opacity:.45; filter:blur(34px)} }
   /* 主控台内部元素要浮在光晕之上 */
   .console > *{position:relative; z-index:1}
 
@@ -107,7 +138,8 @@
      关掉之后光晕**保持在中等亮度**而不是消失——它承载的是「在运行」
      这个信息，不能因为用户不想看动画就把信息一起拿走 */
   @media (prefers-reduced-motion: reduce){
-    .console.is-run::after{animation:none; opacity:.6}
+    .console.is-run::after{animation:none; opacity:.75}
+    .glow .orb{animation:none; opacity:.45}
     .console.is-run .cdot::before,
     .console.is-run .cdot::after{display:none}
     .console.is-run .cdot, .console.is-wait .cdot{animation:none}
@@ -207,15 +239,20 @@
   /* 非空闲时的用量条：安静、贴着 header、不抢注意力 */
   #topusage{
     flex:0 0 auto; width:100%; max-width:592px; margin:0 auto;
-    padding:0 18px 9px; display:flex; align-items:center; gap:14px;
-    font-size:11px; color:var(--dim); font-variant-numeric:tabular-nums;
+    padding:0 18px 9px; font-size:11px; color:var(--dim);
+    font-variant-numeric:tabular-nums;
   }
-  #topusage .tu{display:flex; align-items:center; gap:6px; flex:1; min-width:0}
-  #topusage .tu b{font-weight:600; opacity:.75; flex:0 0 auto}
+  /* 两行而不是并排：并排时进度条被挤到一半宽，10% 和 20% 看着差不多，
+     而右边也放不下重置时间——「还要等多久」只有那一处来源 */
+  #topusage .tu{display:flex; align-items:center; gap:8px}
+  #topusage .tu + .tu{margin-top:4px}
+  #topusage .tu b{font-weight:600; opacity:.75; flex:0 0 auto; width:16px}
   #topusage .tb{flex:1; height:3px; border-radius:2px; background:var(--monobg); overflow:hidden}
   #topusage .tb i{display:block; height:100%; border-radius:2px; background:var(--run)}
   #topusage .tb i.mid{background:var(--warn)} #topusage .tb i.hot{background:var(--no)}
-  #topusage .tu.d7{opacity:.6}
+  #topusage .pc{flex:0 0 auto; width:30px; text-align:right}
+  #topusage .rs{flex:0 0 auto; white-space:nowrap; opacity:.8}
+  #topusage .tu.d7{opacity:.62}
 
   main{
     flex:1 1 auto; overflow-y:auto; overflow-x:hidden; -webkit-overflow-scrolling:touch;
@@ -461,13 +498,15 @@ function renderTopUsage() {
   if (!quota || off || idle) { el.hidden = true; return; }
   el.hidden = false;
 
-  const seg = (label, pct, dim) => {
-    const v = Math.min(100, Math.max(0, pct ?? 0));
+  const row = (label, w, dim) => {
+    const v = Math.min(100, Math.max(0, w?.pct ?? 0));
     const cls = v >= 90 ? 'hot' : v >= 70 ? 'mid' : '';
-    return `<span class="tu${dim ? ' d7' : ''}"><b>${label}</b>
-      <span class="tb"><i class="${cls}" style="width:${v}%"></i></span>${Math.round(v)}%</span>`;
+    return `<div class="tu${dim ? ' d7' : ''}"><b>${label}</b>
+      <span class="tb"><i class="${cls}" style="width:${v}%"></i></span>
+      <span class="pc">${Math.round(v)}%</span>
+      <span class="rs">${until(w?.resets_at)}</span></div>`;
   };
-  el.innerHTML = seg('5h', quota.five_hour?.pct, false) + seg('7d', quota.seven_day?.pct, true);
+  el.innerHTML = row('5h', quota.five_hour, false) + row('7d', quota.seven_day, true);
 }
 
 const fmtLeft = (s) => (s >= 60 ? `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}` : `${s}s`);
@@ -577,11 +616,17 @@ function statusConsole() {
     doneTimer = setTimeout(() => { if (tab === 'home') render(); }, Math.max(500, leftMs + 200));
   }
 
-  return `<div class="console ${cls}">
+  const card = `<div class="console ${cls}">
     <div class="ctop"><div class="cleft"><div class="cdot"></div><div class="clabel">${dotLabel}</div></div>${right}</div>
     ${body}
     ${meta ? `<div class="cmeta">${meta}</div>` : ''}
   </div>`;
+
+  // 光球只给运行态：它是这一屏唯一持续动的东西，代表「有事正在发生」。
+  // 给了别的状态就退化成装饰，那时它反而在稀释这个信号
+  return cls === 'is-run'
+    ? `<div class="glow"><div class="orb o1"></div><div class="orb o2"></div><div class="orb o3"></div>${card}</div>`
+    : card;
 }
 
 function elapsed(from) {
