@@ -81,12 +81,29 @@ function run(argv) {
   const SIDE_TEXT = hasSub ? 0 : Math.min(150, Math.max(54, measureText(title, 12.5) + 18))
   // 展开态：内容在刘海下方
   const contentH = 46
+  /** 徽章直径 + 它和文字之间的间距 */
+  const BADGE = 26
+  const BADGE_GAP = 12
+  const PAD_X = TOP_R + 16
+
+  /**
+   * 展开态的宽度也按**实际字宽**算，和紧凑态一样。
+   *
+   * 原来是写死的 `max(notchW + 150, 340)`。短内容（「已完成」「已批准」）撑不满，
+   * 右边空出一大块，胶囊看着像没画完；长内容又在 340 处被硬截断，明明还有
+   * 屏幕却不给。两头都不对。
+   *
+   * 下限保证比刘海明显宽（否则那两个外张的角挤在一起，形状认不出来），
+   * 上限 460 避免横贯半个屏幕——那时该考虑的是缩短文案，不是加宽窗口。
+   */
+  const textW = hasSub
+    ? Math.min(300, Math.max(118, Math.max(measureText(title, 12.5), measureText(subtitle, 11)) + 6))
+    : 0
 
   const H = hasSub ? topInset + contentH : Math.max(topInset, 30)
-  const bodyW = hasSub
-    ? Math.max(notchW + 150, 340)
-    : SIDE_ICON + notchW + SIDE_TEXT
-  const W = bodyW + TOP_R * 2
+  const W = hasSub
+    ? Math.min(460, Math.max(notchW + TOP_R * 2 + 76, PAD_X * 2 + BADGE + BADGE_GAP + textW))
+    : SIDE_ICON + notchW + SIDE_TEXT + TOP_R * 2
 
   const win = $.NSPanel.alloc.initWithContentRectStyleMaskBackingDefer(
     $.NSMakeRect(0, 0, W, H),
@@ -170,22 +187,57 @@ function run(argv) {
     // ── 展开态：内容压在刘海**下方** ──
     // 刘海那一条被摄像头占着，放字会被切掉。左右各让开 TOP_R，
     // 那是反向曲线张开的地方，压上去也会被切。
-    const padX = TOP_R + 18
     const midY = contentH / 2
-    const ic = label(icon, $.NSMakeRect(padX, midY - 15, 30, 30), 20, $.NSFontWeightRegular, 1)
+
+    /**
+     * 图标装进一个染色的圆形徽章里。
+     *
+     * 一个 20pt 的 ✓ 在纯黑上太轻，扫一眼抓不住；圆形色块是**形状**，
+     * 余光里先认出形状再读字。淡底 + 同色字形，和手机端结果页那个对勾圈
+     * 是同一套语汇——两端看到的应该是同一个东西。
+     */
+    const badge = $.NSView.alloc.initWithFrame(
+      $.NSMakeRect(PAD_X, midY - BADGE / 2, BADGE, BADGE))
+    badge.setWantsLayer(true)
+    badge.layer.setCornerRadius(BADGE / 2)
+    // 同样必须用 CGColorCreateGenericRGB —— NSColor.CGColor 是 autorelease 的，
+    // 等图层真正绘制时已经悬空，进程被 SIGKILL 且 stderr 一个字都没有
+    badge.layer.setBackgroundColor($.CGColorCreateGenericRGB(tint[0], tint[1], tint[2], 0.18))
+    badge.layer.setBorderWidth(1)
+    badge.layer.setBorderColor($.CGColorCreateGenericRGB(tint[0], tint[1], tint[2], 0.45))
+    box.addSubview(badge)
+
+    const ic = label(icon, $.NSMakeRect(PAD_X, midY - 11, BADGE, 22), 14, $.NSFontWeightSemibold, 1, tint)
     ic.setAlignment($.NSTextAlignmentCenter)
-    const textX = padX + 38
-    const textW = W - textX - padX
-    label(title, $.NSMakeRect(textX, midY + 1, textW, 17), 12.5, $.NSFontWeightSemibold, 1, tint)
-    // 细节行不染色：它多半是命令原文，染上颜色反而干扰阅读
-    label(subtitle, $.NSMakeRect(textX, midY - 17, textW, 15), 11, $.NSFontWeightRegular, 0.62)
+
+    const textX = PAD_X + BADGE + BADGE_GAP
+    const tw = W - textX - PAD_X
+    /**
+     * **标题不染色。**
+     *
+     * 它多半是项目名（clamicro、value-engine），把项目名染成绿色等于说
+     * 「这个名字是绿的」——而状态是这一条消息的属性，不是那个名字的属性。
+     * 颜色全部交给徽章：一个色块比一行彩色文字更容易在余光里认出来，
+     * 而且 12.5pt 的彩色小字在纯黑上本来就比白字难读。
+     */
+    label(title, $.NSMakeRect(textX, midY + 1, tw, 17), 12.5, $.NSFontWeightSemibold, 1)
+    // 细节行更淡：它多半是命令原文或一句结果，是给「想多知道一点」的人看的
+    label(subtitle, $.NSMakeRect(textX, midY - 17, tw, 15), 11, $.NSFontWeightRegular, 0.58)
   } else {
     // ── 紧凑态：内容摆在刘海**两侧** ──
     // 中间那块是物理刘海，放什么都看不见。所以图标贴左、文字贴右，
     // 刘海正好夹在中间——这也是 Dynamic Island 紧凑态在做的事。
     const midY = H / 2
-    // 图标和状态文字同色。注意 emoji（⚠️ ⚡️ 📱）自带颜色不受 textColor 影响，
-    // 只有 ✓ ✕ 这类**字形**图标会跟着变——所以状态类的图标优先用字形。
+    /**
+     * 紧凑态的文字**要**染色，展开态的标题不染——这不矛盾。
+     *
+     * 紧凑态那行字本身就是状态（「已完成」「运行中」），染色是给它上色；
+     * 展开态的标题是项目名（clamicro、value-engine），染色等于说「这个名字
+     * 是绿的」。规矩是：**给状态上色，不给名字上色。**
+     *
+     * 注意 emoji（⚠️ ⚡️ 📱）自带颜色不受 textColor 影响，只有 ✓ ✕ 这类
+     * **字形**图标会跟着变——所以状态类的图标优先用字形。
+     */
     const ic = label(icon, $.NSMakeRect(TOP_R + 6, midY - 13, 30, 26), 17, $.NSFontWeightRegular, 1, tint)
     ic.setAlignment($.NSTextAlignmentCenter)
     const textX = TOP_R + SIDE_ICON + notchW
