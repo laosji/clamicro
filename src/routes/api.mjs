@@ -221,13 +221,19 @@ export function apiRoutes(ctx) {
     },
 
     // ---- 状态推送 ----
-    {
-      method: 'GET', path: '/api/state', auth: 'token',
-      handler: ({ res, url }) => json(res, 200, {
-        sessions: store.sessions(),
-        events: store.events(Number(url.searchParams.get('since') ?? 0)),
-      }),
-    },
+    /*
+     * /api/state 删掉了（1.0.0 时代的遗物）。
+     *
+     * 它是**还没有 SSE 之前**的合并轮询端点，返回 {sessions, events}。两半
+     * 现在各有归宿，而且都更好：
+     *   sessions → /api/sessions，返回内容逐字相同，还多给 limits 和
+     *              statusLineSeenAt
+     *   events   → /api/stream，连 ?since= 游标语义都被 Last-Event-ID 接走了
+     *
+     * 全仓库历史上没有任何 UI 引用过它，文档也没承诺过。留着的代价是实打实
+     * 的：它 since=0 时**不设上限**地吐出全部事件（实测 481KB），谁哪天顺手
+     * 调一下就是这个量。
+     */
     {
       method: 'GET', path: '/api/stream', auth: 'token',
       handler: ({ req, res, url }) => {

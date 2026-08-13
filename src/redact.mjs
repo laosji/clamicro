@@ -6,7 +6,7 @@
  * `events[].detail` 存的是 Claude 的回复原文（Stop hook 的
  * `last_assistant_message`）。只要 Claude 在对话里贴过一次登录地址——
  * 比如 `http://x.local:8765/ui?t=<主令牌>`——主令牌就被原样写进
- * `history.json`，并且通过 `/api/state` 发给**任何已配对的设备**。
+ * `history.json`，并且通过 `/api/stream` 推给**任何已配对的设备**。
  *
  * 那台手机本来只持有自己的**设备令牌**：它可以被 `clamicro forget` 单独
  * 吊销，权限也只到自己这一份。而主令牌不属于任何设备，`forget` 吊销不掉，

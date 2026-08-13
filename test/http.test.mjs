@@ -77,7 +77,7 @@ test('鉴权', async (t) => {
     const guarded = [
       ['GET', '/api/sessions'], ['GET', '/api/sessions/abc'], ['GET', '/api/approvals'],
       ['GET', '/api/inbox'], ['GET', '/api/config'], ['POST', '/api/config'],
-      ['GET', '/api/state'], ['GET', '/api/stream'],
+      ['GET', '/api/stream'],
       ['POST', '/api/sessions/abc/say'], ['DELETE', '/api/sessions/abc/say/x'],
       ['POST', '/api/sessions/abc/pause'], ['POST', '/api/sessions/abc/resume'],
       ['POST', '/api/sessions/abc/cancel'],

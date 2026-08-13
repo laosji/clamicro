@@ -107,7 +107,12 @@ The one screen that matters, top to bottom:
 
 **The model's description sits below it, in smaller grey type** — deliberately. That sentence is written by Claude Code itself: the one piece of text in this whole chain authored by the thing being reviewed. It can disagree with the command, so it doesn't get the primary slot. When it genuinely disagrees, the page says so outright (the red box above).
 
-**Risky fragments are highlighted** inside the command (`rm -rf`, `.ssh/id_rsa`), so you don't have to read it character by character.
+**Risky fragments are highlighted** inside the command (`rm -rf`, `.ssh/id_rsa`) to point you at the part most worth looking at first.
+
+But **highlighting is a hint, not a guarantee.** It is pattern matching over the
+command text: `base64 -d | sh`, indirection through a variable, `curl … | sh`, or a
+dangerous action hidden inside a script file will not be marked. No highlight doesn't
+mean safe — it means no rule matched. What protects you is reading the command.
 
 **Impact tags** (read-only / reads secrets / writes files / network / sudo) are extracted from the command. When it can't tell, it says "impact unknown" — it will **not** pretend something is read-only.
 

