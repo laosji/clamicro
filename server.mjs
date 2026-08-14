@@ -22,6 +22,7 @@ import { apiRoutes } from './src/routes/api.mjs'
 import { makeRedactor } from './src/redact.mjs'
 import { verifyHooks, install, HOOK_MAP } from './src/settings.mjs'
 import { appPaths } from './src/paths.mjs'
+import { stampConsole } from './src/log.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 
@@ -33,6 +34,17 @@ const HERE = dirname(fileURLToPath(import.meta.url))
  * `process.exit(0)`，而 HUD 是子进程，进程一走就被带走，通知只会留在日志里。
  */
 const ONE_SHOT = process.argv.some((a) => a.startsWith('--'))
+
+/**
+ * 常驻服务的每一行日志都带时间戳；一次性查询不带。
+ *
+ * 必须在**任何 console 调用之前**装上，否则最早那几行（配置路径、监听地址）
+ * 会没有前缀，而它们恰恰是「这次是什么时候起来的」的锚点。
+ *
+ * 一次性查询的输出是给人看的终端内容——`clamicro qr` 的二维码、状态表格。
+ * 给那些行挨个加前缀会把二维码直接毁掉。
+ */
+if (!ONE_SHOT) stampConsole()
 
 const config = loadConfig()
 const store = new Store()
