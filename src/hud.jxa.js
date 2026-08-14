@@ -20,6 +20,7 @@
 //   · 窗口层级用 screenSaver（1000），比 status 高，全屏应用之上也能看见。
 ObjC.import('AppKit')
 ObjC.import('QuartzCore')
+ObjC.import('stdlib') // $.exit —— app.terminate 只能退 0，而失败必须是非零
 
 /** 反向曲线的顶角半径 / 普通圆角的底角半径，取自 DynamicNotchKit 的展开态 */
 const TOP_R = 15
@@ -301,9 +302,12 @@ function run(argv) {
    * 因果正好搞反了。
    *
    * 实测：那样写窗口**建得出来**（`isVisible=true`，WindowServer 也发了
-   * windowNumber），但 `occlusionState` 始终不含 visible 位，屏幕上什么都
-   * 没有，截图也截不到。换成 `NSApp.run` 之后 occlusionState 立刻从
-   * 8192 变成 8194（+2 = visible），画面就出来了。
+   * windowNumber），但屏幕上什么都没有，截图也截不到。换成 `NSApp.run`
+   * 之后画面就出来了。
+   *
+   * （原来这段拿 occlusionState 的 visible 位当证据，说它从 8192 变成 8194。
+   * 后来重测发现那个量不可信：前台和孤儿进程都稳定报 8192，区分不了两者。
+   * 结论没变——要跑 NSApp.run——但证据换成了**屏幕截图**：截得到就是画出来了。）
    *
    * 也就是说：**AppKit 窗口要参与合成，得有 AppKit 自己的事件循环在跑**，
    * 光转 runloop 不够。动画因此改成 NSTimer 驱动的状态机。
@@ -311,7 +315,6 @@ function run(argv) {
   const easeOutBack = (t) => 1 + 2.2 * Math.pow(t - 1, 3) + 1.2 * Math.pow(t - 1, 2)
   const easeOutCubic = (t) => 1 - Math.pow(1 - t, 3)
 
-  let checked = false
   const IN = 0.34
   const OUT = 0.26
   const start = Date.now()
@@ -345,24 +348,26 @@ function run(argv) {
       layout(W, H)
       win.setAlphaValue(1)
       /**
-       * **自检：确认真的画出来了。**
+       * 这里曾经有一个「确认真的画出来了」的自检，用 occlusionState 的
+       * visible 位判断窗口有没有参与合成。**删掉了，因为它是错的，而且有害。**
        *
-       * 这是整件事里最关键的一行。窗口能建、isVisible 返回 true、退出码 0，
-       * 都**不能证明屏幕上有东西**——孤儿进程（PPID=1，比如被 nohup 起来的
-       * 服务）拿不到图形会话，窗口永远不参与合成。而这正是本项目服务的形态。
+       * 实测（前台 shell 父进程 vs 双重 fork 造的孤儿，两边各跑几次）：
+       *   前台：occlusionState = 8192，窗口确实在屏幕上
+       *   孤儿：occlusionState = 8192，窗口什么都没画出来
+       * 两者**报同一个值**，这个量根本区分不了。而代码检查的是 `& 2`
+       * （文档里 NSWindowOcclusionStateVisible 确实是 2），8192 & 2 = 0，
+       * 于是它**永远判定失败**——包括每一次真的显示成功。
        *
-       * occlusionState 的 visible 位（1<<1）才是唯一可信的判据。不含它就
-       * 抛异常，让 osascript 以非 0 退出——上层据此回落到系统横幅。
+       * 代价不只是误报：原来的实现是在这个定时器回调里 `throw`，异常打断
+       * 定时器但 `app.run` 还在转，之后没有任何东西再去 terminate。机器上
+       * 因此堆了 9 个 hud.jxa.js，最久的跑了 13 小时 10 分钟，不写日志、
+       * 不报错，只是安静地占着内存——日志分析时才发现。
        *
-       * 只在展开完成后查一次：动画期间状态本来就在变。
+       * 而 hud.mjs 里早就写着结论：「为什么不用 occlusionState 自检：试过，
+       * 在真实的孤儿环境里它照样带着 visible 位，判不出来。ppid 是能直接
+       * 观察、能复现、能解释的那个量。」——**结论写在一个文件里，废弃的
+       * 检查留在了另一个文件里。** 判据只保留 hud.mjs 的 canDrawWindows()。
        */
-      if (!checked) {
-        checked = true
-        if ((Number(win.occlusionState) & 2) === 0) {
-          win.close
-          throw new Error('窗口未参与合成（多半是没有图形会话），本次提示未显示')
-        }
-      }
       return
     }
 
@@ -387,6 +392,23 @@ function run(argv) {
       app.terminate(null)
     }
   })
+
+  /**
+   * 看门狗：到点无论如何都退出。
+   *
+   * 上面那条动画定时器是唯一的正常退出路径，任何让它停下来的意外（抛异常、
+   * 拿不到图形会话、AppKit 内部出岔子）都会让 `app.run` 永远转下去。实测
+   * 后果是机器上堆着一批跑了十几个小时的 osascript。
+   *
+   * 一个**独立于动画**的绝对超时把这件事变成不可能：胶囊最多活 ms + 2 秒，
+   * 之后强制 terminate。宁可提示少显示一会儿，也不留一个不会死的进程。
+   */
+  $.NSTimer.scheduledTimerWithTimeIntervalRepeatsBlock(
+    (ms + 2000) / 1000, false, () => {
+      // 走到这儿说明动画那条正常路径没能收尾。同样要非零：让调用方知道
+      // 这次提示不可靠，而不是以为一切正常
+      $.exit(4)
+    })
 
   app.run
   // app.run 之后必须还有一条语句：它是 run() 的尾表达式时，JXA 会把它当成

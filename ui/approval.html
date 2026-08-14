@@ -621,7 +621,23 @@ function renderCommand(a) {
 
 function tick() {
   const total = BOOT.expires_at - BOOT.created_at;
-  const left = Math.max(0, BOOT.expires_at - Date.now());
+  /**
+   * **剩余时间要钳在 [0, total] 里。**
+   *
+   * `expires_at` 是 **Mac 的**时钟，`Date.now()` 是**手机的**。两台设备的
+   * 时钟差哪怕几毫秒，left 就会超过整个时限，然后被两层向上取整放大成
+   * 一整分钟：
+   *
+   *   left = 180000ms → ceil(180/60) = 3m   ← 对
+   *   left = 180001ms → ceil(181/60) = 4m   ← 一个 3 分钟的窗口显示成 4 分钟
+   *
+   * 实际表现就是「刚打开显示 4m，过一秒变 3m」——用户报的正是这个。
+   * 环也一样：`1 - left/total` 会算出负数，描边跑过头。
+   *
+   * 钳住是对的，因为它陈述的是一个事实：**剩下的时间不可能比总时长还长。**
+   * 在这里修，比在每个读数上各自防一次更靠得住。
+   */
+  const left = Math.max(0, Math.min(total, BOOT.expires_at - Date.now()));
   const s = Math.ceil(left / 1000);
   const urgent = left <= 60_000;
 

@@ -845,8 +845,10 @@ function statusConsole() {
     // 有事等你做决定 —— 这是整个产品存在的理由，压过其他一切状态
     const a = pending[0];
     cls = 'is-wait' + (pending.length > 1 ? ' queued' : ''); dotLabel = '等待批准';
-    const left = Math.max(0, Math.round((a.expires_at - Date.now()) / 1000));
     const span = Math.max(1, a.expires_at - a.created_at);
+    // 同样钳住：跨设备时钟差会让「剩余」超过「总时长」，读数多跳一秒、
+    // 进度条超过 100%
+    const left = Math.max(0, Math.round(Math.min(span, a.expires_at - Date.now()) / 1000));
     const pctLeft = Math.max(0, Math.min(100, ((a.expires_at - Date.now()) / span) * 100));
     /**
      * 等待态是**完整且可操作**的那一份，不是一个摘要。
@@ -1368,7 +1370,10 @@ function tickDeadlines() {
   for (const el of document.querySelectorAll('.dl')) {
     const exp = +el.dataset.exp, born = +el.dataset.born;
     const auto = el.dataset.auto === 'allow';
-    const left = Math.max(0, exp - Date.now());
+    // 钳在 [0, 总时长]：exp 是 **Mac 的**时钟，Date.now() 是**手机的**。
+    // 两边差几毫秒，left 就会超过总时长，进度条算出 >100%、读数也会多跳一档。
+    // 详见 approval.html 里 tick() 的同一处注释
+    const left = Math.max(0, Math.min(exp - born, exp - Date.now()));
     const s = Math.ceil(left / 1000);
     const mmss = s >= 60 ? `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}` : `${s}s`;
     el.querySelector('.dlbar i').style.width = (left / (exp - born)) * 100 + '%';
