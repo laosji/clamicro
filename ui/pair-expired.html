@@ -1,7 +1,10 @@
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <title>配对链接已失效 · Clamicro</title>
 <style>
+  /* iOS Safari 从 10 起就忽略 user-scalable=no，双击放大只能靠 touch-action 挡。
+     manipulation = 保留滚动和捏合，去掉双击缩放那 300ms 的等待。 */
+  html{touch-action:manipulation; -webkit-text-size-adjust:100%}
   :root{
     --bg:#f7f8fa; --fg:#12151a; --dim:#6b7280; --line:#e4e7ec; --card:#fff;
     --accent:#2563eb; --ok:#16a34a; --warn:#b45309;
