@@ -22,7 +22,7 @@ import { apiRoutes } from './src/routes/api.mjs'
 import { makeRedactor } from './src/redact.mjs'
 import { verifyHooks, install, HOOK_MAP } from './src/settings.mjs'
 import { appPaths } from './src/paths.mjs'
-import { stampConsole } from './src/log.mjs'
+import { stampConsole, rotateLog } from './src/log.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 
@@ -124,6 +124,10 @@ if (!ONE_SHOT) {
     approvals.sweep(86_400_000) // 记录留一天，够回看昨天的操作
     history.touch()
     healHooks()
+    // 日志只增不减，一年下来能涨到几 MB。搭在这个已有的 5 分钟巡检上，
+    // 不为它单开定时器
+    const cut = rotateLog()
+    if (cut) console.log(`[log] 日志已截断：${Math.round(cut.was / 1024)}KB → ${Math.round(cut.now / 1024)}KB`)
   }, 300_000).unref()
 }
 

@@ -4,6 +4,7 @@ import { existsSync, openSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { APP_DIR, appPaths, installedInfo } from './src/paths.mjs'
+import { LOG_FILE } from './src/log.mjs'
 import { isNewer, checkUpdate } from './src/update.mjs'
 
 // npm 包自己的版本（不是已安装运行时的版本，两者可能不一样——这正是要提示的）
@@ -12,7 +13,8 @@ const PKG_VERSION = JSON.parse(
 ).version
 
 const [cmd, ...rest] = process.argv.slice(2)
-const LOG = join(homedir(), 'Library', 'Logs', 'clamicro.log')
+// 路径只在 src/log.mjs 定义一次——原来 cli / install / server 各写了一遍
+const LOG = LOG_FILE
 
 const c = {
   b: (s) => `\x1b[1m${s}\x1b[0m`,

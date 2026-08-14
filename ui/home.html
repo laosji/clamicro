@@ -40,8 +40,6 @@
     display:flex; align-items:center; gap:8px; padding:16px 18px 10px; flex:0 0 auto;
   }
   header h1{font-size:19px; margin:0; font-weight:600}
-  .dot{width:8px;height:8px;border-radius:50%;background:var(--dim);flex:0 0 auto;transition:background .3s}
-  .dot.live{background:var(--ok)}
   header a{
     margin-left:auto; color:var(--dim); text-decoration:none;
     /* 44×44 是拇指可靠命中的最小面积。图形本身 24px——用内联 SVG 而不是
@@ -644,7 +642,6 @@
 </head>
 <body>
 <header>
-  <span class="dot" id="dot"></span>
   <h1 id="title">Clamicro</h1>
   <a href="/ui/settings" aria-label="设置" title="设置">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
@@ -1540,11 +1537,12 @@ function connect() {
   const es = new EventSource('/api/stream');
   es.onopen = () => {
     if (offlineSince !== null) { offlineSince = null; refresh(); }
-    $('dot').classList.add('live');
+    // 连接状态只由路径行那个光标表示。标题前面原来还有一个小圆点，
+    // 说的是同一件事——两个指示灯说同一句话，人要多看一处才能确认，
+    // 而且它们的更新时机不同步时反而制造疑问
     renderPathBar();
   };
   es.onerror = () => {
-    $('dot').classList.remove('live');
     // EventSource 会自己重连，短暂抖动不该报警——超过几秒才算真断
     if (offlineSince === null) { offlineSince = Date.now(); setTimeout(render, 5000); }
     else if (Date.now() - offlineSince > 5000) render();
