@@ -165,16 +165,62 @@ test('截断不得把命中风险的内容藏起来', () => {
  * 所以详情页一打开就 extend。这些用例钉的是 extend 的三条性质。
  */
 test('extend：有人在看就停表', async (t) => {
-  const mk = (policy) => {
+  const mk = (policy, command = 'ls') => {
     const s = new ApprovalStore()
-    return { s, ap: s.create({ session_id: 'x', tool_name: 'Bash', tool_input: { command: 'ls' } }, policy) }
+    return { s, ap: s.create({ session_id: 'x', tool_name: 'Bash', tool_input: { command } }, policy) }
   }
+  /** 到点会被**拒绝**的那种——只有这种才会被延长 */
+  const risky = (policy) => mk(policy, 'rm -rf /tmp/whatever')
 
   await t.test('把时限推到新的截止点', () => {
-    const { s, ap } = mk({ autoApproveMs: 10_000 })
+    const { s, ap } = risky({ timeoutMs: 5_000 })
     const before = ap.expires_at
     s.extend(ap.id, 180_000)
-    assert.ok(s.get(ap.id).expires_at > before + 100_000, '10 秒的窗口应该被推到 3 分钟量级')
+    assert.ok(s.get(ap.id).expires_at > before + 100_000, '5 秒的窗口应该被推到 3 分钟量级')
+  })
+
+  await t.test('到点会通过的不延长 —— 延长只会白白拖住 Claude', () => {
+    /**
+     * 延长的意义是「在不可挽回的自动决策落下之前给你时间读」。那个决策是
+     * 通过时，延长只是把一件你反正会放行的事又拖几分钟：点开一条
+     * `npm run build` 然后走开，终端会干等 3 分钟而不是 10 秒。
+     */
+    const { s, ap } = mk({ autoApproveMs: 10_000 })
+    assert.equal(ap.auto_decision, 'allow')
+    const before = ap.expires_at
+    s.extend(ap.id, 180_000)
+    assert.equal(s.get(ap.id).expires_at, before, '普通审批的时限不该被打开详情页改动')
+  })
+
+  await t.test('AskUserQuestion 例外：放行等于错过，仍然要延长', () => {
+    /**
+     * 它不是一次「操作」，是一道问给人的选择题。放行它不代表事情办成了，
+     * 只代表这道题被弹回 Mac 终端——手机那边彻底失去回答的机会。
+     *
+     * 所以对它来说自动通过和自动拒绝一样不可挽回。历史里唯一一条在手机上
+     * 答成的 AskUserQuestion 窗口是 223 秒，靠的正是 extend；按 10 秒算，
+     * 它会在页面还没读完时就被弹回终端。
+     */
+    const s = new ApprovalStore()
+    const ap = s.create(
+      { session_id: 'x', tool_name: 'AskUserQuestion', tool_input: { questions: [{ question: '选哪个' }] } },
+      { autoApproveMs: 10_000 },
+    )
+    assert.equal(ap.auto_decision, 'allow', '前提：它确实是「到点会通过」的那一类')
+    const before = ap.expires_at
+    s.extend(ap.id, 180_000)
+    assert.ok(s.get(ap.id).expires_at > before + 100_000, '被当成普通审批处理了，人来不及答')
+  })
+
+  await t.test('判据是 auto_decision，不是风险等级', () => {
+    // 打开 autoApproveHighRisk 之后高危也会自动通过，那时它同样不该被延长。
+    // 用「风险等级 high」做判据的实现会在这里走错
+    const { s, ap } = risky({ autoApproveMs: 10_000, autoApproveHighRisk: true })
+    assert.equal(ap.risk.level, 'high')
+    assert.equal(ap.auto_decision, 'allow')
+    const before = ap.expires_at
+    s.extend(ap.id, 180_000)
+    assert.equal(s.get(ap.id).expires_at, before)
   })
 
   await t.test('只延长不缩短', () => {
@@ -186,7 +232,7 @@ test('extend：有人在看就停表', async (t) => {
   })
 
   await t.test('auto_decision 不变——变的是「你有多久插手」，不是「不插手会怎样」', () => {
-    const { s, ap } = mk({ autoApproveMs: 10_000 })
+    const { s, ap } = risky({ timeoutMs: 5_000 })
     const before = ap.auto_decision
     s.extend(ap.id, 180_000)
     assert.equal(s.get(ap.id).auto_decision, before)
@@ -208,8 +254,9 @@ test('extend：有人在看就停表', async (t) => {
     // 只改 expires_at 是不够的——定时器在创建那一刻就把延迟算死了，
     // 不重新排期的话它照样在原来的时间点开火，延长等于没做
     const s = new ApprovalStore()
-    const ap = s.create({ session_id: 'x', tool_name: 'Bash', tool_input: { command: 'ls' } },
-      { autoApproveMs: 60 })
+    // 必须用高危：到点会通过的那些现在压根不延长，拿它测「重新排期」测不到东西
+    const ap = s.create({ session_id: 'x', tool_name: 'Bash', tool_input: { command: 'rm -rf /tmp/whatever' } },
+      { timeoutMs: 60 })
     const waited = s.wait(ap.id)
     s.extend(ap.id, 5_000)
     const raced = await Promise.race([

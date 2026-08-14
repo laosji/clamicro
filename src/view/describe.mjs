@@ -42,8 +42,51 @@ export function describeMismatch(description, cmd) {
  *   impact    —— 影响面标签
  *   mismatch  —— 描述与命令不符的警告，没有则 null
  */
+/**
+ * 把 AskUserQuestion 的输入拆成手机能渲染的结构。
+ *
+ * ## 为什么必须特判
+ *
+ * 走通用分支的话，headline 是光秃秃的 `AskUserQuestion`，detail 是一整坨
+ * 十几行的原始 JSON——手机上根本读不了，而且底下只有「允许 / 拒绝」两个
+ * 按钮，对一道选择题毫无意义。
+ *
+ * ## 只取渲染需要的字段
+ *
+ * question / header / label / description / multiSelect，其余一律不带。
+ * 这些文本会进 HTML，转义在前端做；这里只负责**把结构理出来**，
+ * 顺便把长度掐住——description 可以写得很长，手机上一屏放不下。
+ */
+export function askQuestions(toolInput) {
+  const t = toolInput && typeof toolInput === 'object' ? toolInput : {}
+  const qs = Array.isArray(t.questions) ? t.questions : []
+  return qs.slice(0, 4).map((q, i) => ({
+    idx: i,
+    question: String(q?.question ?? '').slice(0, 500),
+    header: String(q?.header ?? '').slice(0, 40),
+    multiSelect: !!q?.multiSelect,
+    options: (Array.isArray(q?.options) ? q.options : []).slice(0, 8).map((o) => ({
+      label: String(o?.label ?? '').slice(0, 120),
+      description: String(o?.description ?? '').slice(0, 400),
+    })).filter((o) => o.label),
+  })).filter((q) => q.question && q.options.length)
+}
+
 export function analyze(toolName, toolInput) {
   const t = toolInput && typeof toolInput === 'object' ? toolInput : {}
+
+  if (toolName === 'AskUserQuestion') {
+    const qs = askQuestions(t)
+    // 标题用第一道题的 header（那本来就是给人看的短标签），退而求其次用题干。
+    // 「AskUserQuestion」这个工具名对人零信息量，不该出现在通知和列表里
+    const first = qs[0]
+    return {
+      headline: first ? (first.header || first.question).slice(0, 60) : '一个需要你回答的问题',
+      // detail 仍然给出题干：手机上按 choices 渲染，而通知正文和终端只有纯文本
+      detail: qs.map((q) => q.question).join('\n\n') || JSON.stringify(t, null, 2).slice(0, 2000),
+      impact: [{ label: '等你回答', tone: 'calm' }],
+    }
+  }
 
   if (toolName === 'Bash') {
     const cmd = String(t.command ?? '')

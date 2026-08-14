@@ -11,7 +11,7 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { createConfirmer, escapeAppleScript, describeSource } from '../src/confirm.mjs'
+import { createConfirmer, createUrlShower, escapeAppleScript, describeSource } from '../src/confirm.mjs'
 
 /** 记下被问的那段脚本，同时决定回什么 */
 const spy = (reply) => {
@@ -27,13 +27,13 @@ const spy = (reply) => {
 
 test('只有明确按了「允许」才算通过', async (t) => {
   await t.test('按允许', async () => {
-    const ok = await createConfirmer(spy('button returned:允许, gave up:false'))({ name: 'iPhone' })
-    assert.equal(ok, true)
+    const r = await createConfirmer(spy('button returned:允许, gave up:false'))({ name: 'iPhone' })
+    assert.deepEqual(r, { allowed: true, reason: 'allowed' })
   })
 
   await t.test('按拒绝', async () => {
-    const ok = await createConfirmer(spy('button returned:拒绝, gave up:false'))({ name: 'iPhone' })
-    assert.equal(ok, false)
+    const r = await createConfirmer(spy('button returned:拒绝, gave up:false'))({ name: 'iPhone' })
+    assert.deepEqual(r, { allowed: false, reason: 'denied' })
   })
 })
 
@@ -42,24 +42,101 @@ test('失败一律倒向拒绝', async (t) => {
   await t.test('超时（gave up）', async () => {
     // 关键：超时的返回里**同时**带着一个空的 button returned。
     // 只看「字符串里有没有『允许』」的实现会把这一条读成同意
-    const ok = await createConfirmer(spy('button returned:, gave up:true'))({ name: 'iPhone' })
-    assert.equal(ok, false)
+    const r = await createConfirmer(spy('button returned:, gave up:true'))({ name: 'iPhone' })
+    assert.equal(r.allowed, false)
   })
 
   await t.test('超时且回显里恰好含「允许」二字', async () => {
-    const ok = await createConfirmer(spy('button returned:允许, gave up:true'))({ name: 'x' })
-    assert.equal(ok, false, 'gave up 必须优先于按钮名')
+    const r = await createConfirmer(spy('button returned:允许, gave up:true'))({ name: 'x' })
+    assert.equal(r.allowed, false, 'gave up 必须优先于按钮名')
   })
 
   await t.test('osascript 抛异常（拿不到图形会话 / 崩了）', async () => {
-    const ok = await createConfirmer(spy(new Error('no GUI session')))({ name: 'iPhone' })
-    assert.equal(ok, false)
+    const r = await createConfirmer(spy(new Error('no GUI session')))({ name: 'iPhone' })
+    assert.equal(r.allowed, false)
   })
 
   await t.test('返回看不懂的东西', async () => {
     for (const junk of ['', 'wat', null, undefined]) {
-      assert.equal(await createConfirmer(spy(junk))({ name: 'x' }), false, `junk=${junk}`)
+      const r = await createConfirmer(spy(junk))({ name: 'x' })
+      assert.equal(r.allowed, false, `junk=${junk}`)
     }
+  })
+})
+
+test('三种「没通过」必须能分开', async (t) => {
+  /**
+   * 全部返回 false 的时候，等待页只能对所有情况讲同一句
+   * 「Mac 上点了『拒绝』，或者等太久自动拒绝了」。
+   *
+   * 日志里出现过两次 `osascript 退出码 null`（被信号杀死，多半是服务重启把
+   * 同进程组的对话框带走了）。那两次上面两件事一件都没发生，手机却告诉用户
+   * 有人拒绝了他 —— 于是他去找「谁点的拒绝」，而真正该做的只是再扫一次。
+   */
+  await t.test('有人点了拒绝 → denied', async () => {
+    const r = await createConfirmer(spy('button returned:拒绝, gave up:false'))({ name: 'x' })
+    assert.equal(r.reason, 'denied')
+  })
+
+  await t.test('没人理 → timeout', async () => {
+    const r = await createConfirmer(spy('button returned:, gave up:true'))({ name: 'x' })
+    assert.equal(r.reason, 'timeout')
+  })
+
+  await t.test('对话框根本没能正常结束 → interrupted', async () => {
+    const r = await createConfirmer(spy(new Error('osascript 被信号 SIGTERM 终止')))({ name: 'x' })
+    assert.equal(r.reason, 'interrupted', '这一条不该被说成「有人拒绝了你」')
+  })
+
+  await t.test('三种都不放行', async () => {
+    // 分类是为了把话说清楚，**不是**为了给某一类开口子
+    for (const reply of [
+      'button returned:拒绝, gave up:false',
+      'button returned:, gave up:true',
+      new Error('boom'),
+    ]) {
+      assert.equal((await createConfirmer(spy(reply))({ name: 'x' })).allowed, false)
+    }
+  })
+})
+
+test('没装 qrencode 时把地址弹出来', async (t) => {
+  /**
+   * qrencode 是 Homebrew 的包，仓库里从没声明过。缺了它，网页配对这条路
+   * 原来是彻底的死路：屏幕上什么都没有，而通知和两个前端页面都在说
+   * 「屏幕上有二维码」。
+   */
+  await t.test('地址进了对话框正文', async () => {
+    const ask = spy('button returned:知道了, gave up:false')
+    const ok = await createUrlShower(ask)('http://MacBook.local:8765/ui/pair/abc123')
+    assert.equal(ok, true)
+    assert.match(ask.calls[0].script, /MacBook\.local:8765\/ui\/pair\/abc123/)
+  })
+
+  await t.test('顺便告诉人缺的是什么', async () => {
+    const ask = spy('button returned:知道了, gave up:false')
+    await createUrlShower(ask)('http://x/y')
+    assert.match(ask.calls[0].script, /brew install qrencode/,
+      '不说的话，人只会看到一段地址，永远不知道本该是个二维码')
+  })
+
+  await t.test('只有一个按钮 —— 它是通知不是提问', async () => {
+    const ask = spy('button returned:知道了, gave up:false')
+    await createUrlShower(ask)('http://x/y')
+    assert.doesNotMatch(ask.calls[0].script, /拒绝|允许/, '别和授权确认框长得像')
+  })
+
+  await t.test('弹不出来也不抛 —— 配对 id 已经生效了', async () => {
+    // 抛的话整个 POST /api/pair 跟着 400，而配对其实是成功的：
+    // 人还可以去终端跑 clamicro qr
+    assert.equal(await createUrlShower(spy(new Error('no GUI')))('http://x/y'), false)
+  })
+
+  await t.test('地址里的引号会被转义', async () => {
+    const ask = spy('button returned:知道了, gave up:false')
+    await createUrlShower(ask)('http://x/"; do shell script "id')
+    const body = ask.calls[0].script.match(/display dialog "([\s\S]*?)" with title/)[1]
+    assert.ok(!/(^|[^\\])"/.test(body), `正文里有未转义引号: ${body}`)
   })
 })
 
@@ -76,8 +153,8 @@ test('对话框里必须带上「它从哪来」', async (t) => {
 
   await t.test('局域网带上来源 IP', async () => {
     const ask = spy('button returned:拒绝, gave up:false')
-    await createConfirmer(ask)({ name: 'iPhone', ip: '192.168.0.7' })
-    assert.match(ask.calls[0].script, /192\.168\.0\.7/)
+    await createConfirmer(ask)({ name: 'iPhone', ip: '192.168.1.7' })
+    assert.match(ask.calls[0].script, /192\.168\.1\.7/)
   })
 
   await t.test('「允许」高亮，但 Esc 和超时仍然走向拒绝', async () => {

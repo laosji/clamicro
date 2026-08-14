@@ -66,7 +66,7 @@ test('带转发头的一律不算本机', async (t) => {
 test('非回环来源', async (t) => {
   await t.test('同一 Wi-Fi 上的别人', () => {
     // 服务同时绑局域网网卡，所以这一条不是理论问题
-    assert.equal(isLoopback(req('192.168.0.7', '192.168.0.101:8765')), false)
+    assert.equal(isLoopback(req('192.168.1.7', '192.168.1.42:8765')), false)
   })
   await t.test('拿不到来源地址时按不可信处理', () => {
     assert.equal(isLoopback({ socket: {}, headers: {} }), false)

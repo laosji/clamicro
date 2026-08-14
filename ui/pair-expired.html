@@ -95,9 +95,11 @@ $('again').onclick = async function () {
     const d = await r.json();
     if (r.ok && d.ok) {
       $('state').className = 'state on';
+      // 这句以前是假的：没装 qrencode 时屏幕上什么都不会显示。
+      // 现在 pages.mjs 会退回去弹一个带地址的对话框，它才成立
       $('state').textContent = d.qr
         ? '✅ 二维码已显示在 Mac 上，去扫它'
-        : '✅ 已通知 Mac（没装 qrencode，屏幕上会显示地址）';
+        : '✅ Mac 上已弹出配对地址（没装 qrencode；brew install qrencode 之后就是二维码）';
     } else if (r.status === 429) {
       $('state').className = 'state err';
       $('state').textContent = d.error || '刚显示过，等几秒再试';

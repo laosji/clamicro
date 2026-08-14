@@ -313,6 +313,49 @@ if (process.argv.includes('--rotate-token')) {
 }
 
 /**
+ * 摊开当前真正生效的完整配置，每一项标出是哪一层给的。
+ *
+ * ## 为什么值得一条独立命令
+ *
+ * `status` 答的是「现在健康吗」——版本、监听地址、hooks、网络信任。它**不答**
+ * 「现在的规则是什么」：审批等多久、高危会不会自动放行、能配几台设备。而后者
+ * 恰恰是行为不对劲时你最想知道的。
+ *
+ * 更要命的是这些值大多**看不见**：生效的 25 项里只有个位数写在 config.json 里，
+ * 其余全部只存在于源码的 DEFAULTS。`cat config.json` 给你的是一份沉默的谎言——
+ * 你看到的是「我改过什么」，而不是「现在按什么在跑」。
+ *
+ * maxDevices 就是活例子：默认 1，配置文件里没有这一项，于是「手机为什么老要
+ * 重新扫码」查了半天，而答案就是那个看不见的默认值。
+ *
+ * ## 为什么标来源
+ *
+ * 只打最终值只能回答「是多少」。「10 秒」和「10 秒 ← 你自己改过」在排查时是
+ * 两件不同的事——后者说明有人动过手，前者说明你在跟设计意图较劲。
+ */
+if (process.argv.includes('--config')) {
+  const { explainConfig } = await import('./src/config.mjs')
+  const rows = explainConfig(config)
+  const C = { 默认值: '\x1b[2m', 配置文件: '\x1b[36m', 环境变量: '\x1b[33m', 运行时探测: '\x1b[35m' }
+  const R = '\x1b[0m'
+  const w = Math.max(...rows.map((r) => r.key.length))
+
+  console.log('\n  当前生效的配置（不含令牌和设备列表）\n')
+  for (const r of rows) {
+    const v = r.value === null ? '—' : Array.isArray(r.value) ? `[${r.value.join(', ')}]` : String(r.value)
+    console.log(`    ${r.key.padEnd(w)}  ${v.padEnd(26)} ${C[r.source] ?? ''}${r.source}${R}`)
+  }
+
+  const n = rows.reduce((a, r) => ((a[r.source] = (a[r.source] ?? 0) + 1), a), {})
+  console.log(
+    `\n  ${Object.entries(n).map(([k, v]) => `${k} ${v}`).join('  ·  ')}` +
+      `\n  \x1b[2m「默认值」的那些在 config.json 里查不到，但一样在起作用。` +
+      `改动：设置页，或直接编辑 ${CONFIG_FILE}\x1b[0m\n`,
+  )
+  process.exit(0)
+}
+
+/**
  * 已配对设备列表 / 吊销。
  *
  * 每台设备一个令牌，所以吊销是**单独**的——丢一台手机不必让其他设备
@@ -443,6 +486,10 @@ function publicApproval(a, withKey = false) {
     detail_lines: a.detail_lines,
     impact: a.impact,
     mismatch: a.mismatch ?? null,
+    // 选择题的题干和选项。只有 AskUserQuestion 有，其余是空数组。
+    // 手机据此渲染成可点的列表，而不是把原始 JSON 摊在屏幕上
+    choices: a.choices ?? [],
+    answer: a.answer ?? null,
     rule: a.rule,
     risk: a.risk,
     status: a.status,

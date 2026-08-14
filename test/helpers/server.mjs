@@ -18,10 +18,15 @@ import { fileURLToPath } from 'node:url'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
 
-export async function startServer({ port = 8791 } = {}) {
+/**
+ * @param env 额外环境变量。主要用途是改 PATH，把 qrencode / osascript 换成
+ *   假的——那两条外部依赖的失败路径没法在真机上直接制造，而它们恰恰
+ *   是「屏幕上什么都没有，前端却说有」这类故障的源头。
+ */
+export async function startServer({ port = 8791, env = {} } = {}) {
   const home = mkdtempSync(join(tmpdir(), 'clamicro-http-'))
   const child = spawn(process.execPath, [join(ROOT, 'server.mjs')], {
-    env: { ...process.env, HOME: home, CLAMICRO_PORT: String(port) },
+    env: { ...process.env, HOME: home, CLAMICRO_PORT: String(port), ...env },
     stdio: ['ignore', 'pipe', 'pipe'],
   })
   const logs = []

@@ -86,27 +86,37 @@ export class PairingStore {
  *
  * ## 设备在**领取**时才创建
  *
- * 不是确认通过的那一刻。扫完就切走的标签页不会留下一台幽灵设备——而
- * maxDevices 默认是 1，一台幽灵设备就会把你顶下线。
+ * 不是确认通过的那一刻。扫完就切走的标签页不会留下一台幽灵设备——设备位
+ * 有限（maxDevices 默认 2），幽灵设备会白占一格，攒够了就把真设备顶下线。
  */
 const CONFIRM_TTL_MS = 180_000
 
 export class ConfirmStore {
-  #items = new Map() // watch -> { state, meta, expiresAt }
+  #items = new Map() // watch -> { state, reason, meta, expiresAt }
 
   /** 开一条等待记录，返回给浏览器的 watch 凭据 */
   begin(meta = {}, now = Date.now()) {
     this.sweep(now)
     const watch = randomBytes(24).toString('base64url')
-    this.#items.set(watch, { state: 'pending', meta, expiresAt: now + CONFIRM_TTL_MS })
+    this.#items.set(watch, { state: 'pending', reason: null, meta, expiresAt: now + CONFIRM_TTL_MS })
     return watch
   }
 
-  /** 确认有结果了。已经不在表里（超时被清）就什么都不做。 */
-  settle(watch, allowed, now = Date.now()) {
+  /**
+   * 确认有结果了。已经不在表里（超时被清）就什么都不做。
+   *
+   * `reason` 区分三种「没通过」：denied（有人点了拒绝）、timeout（没人理）、
+   * interrupted（对话框根本没能正常结束，多半是服务重启把它带走了）。
+   *
+   * 不区分的代价是实打实的：等待页原来对所有失败都说「Mac 上点了『拒绝』，
+   * 或者等太久自动拒绝了」。服务重启那次两件事都没发生，于是手机告诉你
+   * 有人拒绝了你——一条会把人带向完全错误方向的错误信息。
+   */
+  settle(watch, allowed, now = Date.now(), reason = null) {
     const it = this.#items.get(watch)
     if (!it || it.state !== 'pending') return false
     it.state = allowed ? 'allowed' : 'denied'
+    it.reason = reason
     it.settledAt = now
     return true
   }
@@ -114,12 +124,12 @@ export class ConfirmStore {
   /** 查状态，不消费 */
   peek(watch, now = Date.now()) {
     const it = this.#items.get(watch)
-    if (!it) return { state: 'unknown' }
+    if (!it) return { state: 'unknown', reason: null }
     if (it.expiresAt <= now) {
       this.#items.delete(watch)
-      return { state: 'unknown' }
+      return { state: 'unknown', reason: null }
     }
-    return { state: it.state, meta: it.meta }
+    return { state: it.state, reason: it.reason ?? null, meta: it.meta }
   }
 
   /**
@@ -152,17 +162,20 @@ export function addDevice(config, { name, now = Date.now() } = {}) {
   config.devices ??= []
 
   /**
-   * 设备数上限，默认 1。
+   * 设备数上限，默认 2（见 config.mjs 对这个数字的完整说明）。
    *
    * 这**不是**为了挡住攻击者——局域网是明文的，嗅到 cookie 的人直接重放就行，
-   * 根本不用配对。上限真正买到的是**可检测性**：多一台就必然顶掉你，
-   * 你当场发现，而不是多一个人静悄悄地也有权限。
+   * 根本不用配对。挡住陌生设备的是 Mac 上那道授权确认（confirm.mjs），
+   * 每一次配对都要人点一下，不点就超时拒绝。
    *
+   * 上限剩下的作用是收口：令牌不会无限堆积，超出时最旧的一台被顶掉。
    * 用「顶掉最旧的」而不是「拒绝新的」：拒绝的话，抢先配对的人反而把你
-   * 锁在外面，你还得跑到终端去清。顶替则是合法用户永远能进，而且异常
-   * 一定会以「我怎么被踢了」的形式浮出来。
+   * 锁在外面，你还得跑到终端去清。顶替则是合法用户永远能进。
+   *
+   * 顶替**必须让人看见**——调用方负责发 HUD + 通知（见 routes/pages.mjs）。
+   * 默认 1 时代它是常态，静默发生就表现为「手机怎么老要重新扫码」。
    */
-  const max = Math.max(1, Number(config.maxDevices ?? 1))
+  const max = Math.max(1, Number(config.maxDevices ?? 2))
   const evicted = []
   while (config.devices.length >= max) evicted.push(config.devices.shift())
 

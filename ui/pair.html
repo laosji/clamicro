@@ -120,11 +120,16 @@ $('pair').onclick = async function () {
   try {
     const r = await fetch('/api/pair', { method: 'POST', headers: { 'X-CCM': '1' } }).then((r) => r.json());
     if (r.ok) {
-      this.textContent = '✓ 已在 Mac 上显示';
+      // r.qr 为 false = Mac 上没装 qrencode，弹出来的是**地址不是码**。
+      // 这里原来不看 r.qr，一律说「用相机扫那个二维码」——而屏幕上根本
+      // 没有码可扫（那时连地址都不显示），人就卡死在这一步
+      this.textContent = r.qr ? '✓ 已在 Mac 上显示' : '✓ Mac 上已显示地址';
       this.classList.add('done');
       // 扫完之后手机会停在加载页上等 Mac 的确认框，这句先把它说出来
-      $('msg').innerHTML = '去看你的 Mac 屏幕，用相机扫那个二维码。<br>'
-        + '扫完手机会停一下 —— 那是在等你回 Mac 点「允许」。';
+      $('msg').innerHTML = (r.qr
+        ? '去看你的 Mac 屏幕，用相机扫那个二维码。<br>'
+        : 'Mac 上没装 qrencode，弹的是一段地址 —— 照着输进浏览器。<br>')
+        + '打开之后手机会停一下 —— 那是在等你回 Mac 点「允许」。';
     } else {
       $('msg').textContent = r.error || '失败了，试试下面的命令';
       this.disabled = false;

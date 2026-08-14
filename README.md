@@ -27,6 +27,12 @@ So out of the box it *tells you* about routine work and *stops* dangerous work. 
 
 **Zero dependencies.** Node ≥ 18 and `curl` (built into macOS). Nothing in `node_modules` at runtime.
 
+`qrencode` is optional: with it, pairing shows a QR code you scan with the camera; without it, the same pairing URL is shown as text for you to type. Nothing breaks either way.
+
+```bash
+brew install qrencode
+```
+
 > macOS + iPhone only. The service uses macOS-specific facilities (`scutil`, `osascript`, Bonjour) and the UI is built for iOS Safari.
 
 ---
@@ -249,6 +255,7 @@ npx clamicro install      # install / upgrade
 npx clamicro uninstall    # uninstall
 npx clamicro qr           # print the login QR code
 npx clamicro status       # service, network, version
+npx clamicro config       # every effective setting, labelled by where it came from
 npx clamicro trust        # trust the current network
 npx clamicro untrust      # revoke trust (untrust <id-prefix> | untrust all)
 npx clamicro networks     # current network + trusted list

@@ -95,35 +95,55 @@ test('设备令牌簿', async (t) => {
   })
 })
 
-test('设备上限：默认 1，顶掉最旧的', async (t) => {
-  await t.test('默认只留一台，并报告被顶掉的是谁', () => {
+test('设备上限：默认 2，顶掉最旧的', async (t) => {
+  /**
+   * 这里从 1 改成 2 是**修一个真实故障**，不是放宽策略。
+   *
+   * 默认 1 的时候，手机和「Mac 上用局域网地址打开的浏览器」会互相顶——
+   * 回环免配对，局域网地址不免。于是每次在 Mac 上开一次局域网页面，
+   * 手机就掉一次线，表现为「Claude 重启后手机又要扫码」，而原因和重启无关。
+   *
+   * 让 1 曾经说得通的理由（多一台必然顶掉你 → 异常看得见）已经由
+   * confirm.mjs 的 Mac 授权确认承担：每次配对都得有人点「允许」。
+   */
+  await t.test('手机 + 一台别的，谁都不掉线', () => {
     const cfg = {}
     addDevice(cfg, { name: 'iPhone' })
-    const second = addDevice(cfg, { name: '别人的手机' })
-    assert.equal(cfg.devices.length, 1, '默认 maxDevices=1')
-    assert.equal(cfg.devices[0].name, '别人的手机')
-    assert.equal(second.evicted.length, 1)
-    assert.equal(second.evicted[0].name, 'iPhone', '必须说出顶掉了谁——上限的价值全在可检测性')
+    const second = addDevice(cfg, { name: 'Mac' })
+    assert.equal(cfg.devices.length, 2, '默认 maxDevices=2')
+    assert.deepEqual(second.evicted, [], '这一步不该顶掉任何人——就是它在造成「手机总要重扫」')
+    assert.deepEqual(cfg.devices.map((d) => d.name), ['iPhone', 'Mac'])
+  })
+
+  await t.test('第三台才开始顶，并报告被顶掉的是谁', () => {
+    const cfg = {}
+    addDevice(cfg, { name: 'iPhone' })
+    addDevice(cfg, { name: 'Mac' })
+    const third = addDevice(cfg, { name: '别人的手机' })
+    assert.equal(cfg.devices.length, 2)
+    assert.equal(third.evicted.length, 1)
+    assert.equal(third.evicted[0].name, 'iPhone', '必须说出顶掉了谁——调用方要据此发 HUD 和通知')
   })
 
   await t.test('顶替而不是拒绝：合法用户永远进得来', () => {
     // 拒绝的话，抢先配对的人反而把你锁在外面
-    const cfg = {}
+    const cfg = { maxDevices: 1 }
     addDevice(cfg, { name: '攻击者' })
     const mine = addDevice(cfg, { name: 'iPhone' })
     assert.equal(cfg.devices[0].id, mine.id, '后来的总能进')
     assert.equal(cfg.devices.length, 1)
   })
 
-  await t.test('调到 2 就能 iPhone + iPad 同时用', () => {
-    const cfg = { maxDevices: 2 }
+  await t.test('显式配 3 就能再多一台', () => {
+    const cfg = { maxDevices: 3 }
     addDevice(cfg, { name: 'iPhone' })
-    const b = addDevice(cfg, { name: 'iPad' })
-    assert.equal(cfg.devices.length, 2)
-    assert.equal(b.evicted.length, 0)
-    const c = addDevice(cfg, { name: '第三台' })
-    assert.equal(cfg.devices.length, 2)
-    assert.equal(c.evicted[0].name, 'iPhone', '顶掉最旧的')
+    addDevice(cfg, { name: 'iPad' })
+    const c = addDevice(cfg, { name: 'Mac' })
+    assert.equal(cfg.devices.length, 3)
+    assert.deepEqual(c.evicted, [])
+    const d = addDevice(cfg, { name: '第四台' })
+    assert.equal(cfg.devices.length, 3)
+    assert.equal(d.evicted[0].name, 'iPhone', '顶掉最旧的')
   })
 
   await t.test('上限最小是 1，配 0 或负数不至于让所有人都进不来', () => {

@@ -261,6 +261,46 @@
   }
 
   .tags{display:flex; align-items:center; gap:7px; flex-wrap:wrap; margin-bottom:12px}
+  /* ── 选择题 ──
+     AskUserQuestion 不是一次「操作」，是一道问给人的选择题。用允许/拒绝那套
+     手势去表达「选哪一项」是表达不了的，所以它有自己的一套控件：
+     题干 + 可点的选项 + 一个提交按钮。 */
+  .qs{margin-top:14px}
+  .q{margin-bottom:20px}
+  .q:last-child{margin-bottom:0}
+  .q-head{
+    font-size:11px; letter-spacing:.08em; text-transform:uppercase;
+    color:var(--dim); font-weight:700; margin-bottom:6px;
+  }
+  .q-text{font-size:15.5px; line-height:1.5; font-weight:600; margin:0 0 12px}
+  .opt{
+    display:block; width:100%; text-align:left; cursor:pointer;
+    border:1.5px solid var(--line); background:var(--card); color:var(--fg);
+    border-radius:13px; padding:13px 14px; margin-bottom:9px;
+    font:inherit; transition:border-color .15s, background .15s;
+  }
+  .opt:last-child{margin-bottom:0}
+  .opt .lb{font-size:14.5px; font-weight:600; display:flex; align-items:center; gap:9px}
+  /* 选中标记用一个占位的圆圈，不是选中才出现的对勾——否则每次选择
+     文字都会横向跳一下 */
+  .opt .mk{
+    width:18px; height:18px; border-radius:50%; flex:0 0 auto;
+    border:1.5px solid var(--line); display:flex; align-items:center;
+    justify-content:center; font-size:11px; color:transparent;
+  }
+  .opt .ds{font-size:12.5px; color:var(--dim); line-height:1.5; margin-top:5px; padding-left:27px}
+  .opt.on{border-color:var(--ok); background:color-mix(in srgb, var(--ok) 8%, var(--card))}
+  .opt.on .mk{border-color:var(--ok); background:var(--ok); color:var(--card)}
+  @media (prefers-reduced-motion: reduce){ .opt{transition:none} }
+
+  #answerBtn{
+    width:100%; padding:16px; border-radius:14px; border:none; cursor:pointer;
+    font:600 16px -apple-system,"PingFang SC",sans-serif;
+    background:var(--ok); color:var(--card);
+  }
+  #answerBtn:disabled{opacity:.4; cursor:default}
+  #answerBtn:active:not(:disabled){opacity:.85}
+
   .tag{font-size:12px; padding:4px 9px; border-radius:20px; background:var(--monobg); color:var(--dim)}
   .tag.tool{font-family:ui-monospace,Menlo,monospace; color:var(--fg); font-weight:600}
   .tag.warn{background:var(--warnbg); color:var(--warn)}
@@ -342,6 +382,7 @@
     --neon:var(--ok);
   }
   #result[data-s="auto_allowed"]{ --neon:var(--ok) }
+  #result[data-s="answered"]{ --neon:var(--ok) }
   #result[data-s="denied"]   { --neon:var(--no) }
   #result[data-s="expired"]  { --neon:var(--warn) }
   #result[data-s="abandoned"]{ --neon:var(--calm) }
@@ -442,6 +483,8 @@
          唯一不可信的部分，不该占据主视觉。 -->
     <div id="cmdbox"></div>
     <p class="says" id="headline">…</p>
+    <!-- 选择题的题干和选项。只有 AskUserQuestion 会用到 -->
+    <div class="qs hidden" id="qs"></div>
   </div>
 </main>
 
@@ -467,6 +510,9 @@
         </div>
       </div>
     </div>
+    <!-- 选择题用它替掉滑动条。要一次显式提交而不是「点中即发」：
+         误触发出去的是一个**错误的答案**，比多按一下贵得多。 -->
+    <button class="hidden" id="answerBtn" disabled>提交回答</button>
     <div class="deadline" id="deadline"><span id="dlText">—</span></div>
 </footer>
 
@@ -515,19 +561,36 @@ function render(a) {
 
   if (a.status !== 'pending') return renderResult(a);
 
+  /**
+   * 选择题是另一种页面，不是「多了个控件的审批页」。
+   *
+   * 第一版只是在原页面底下挂了选项，渲染出来才发现题干出现了**三遍**：
+   * #cmdbox 一遍（detail 就是题干）、「模型的描述」一遍（headline 是 header）、
+   * 选项区的 header + question 又一遍。加上一个「风险等级 普通 / 没有命中
+   * 任何风险规则」的模块——对一道选择题，那整块都是噪音。
+   *
+   * 光看代码看不出来，跑起来截一张图就一目了然。
+   */
+  const isAsk = !!(a.choices && a.choices.length);
+
   $('tags').innerHTML =
-    `<span class="tag tool">${esc(a.tool_name)}</span>` +
+    // 工具名对人零信息量，选择题连这个标签都不必要——影响项那个「等你回答」
+    // 已经把它是什么说清楚了
+    (isAsk ? '' : `<span class="tag tool">${esc(a.tool_name)}</span>`) +
     (a.impact || []).map((i) => `<span class="tag ${esc(i.tone)}">${esc(i.label)}</span>`).join('') +
     (a.rule ? `<span class="tag">规则 ${esc(a.rule)}</span>` : '');
 
   // 明说这句是「模型写的」——它是链路里唯一由被审查方生成的文本，
-  // 不该看起来像系统的判断
-  $('headline').innerHTML = `<span class="desc-label">模型的描述</span>${esc(a.headline || a.summary)}`;
+  // 不该看起来像系统的判断。选择题不显示：它的 headline 就是题目的 header，
+  // 而 header 和题干都会在选项区完整出现
+  if (isAsk) $('headline').classList.add('hidden');
+  else $('headline').innerHTML = `<span class="desc-label">模型的描述</span>${esc(a.headline || a.summary)}`;
 
   // 限制只加在「批准」上，不加在「拒绝」上：
   // 拒绝永远是左滑这个轻动作，批准的重量随风险升级。
-  renderRisk(a);
-  armSwipe(a.risk.level === 'high' ? 'high' : 'normal');
+  // 选择题不评风险：它不执行任何东西，「风险等级 普通」只是一行占地方的废话
+  if (isAsk) renderChoices(a);
+  else { renderRisk(a); armSwipe(a.risk.level === 'high' ? 'high' : 'normal'); }
 
   // 描述声称无害而命令并非如此。这条比「高风险」更需要显眼——
   // 高风险只是说这事危险，不符是说那句人话在骗你。
@@ -537,7 +600,9 @@ function render(a) {
     armSwipe('high'); // 不符一律按高风险的手势重量处理
   }
 
-  renderCommand(a);
+  // 选择题的 detail 就是题干本身，而题干已经在选项区完整显示过了。
+  // 再画一遍 #cmdbox 等于同一句话连着出现两次
+  if (!isAsk) renderCommand(a);
   tick();
   ticker = setInterval(tick, 1000);
   syncTimer = setInterval(sync, 3000);
@@ -646,8 +711,14 @@ function tick() {
   // 只会一起变，谁都没多说什么。留在拇指正下方的那个。
   const autoAllow = BOOT.auto_decision === 'allow';
   // 这一行说的不是「还剩多久」而是「到点会怎样」，是另一件事，所以留着，
-  // 但不带数字——数字归环
-  $('dlText').textContent = autoAllow ? '无人处理将自动通过' : '无人处理将自动拒绝';
+  // 但不带数字——数字归环。
+  //
+  // 选择题必须单独说：它的 auto_decision 确实是 allow，但「通过」在这里
+  // 不是好事——放行 AskUserQuestion 等于把这道题弹回 Mac 终端，手机白等一场。
+  // 照搬「将自动通过」会让人以为不管也没关系，而且那行还是绿的
+  $('dlText').textContent = (BOOT.choices && BOOT.choices.length)
+    ? '超时未回答将退回 Mac 终端'
+    : autoAllow ? '无人处理将自动通过' : '无人处理将自动拒绝';
   // 把剩余秒数放进把手里：你的手指正按在那儿，倒计时该长在你看的地方。
   // 分秒都显示放不下，超过一分钟只给分钟数
   // 注意用 s 不是 left —— left 是**毫秒**，直接拿来判断会一直走「分钟」分支，
@@ -694,6 +765,7 @@ async function sync(force = false) {
 const RESULTS = {
   allowed:      ['✓', 'access granted', '已批准', '操作正在执行'],
   auto_allowed: ['✓', 'auto-approved', '已自动通过', '无人操作，按预授权规则放行'],
+  answered:  ['✓', 'answer sent',    '已回答', '你的选择已经送回 Claude'],
   denied:    ['✕', 'access denied',  '已拒绝', 'Claude Code 已收到拒绝'],
   expired:   ['◷', 'session expired', '已超时', '超时未决策，已自动拒绝'],
   abandoned:  ['↗', 'handled elsewhere', '已在别处处理', '这条请求已由终端处理或会话已结束'],
@@ -704,6 +776,11 @@ function renderResult(a) {
   clearInterval(ticker);
   clearInterval(syncTimer);
   let [icon, code, title, desc] = RESULTS[a.status] || ['◌', 'unknown', '状态未知', ''];
+  // 回显选了什么。只说「已回答」的话，人过一会儿回来看根本想不起来自己选了哪项，
+  // 而这条记录会一直留在历史里
+  if (a.status === 'answered' && a.answer?.length) {
+    desc = `你的选择：${a.answer.map((x) => `「${x}」`).join('、')}`;
+  }
   // 服务重启导致的中断，说清楚是重启而不是「别处处理了」
   if (a.status === 'abandoned' && a.decided_by === 'restart') {
     code = 'interrupted'; title = '服务重启时中断';
@@ -746,6 +823,97 @@ async function decide(decision) {
     // 那个容器里。原来这一句会把整条控件从 DOM 里抹掉，然后显示「请重试」，
     // 而人已经没有任何东西可以重试了
     $('dbHint').innerHTML = '<b style="color:var(--no)">网络错误，请重新拖动</b>';
+    $('swipehint').classList.remove('hidden');
+  }
+}
+
+/**
+ * 选择题：题干 + 可点的选项 + 一次显式提交。
+ *
+ * ## 为什么不复用滑动条
+ *
+ * 「允许 / 拒绝」这套手势表达不了「选第 2 项」。在这之前 AskUserQuestion 走的
+ * 就是通用分支：屏幕上一坨十几行的原始 JSON，底下两个毫无意义的按钮——
+ * 允许只是把问题弹回 Mac 终端，手机白看一场。
+ *
+ * ## 为什么要一次显式提交，不是点中即发
+ *
+ * 误触发出去的是一个**错误的答案**，它会直接进模型的上下文并被照着执行。
+ * 比起多按一下，那个代价高得多。多选和多题也需要一个「都选完了」的时刻。
+ */
+const picked = new Map(); // 题号 -> Set(选项文本)
+
+function renderChoices(a) {
+  $('qs').innerHTML = a.choices.map((q) => `
+    <div class="q">
+      ${q.header ? `<div class="q-head">${esc(q.header)}</div>` : ''}
+      <p class="q-text">${esc(q.question)}</p>
+      ${q.options.map((o, oi) => `
+        <button class="opt" data-q="${q.idx}" data-o="${oi}" data-label="${esc(o.label)}">
+          <span class="lb"><span class="mk">✓</span>${esc(o.label)}</span>
+          ${o.description ? `<span class="ds">${esc(o.description)}</span>` : ''}
+        </button>`).join('')}
+    </div>`).join('');
+  $('qs').classList.remove('hidden');
+
+  const multi = new Map(a.choices.map((q) => [String(q.idx), q.multiSelect]));
+
+  $('qs').addEventListener('click', (e) => {
+    const btn = e.target.closest('.opt');
+    if (!btn) return;
+    const q = btn.dataset.q;
+    const set = picked.get(q) ?? new Set();
+    if (multi.get(q)) {
+      // 多选：点一下切换
+      set.has(btn.dataset.label) ? set.delete(btn.dataset.label) : set.add(btn.dataset.label);
+    } else {
+      // 单选：换掉之前那个
+      set.clear();
+      set.add(btn.dataset.label);
+    }
+    picked.set(q, set);
+    // 重画这一题的选中态。只动 class，不重建 DOM——重建会把滚动位置弹回顶部
+    for (const el of $('qs').querySelectorAll(`.opt[data-q="${q}"]`)) {
+      el.classList.toggle('on', set.has(el.dataset.label));
+    }
+    // 每道题都至少选了一项才让提交。少一题就发出去的话，模型收到的是
+    // 一份残缺的答案，而它没办法知道缺的是哪一道
+    const done = a.choices.every((x) => (picked.get(String(x.idx))?.size ?? 0) > 0);
+    $('answerBtn').disabled = !done;
+  });
+
+  $('answerBtn').classList.remove('hidden');
+  $('answerBtn').onclick = () => answer(a);
+
+  // 坞的高度写回 CSS 变量，理由同 armSwipe：写死一个数会把正文最后几行
+  // 压在坞底下，而这里的坞比滑动条那套矮
+  const dock = $('dock');
+  const fit = () => document.documentElement.style.setProperty('--dock', dock.offsetHeight + 'px');
+  fit();
+  new ResizeObserver(fit).observe(dock);
+}
+
+async function answer(a) {
+  if (submitting) return;
+  submitting = true;
+  const btn = $('answerBtn');
+  btn.disabled = true;
+  btn.textContent = '正在提交…';
+  // 按题目顺序展平，保证送回去的顺序和屏幕上一致
+  const choices = a.choices.flatMap((q) => [...(picked.get(String(q.idx)) ?? [])]);
+  try {
+    const res = await fetch(`/api/approvals/${BOOT.id}/decide?k=${encodeURIComponent(BOOT.key)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ choices }),
+    });
+    const data = await res.json();
+    renderResult(data.approval || { status: 'answered', answer: choices });
+  } catch {
+    submitting = false;
+    btn.disabled = false;
+    btn.textContent = '提交回答';
+    $('dbHint').innerHTML = '<b style="color:var(--no)">网络错误，请重试</b>';
     $('swipehint').classList.remove('hidden');
   }
 }

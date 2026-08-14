@@ -108,20 +108,65 @@ export function createConfirmer(ask) {
     } catch (err) {
       // 弹不出来 = 没人能确认 = 谁都不该被放进来
       console.warn(`[pair] 确认对话框失败，按拒绝处理：${err.message}`)
-      return false
+      return { allowed: false, reason: 'interrupted' }
     }
     // gave up:true = 没人按，超时了。必须**显式**检查：超时的返回里同时会带一个
     // 空的 button returned，只看「有没有『允许』」会把超时读成同意
     if (/gave up:\s*true/i.test(out)) {
       console.warn('[pair] 无人确认，已按拒绝处理')
-      return false
+      return { allowed: false, reason: 'timeout' }
     }
     const allowed = /button returned:\s*允许/.test(out)
     // 通过的那次也要留一行。只在拒绝时打日志的话，「对话框根本没弹、
     // 直接放行了」和「弹了、人点了允许」在日志里长得一模一样——
     // 而这两件事的安全含义完全相反
     console.log(`[pair] 确认对话框：${allowed ? '已允许' : '已拒绝'}（${src.text}）`)
-    return allowed
+    return { allowed, reason: allowed ? 'allowed' : 'denied' }
+  }
+}
+
+/**
+ * 没装 qrencode 时，把配对地址本身弹在 Mac 上。
+ *
+ * ## 为什么必须有这条路
+ *
+ * qrencode 是 Homebrew 的包，**README、install.sh、package.json 里一次都没
+ * 声明过**，一台新 Mac 上大概率没有。而在这之前，缺了它的后果是：
+ *
+ *   · pages.mjs 只把 loginUrl 喂给 qrencode，失败就不 open —— 屏幕上什么都没有
+ *   · 通知却说「扫描屏幕上的二维码」
+ *   · pair.html 说「✓ 已在 Mac 上显示」
+ *   · pair-expired.html 说「屏幕上会显示地址」
+ *
+ * 三处一起撒谎，而且没有任何线索指向「缺的是一个 Homebrew 包」。人在手机上
+ * 点了配对、跑去看 Mac、什么都没有，这条路就到此为止了。
+ *
+ * CLI 的 `clamicro qr` 一直是对的（先打印 URL，再试 qrencode，失败提示
+ * brew install）。这里只是把同样的兜底补给网页那条路。
+ */
+export function createUrlShower(ask) {
+  return async function showUrl(url, timeoutMs = CONFIRM_TIMEOUT_MS) {
+    const body = [
+      '在手机浏览器里打开这个地址：',
+      '',
+      escapeAppleScript(url),
+      '',
+      '一次性，60 秒内有效。',
+      '装上 qrencode 就能直接扫码：brew install qrencode',
+    ].join('\\n')
+    const script =
+      `tell application "System Events" to display dialog "${body}" ` +
+      `with title "Clamicro 配对" buttons {"知道了"} default button "知道了" ` +
+      `with icon note giving up after ${Math.round(timeoutMs / 1000)}`
+    try {
+      await ask(script, timeoutMs)
+      return true
+    } catch (err) {
+      // 弹不出来也不该让整个配对请求失败：配对 id 已经生效，人还可以去终端
+      // 跑 clamicro qr。这里只负责把「屏幕上也没有」记下来
+      console.warn(`[pair] 没能在 Mac 上显示配对地址：${err.message}`)
+      return false
+    }
   }
 }
 
@@ -140,13 +185,25 @@ function askViaOsascript(script, timeoutMs) {
       reject(new Error('osascript 超时未返回'))
     }, timeoutMs + 5_000)
     p.on('error', (e) => { clearTimeout(t); reject(e) })
-    p.on('exit', (code) => {
+    p.on('exit', (code, signal) => {
       clearTimeout(t)
       // 按 Esc 时 osascript 退 1 并报 "User canceled" —— 那是拒绝，不是故障
       if (code === 0 || /User canceled/i.test(err)) return resolve(out)
+      /**
+       * code === null 意思是**被信号杀死**，而信号在第二个参数里。
+       *
+       * 之前这里只写 `(code)`，于是日志里留下的是「osascript 退出码 null」
+       * ——一个零信息量的字符串，既看不出是谁杀的，也看不出是不是我们自己。
+       * 排查时唯一能排除的只有本函数的超时（那条路 reject 的是另一句话）。
+       *
+       * 最可能的凶手是服务自己重启：spawn 没有 detached（那是刘海 HUD 踩坑后
+       * 的正确选择），osascript 和服务同属一个进程组，进程组被终止时它一起走。
+       */
+      if (code === null) return reject(new Error(err.trim() || `osascript 被信号 ${signal} 终止`))
       reject(new Error(err.trim() || `osascript 退出码 ${code}`))
     })
   })
 }
 
 export const confirmPairing = createConfirmer(askViaOsascript)
+export const showPairUrl = createUrlShower(askViaOsascript)

@@ -131,6 +131,67 @@ function focusActive() {
   }
 }
 
+/**
+ * 提醒通道的健康状况。
+ *
+ * ## 为什么需要
+ *
+ * 所有调用点都是 `notify(...).catch(() => {})` ——**这是对的**，提醒失败绝不能
+ * 影响 hook 链路，工具调用还等着那个请求返回。但代价是：通道整个死掉时，
+ * 这件事没有任何地方记着。
+ *
+ * 后果分两种，都很难自己想到：
+ *   · 高危审批：全部走到 180 秒超时被拒。表现是「Claude 老是被拒绝」，
+ *     而真正的原因是你压根没收到过通知。
+ *   · 普通审批：10 秒后照样放行。那 10 秒本来是留给你的机会，
+ *     而机会根本没送到你手上。
+ *
+ * 换句话说：**审批那一端已经是 fail-closed 的（高危无人处理即拒绝），
+ * 但通道这一端是静默的。**「无法确认保护机制在工作时，不要假装它在工作」
+ * ——这条对通道同样成立。
+ *
+ * ## 只记事实，不下判断
+ *
+ * 特意不提供「通道是否正常」这种布尔值。刘海那条路的教训就摆在上面：
+ * 孤儿进程里窗口建得出来、退出码 0、屏幕上什么都没有。**没抛异常不等于
+ * 送达了**。所以这里只记录能确凿知道的事——哪次抛了、抛了什么、连续几次，
+ * 让人自己判断。
+ */
+const health = {
+  ok: 0,
+  failed: 0,
+  /** 连续失败次数。一次成功清零——偶发一次和通道死掉是两回事 */
+  consecutiveFails: 0,
+  lastError: null,
+  lastErrorAt: null,
+  lastOkAt: null,
+}
+
+/** 取一份快照。返回副本，免得调用方改坏内部状态 */
+export function notifyHealth() {
+  return { ...health }
+}
+
+/** 测试用：同进程里多个用例之间要能互不干扰 */
+export function resetNotifyHealth() {
+  Object.assign(health, {
+    ok: 0, failed: 0, consecutiveFails: 0, lastError: null, lastErrorAt: null, lastOkAt: null,
+  })
+}
+
+function recordOk(now = Date.now()) {
+  health.ok += 1
+  health.consecutiveFails = 0
+  health.lastOkAt = now
+}
+
+function recordFail(err, now = Date.now()) {
+  health.failed += 1
+  health.consecutiveFails += 1
+  health.lastError = String(err?.message ?? err ?? '未知错误').slice(0, 200)
+  health.lastErrorAt = now
+}
+
 export function makeNotifier(config, { notch = notifyNotch, banner = notifyBanner, focus = focusActive } = {}) {
   return async function notify(msg) {
     if (!config.notify.macNotify) return
@@ -151,6 +212,18 @@ export function makeNotifier(config, { notch = notifyNotch, banner = notifyBanne
     const style = ['notch', 'banner', 'both'].includes(raw) ? raw : 'notch'
     if (style !== raw) console.warn(`[notify] 未知样式「${raw}」，按 notch 处理`)
 
+    /**
+     * 进入时的失败计数快照，用来判断「这一次有没有出问题」。
+     *
+     * 不能拿 health.consecutiveFails 判——那是**跨调用累积**的：只要以前失败过
+     * 一次，它就永远大于 0，之后每一次成功都会被判成失败，通道再也「恢复」不了。
+     * 我第一版就是这么写的。
+     *
+     * 回落是异步的，可能在 notify 返回之后才失败。那种情况这里会先记一次 ok、
+     * 稍后再记一次 fail —— 这是准确的：那一刻我们确实还不知道它会失败。
+     */
+    const failedBefore = health.failed
+
     // 每个通道各自 try：'both' 下刘海挂了，横幅还得发出去——
     // 后者才是你不在屏幕前时唯一会留痕的那条。
     // 提醒失败绝不能影响 hook 链路，工具调用还等着这个请求返回。
@@ -167,10 +240,15 @@ export function makeNotifier(config, { notch = notifyNotch, banner = notifyBanne
        */
       // Promise.resolve 包一层：banner 不保证返回 Promise（测试里就是同步桩），
       // 直接 .catch 会在回落路径上再炸一次——而这条路径本来就是给失败兜底的
-      const fallback = style === 'both' ? undefined : () => Promise.resolve(banner(msg)).catch(() => {})
+      const fallback = style === 'both' ? undefined : () => Promise.resolve(banner(msg)).catch((err) => {
+        // 回落也失败 = 这一条**哪个通道都没出去**，是最该被记下的一种
+        recordFail(err)
+        console.error(`[notify] 回落横幅也失败: ${err.message}`)
+      })
       try {
         notch(msg, fallback) // 不阻塞，HUD 自己 detach
       } catch (err) {
+        recordFail(err)
         console.error(`[notify] 刘海失败: ${err.message}`)
         fallback?.()
       }
@@ -179,9 +257,14 @@ export function makeNotifier(config, { notch = notifyNotch, banner = notifyBanne
       try {
         await banner(msg)
       } catch (err) {
+        recordFail(err)
         console.error(`[notify] 横幅失败: ${err.message}`)
       }
     }
+    // 走到这里只说明「没有通道抛异常」。刘海那条路抛不抛都不代表画出来了
+    // （孤儿进程里退出码 0、屏幕上什么都没有），所以这不是「已送达」，
+    // 只是「没有已知失败」——健康记录里的字段名也是照这个含义取的
+    if (health.failed === failedBefore) recordOk()
     console.log(`[notify] ${msg.subtitle ?? msg.title}`)
   }
 }

@@ -2,6 +2,7 @@ import { readBody, json } from '../http/respond.mjs'
 import { safeEq } from '../auth/token.mjs'
 import { requireDeps } from './deps.mjs'
 import { MAX_APPROVAL_TIMEOUT_MS, MIN_APPROVAL_TIMEOUT_MS } from '../config.mjs'
+import { notifyHealth } from '../notify.mjs'
 
 /**
  * JSON API 路由表。
@@ -47,8 +48,19 @@ export function apiRoutes(ctx) {
     {
       method: 'POST', path: /^\/api\/approvals\/([\w-]+)\/decide$/, auth: 'approval',
       handler: async ({ req, res, approval }) => {
-        const { decision } = await readBody(req)
-        const out = approvals.decide(approval.id, decision, 'phone')
+        const body = await readBody(req)
+        /**
+         * `choices` 在场 = 这是在回答一道 AskUserQuestion，不是批准一次操作。
+         *
+         * 走单独的入口而不是复用 decision='deny'：对外的语义必须是「回答」。
+         * 内部确实是靠拒绝通道把文本带回模型的（见 approvals.answer 的注释），
+         * 但那是协议限制下的实现细节，不该渗到 API 上——否则下一个读这段代码
+         * 的人会以为手机上点一个选项等于拒绝了 Claude。
+         */
+        const out = body?.choices !== undefined
+          ? approvals.answer(approval.id, body.choices, 'phone')
+          : approvals.decide(approval.id, body?.decision, 'phone')
+
         if (!out.ok && out.code === 'already_settled') {
           // 幂等：已被终端或另一入口处理过，回当前真实状态而不是报错
           json(res, 200, { ok: false, reason: 'already_settled', approval: publicApproval(approval) })
@@ -127,6 +139,17 @@ export function apiRoutes(ctx) {
     },
 
     // ---- 设置：能在手机网页里改的，就别让人回终端敲命令 ----
+    /**
+     * 这个响应是**手写白名单**，不是把 config 摊开。
+     *
+     * 别改成 `json(res, 200, config)` 图省事：那样主令牌和每台设备的令牌会跟着
+     * 每一次设置页加载一起发出去。这个接口有鉴权，但「存起来的凭证不该被读接口
+     * 原样吐出来」是一条独立的纪律，不能靠「反正有权限保护」兜底——权限那层
+     * 出问题的时候，正是你最需要凭证还没泄露的时候。
+     *
+     * test/api-secrets.test.mjs 钉着这件事：加新字段时如果顺手把令牌带出来，
+     * 那条测试会红。
+     */
     {
       method: 'GET', path: '/api/config', auth: 'token',
       handler: ({ res }) => json(res, 200, {
@@ -143,6 +166,10 @@ export function apiRoutes(ctx) {
         altUrl: config.altUrl,
         localHost: config.localHost,
         network: network(),
+        // 提醒通道的健康状况。全是计数和错误文本，不含任何凭证。
+        // 通道死掉时，高危审批会全部走到超时被拒、普通审批会照常自动放行，
+        // 而你收不到任何一条——这个字段是唯一能让那件事浮出来的东西
+        notifyHealth: notifyHealth(),
       }),
     },
     {

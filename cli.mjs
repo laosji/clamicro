@@ -32,6 +32,7 @@ function usage() {
   ${c.b('uninstall')}    卸载：只摘掉自己加的东西，配置保留
   ${c.b('qr')}           打印登录二维码（换手机 / 重新登录时用）
   ${c.b('status')}       服务、网络、待审批的当前状态
+  ${c.b('config')}       摊开当前生效的完整配置${c.dim('  ← 每项标出来自默认值还是你改过')}
   ${c.b('start')}        前台启动服务（调试用；平时由 SessionStart hook 自动拉起）
   ${c.b('stop')}         停止服务
   ${c.b('tunnel')}       公网隧道：${c.dim('tunnel on | off | status')}${c.dim('  ← 网络禁止设备互通时用')}
@@ -246,6 +247,9 @@ switch (cmd) {
   case 'networks':
     runApp(['--networks'])
     break
+  case 'config':
+    runApp(['--config'])
+    break
   case 'test-push':
     runApp(['--test-push'])
     break
@@ -431,6 +435,35 @@ switch (cmd) {
       } catch {
         console.log(c.y('  端口被占用但没响应，可能是别的程序'))
       }
+
+      /**
+       * 提醒通道连续失败要说出来。
+       *
+       * 所有 notify 调用点都是 `.catch(() => {})`——那是对的，提醒失败不能拖垮
+       * hook 链路。但代价是通道整个死掉时**没有任何地方会告诉你**，而后果一点
+       * 都不小：高危审批会全部走到超时被拒（看起来像「Claude 老是被拒绝」），
+       * 普通审批照常 10 秒自动放行（那 10 秒本来是留给你的机会）。
+       *
+       * 这条只在真的连续失败时才打。健康时多一行「通道正常」是噪音，
+       * 而且那也是句假话——刘海那条路没抛异常并不等于画出来了。
+       */
+      try {
+        const { loadConfig } = await appImport('config.mjs')
+        const r = await fetch(`http://127.0.0.1:${p}/api/config`, {
+          headers: { Authorization: `Bearer ${loadConfig().token}` },
+          signal: AbortSignal.timeout(1500),
+        })
+        const h = (await r.json()).notifyHealth
+        if (h?.consecutiveFails > 0) {
+          const ago = h.lastErrorAt ? Math.round((Date.now() - h.lastErrorAt) / 60000) : null
+          console.log(`  提醒      ${c.r(`连续 ${h.consecutiveFails} 次发送失败`)}`)
+          console.log(c.dim(`            ${h.lastError ?? '未知错误'}${ago === null ? '' : `（${ago} 分钟前）`}`))
+          console.log(c.dim('            高危审批会一路走到超时被拒，普通审批仍会自动通过 —— 而你收不到任何一条'))
+        }
+      } catch {
+        /* 拿不到就不显示。为一行诊断信息把 status 弄挂是本末倒置 */
+      }
+
       runApp(['--networks'])
     }
     console.log()

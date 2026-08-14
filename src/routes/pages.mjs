@@ -5,7 +5,7 @@ import { readBody, json, html, inlineJson } from '../http/respond.mjs'
 import { safeEq, cookieToken, cookieNamed } from '../auth/token.mjs'
 import { requireDeps } from './deps.mjs'
 import { showHud } from '../hud.mjs'
-import { confirmPairing } from '../confirm.mjs'
+import { confirmPairing, showPairUrl } from '../confirm.mjs'
 import { isLoopback } from '../http/security.mjs'
 
 /**
@@ -84,20 +84,46 @@ export function pageRoutes(ctx) {
         return true
       }
       lastPairAt = now
-      const { id } = pairing.begin()
-      const loginUrl = `${config.baseUrl}/ui/pair/${id}`
-      const { spawnSync, spawn } = await import('node:child_process')
-      const png = join(tmpdir(), 'clamicro-pair.png')
-      const q = spawnSync('qrencode', ['-o', png, '-s', '10', '-m', '3', loginUrl])
-      if (q.status === 0) spawn('open', [png], { detached: true, stdio: 'ignore' }).unref()
-      await notify({
-        title: 'Clamicro',
-        subtitle: '配对',
-        body: '扫描屏幕上的二维码 · 60 秒内有效',
-        silent: true, // 你人就在屏幕前等着它，不用出声
-      })
-      console.log('[pair] 已在 Mac 上显示二维码（一次性，60 秒）')
-      json(res, 200, { ok: true, qr: q.status === 0 })
+      try {
+        const { id } = pairing.begin()
+        const loginUrl = `${config.baseUrl}/ui/pair/${id}`
+        const { spawnSync, spawn } = await import('node:child_process')
+        const png = join(tmpdir(), 'clamicro-pair.png')
+        // 缺二进制时 spawnSync 返回 status=null（不是非零），所以只能判 === 0
+        const q = spawnSync('qrencode', ['-o', png, '-s', '10', '-m', '3', loginUrl])
+        const qr = q.status === 0
+        if (qr) {
+          spawn('open', [png], { detached: true, stdio: 'ignore' }).unref()
+        } else {
+          // 没装 qrencode 就把地址本身弹出来（见 confirm.mjs 的 createUrlShower）。
+          // 不这么做的话 Mac 屏幕上什么都没有，而这里、通知、两个前端页面
+          // 会一起说「屏幕上有二维码」——一条死路加三处假话。
+          // 不 await：对话框最长挂 60 秒，这个请求要立刻返回
+          showPairUrl(loginUrl).catch(() => {})
+        }
+        /**
+         * 通知**不能** await 裸奔。
+         *
+         * 二维码/地址已经在屏幕上、配对 id 也已经生效，通知只是叫你抬头看一眼。
+         * 它抛出来的话整个路由跟着抛，手机收到 400 —— 一次本来成功的配对被
+         * 一条装饰性提醒判成失败。这不是假想：日志里有过
+         * `[http] POST /api/pair: notify is not a function`，当时二维码就在屏幕上，
+         * 而手机上原样显示着那句报错。
+         */
+        notify({
+          title: 'Clamicro',
+          subtitle: '配对',
+          body: qr ? '扫描屏幕上的二维码 · 60 秒内有效' : '屏幕上有配对地址 · 60 秒内有效',
+          silent: true, // 你人就在屏幕前等着它，不用出声
+        }).catch(() => {})
+        console.log(`[pair] 已在 Mac 上显示${qr ? '二维码' : '配对地址（没装 qrencode）'}（一次性，60 秒）`)
+        json(res, 200, { ok: true, qr })
+      } catch (err) {
+        // 没成功就不该占着 10 秒限流窗口——否则一次失败会连带把重试也锁掉，
+        // 而人在手机上除了干等没有别的办法
+        lastPairAt = 0
+        throw err
+      }
       return true
     }
 
@@ -164,15 +190,22 @@ export function pageRoutes(ctx) {
         tunnel: viaTunnel,
         ip: req.socket?.remoteAddress ?? null,
       })
-        .then((ok) => {
-          confirms.settle(watch, ok)
-          if (!ok) {
+        .then(({ allowed, reason }) => {
+          confirms.settle(watch, allowed, undefined, reason)
+          if (!allowed) {
             // 被拒必须留痕。有人在你不知情时试过配对，这件事本身值得看见——
-            // 静默失败会让它看起来只是「码过期了」
-            console.warn(`[pair] 已拒绝「${name}」的配对请求（${viaTunnel ? '经隧道' : '局域网/本机'}）`)
+            // 静默失败会让它看起来只是「码过期了」。
+            // reason 一并记下：denied / timeout / interrupted 在日志里长得
+            // 一模一样的话，「有人点了拒绝」和「服务重启把对话框带走了」
+            // 就分不开，而这两件事该做的处置完全不同
+            console.warn(
+              `[pair] 未通过「${name}」的配对请求（${viaTunnel ? '经隧道' : '局域网/本机'}）：${reason}`,
+            )
           }
         })
-        .catch(() => confirms.settle(watch, false))
+        // 走到这里说明 confirmPairing 自己抛了——它内部已经兜住了所有已知失败，
+        // 所以这是真正的意外，同样按「被打断」处理
+        .catch(() => confirms.settle(watch, false, undefined, 'interrupted'))
 
       html(res, 200, page('pair-wait.html'), {
         // watch 和登录 cookie 用不同的名字，否则会互相覆盖；
@@ -190,7 +223,7 @@ export function pageRoutes(ctx) {
      * 配对第二步：等待页轮询这里。
      *
      * 设备在**领取时**才创建，不是确认通过的那一刻——扫完就切走的标签页
-     * 不该留下一台幽灵设备，而 maxDevices 默认是 1，一台幽灵就能把你顶下线。
+     * 不该留下一台幽灵设备白占一格（maxDevices 默认 2，占满就开始顶人）。
      */
     if (req.method === 'GET' && path === '/api/pair/status') {
       // 和 /api/pair 同样的理由：跨站「简单请求」带不了自定义头，
@@ -206,7 +239,9 @@ export function pageRoutes(ctx) {
       }
       const st = confirms.peek(watch)
       if (st.state !== 'allowed') {
-        json(res, 200, { state: st.state })
+        // reason 让等待页说清是哪一种「没通过」。它不泄露任何东西：
+        // 三个值都是这个浏览器自己那次配对的结局
+        json(res, 200, { state: st.state, reason: st.reason ?? null })
         return true
       }
 

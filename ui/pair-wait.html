@@ -115,7 +115,22 @@ async function poll() {
     return void (location.href = '/ui');
   }
   if (r.state === 'denied') {
-    return show('no', '已拒绝', 'Mac 上点了「拒绝」，或者等太久自动拒绝了。',
+    /**
+     * 三种「没通过」要分开说。
+     *
+     * 这里原来对所有情况都讲「Mac 上点了『拒绝』，或者等太久自动拒绝了」。
+     * 服务重启把确认框一起带走的那两次，两件事一件都没发生——手机却告诉
+     * 你有人拒绝了你。人接着会去找「谁点的拒绝」，而真正该做的只是再扫一次。
+     */
+    if (r.reason === 'interrupted') {
+      return show('no', '配对被打断', 'Mac 上的确认框没能正常结束，通常是服务刚好重启了。',
+        '不是有人拒绝你 —— 重新扫一次就行。');
+    }
+    if (r.reason === 'timeout') {
+      return show('no', '等太久了', '没有人在 Mac 上确认，已经自动拒绝。',
+        '重新配对会生成一张新的二维码。');
+    }
+    return show('no', '已拒绝', 'Mac 上点了「拒绝」。',
       '重新配对会生成一张新的二维码。');
   }
   if (r.state === 'unknown') {

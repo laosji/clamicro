@@ -922,8 +922,10 @@ function statusConsole() {
   }
 
   // 等待态的主控台**就是那张待办卡片**，所以带上 attachListSwipes 认的标记。
-  // 高危给 denyOnly：密集界面里滑一下就批准 rm -rf 太容易了，批准得进详情页
-  const swipeAttr = cls.startsWith('is-wait') && pending.length
+  // 高危给 denyOnly：密集界面里滑一下就批准 rm -rf 太容易了，批准得进详情页。
+  // 选择题一律不接手势——滑一下等于「允许」，而允许它只会把问题弹回 Mac 终端
+  const askOnly = pending.length && pending[0].choices && pending[0].choices.length;
+  const swipeAttr = cls.startsWith('is-wait') && pending.length && !askOnly
     ? ` swipecard" data-ap="${pending[0].id}" data-risk="${esc(pending[0].risk.level)}`
     : '';
   const card = `<div class="console ${cls}${swipeAttr}">
@@ -1261,15 +1263,17 @@ function renderHome() {
         <span>已批准 · <b id="undo-${a.id}">3</b> 秒后执行</span>
         <button onclick="cancelUndo('${a.id}')">撤销</button>
       </div>` : `
-      <div class="card alert swipecard" data-ap="${a.id}" data-risk="${esc(a.risk.level)}">
+      <!-- 选择题不接手势：这里滑一下就是「允许」，而允许 AskUserQuestion
+           等于把问题弹回 Mac 终端，手机白看一场。只能点进去回答。 -->
+      <div class="card alert${a.choices && a.choices.length ? '' : ' swipecard'}" data-ap="${a.id}" data-risk="${esc(a.risk.level)}">
         <div class="top">
-          <span class="name">${a.risk.level === 'high' ? '⚠️ ' : '🔐 '}${esc(a.session_name || (a.cwd||'').split('/').filter(Boolean).pop() || '')}</span>
-          <span class="state" style="color:var(--warn)">${esc(a.tool_name)}</span>
+          <span class="name">${a.choices && a.choices.length ? '💬 ' : a.risk.level === 'high' ? '⚠️ ' : '🔐 '}${esc(a.session_name || (a.cwd||'').split('/').filter(Boolean).pop() || '')}</span>
+          <span class="state" style="color:var(--warn)">${a.choices && a.choices.length ? '待回答' : esc(a.tool_name)}</span>
         </div>
         <div class="head">${esc(a.headline || a.summary)}</div>
         ${a.mismatch ? `<div class="mismatch">⚠️ 这句描述与命令不符，点进去看原文</div>` : ''}
         <div class="chips">${(a.impact||[]).map((i) => `<span class="chip ${i.tone==='danger'?'danger':i.tone==='calm'?'':'warn'}">${esc(i.label)}</span>`).join('')}
-          <a class="chip" href="/ui/a/${a.id}" style="color:var(--run)">${a.risk.level === 'high' ? '需详情页批准 ›' : '详情 ›'}</a>
+          <a class="chip" href="/ui/a/${a.id}" style="color:var(--run)">${a.choices && a.choices.length ? '去回答 ›' : a.risk.level === 'high' ? '需详情页批准 ›' : '详情 ›'}</a>
         </div>
         <div class="dl" data-exp="${a.expires_at}" data-born="${a.created_at}" data-auto="${a.auto_decision}">
           <span class="dlbar"><i></i></span><span class="dltext">—</span>

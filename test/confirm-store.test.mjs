@@ -38,6 +38,27 @@ test('三态流转', async (t) => {
     assert.equal(s.peek(w).state, 'denied')
   })
 
+  await t.test('原因要带得回来 —— 三种「没通过」不能长一样', () => {
+    // 等待页据此决定说哪一句。不带原因的话，服务重启把确认框带走那次
+    // 会被说成「Mac 上点了拒绝」，人就去找一个根本不存在的人
+    for (const reason of ['denied', 'timeout', 'interrupted']) {
+      const s = new ConfirmStore()
+      const w = s.begin()
+      s.settle(w, false, undefined, reason)
+      assert.equal(s.peek(w).reason, reason)
+    }
+  })
+
+  await t.test('没给原因时是 null，不是 undefined', () => {
+    // 这个值要走 JSON 出去；undefined 会被 JSON.stringify 直接吃掉，
+    // 前端拿到的字段就消失了，分支判断会静默走错
+    const s = new ConfirmStore()
+    const w = s.begin()
+    s.settle(w, false)
+    assert.equal(s.peek(w).reason, null)
+    assert.equal(JSON.parse(JSON.stringify(s.peek(w))).reason, null)
+  })
+
   await t.test('没见过的 watch → unknown，不是报错', () => {
     // 页面在后台待太久之后回来轮询，会落到这一条。它是正常路径，
     // 不该让前端看到 500

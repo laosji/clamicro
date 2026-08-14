@@ -134,10 +134,20 @@ const DEFAULTS = {
     // 高风险是否也自动通过。默认 false —— 开了等于 rm -rf 在你不在时会自己放行。
     autoApproveHighRisk: false,
   },
-  // 同时能有几台手机配对。默认 1 —— 不是为了挡攻击者（局域网明文，
-  // 嗅到 cookie 直接重放，不用配对），而是让「多出来一台」必然顶掉你，
-  // 从而变得看得见。要 iPhone + iPad 同时用就改成 2。
-  maxDevices: 1,
+  // 同时能有几台设备配对。默认 2。
+  //
+  // 曾经是 1，理由是「多出来一台必然顶掉你，异常因此看得见」。那个理由在
+  // Mac 端授权确认（confirm.mjs）加进来之后就不成立了：**每一次配对都必须
+  // 有人在这台 Mac 上点「允许」**，不点就超时自动拒绝。可检测性由那道弹框
+  // 兜住，比「事后发现自己被踢了」直接得多。
+  //
+  // 而 1 的代价是实打实的：手机和 Mac 上的浏览器互相顶。回环（127.0.0.1）
+  // 不用配对，但在 Mac 上打开局域网地址（做截图、调试、给人演示）就要，
+  // 于是配成一台「Mac」，手机当场掉线——表现是「重启之后手机又要扫码」，
+  // 而真正的原因和重启毫无关系，极难自己想到。
+  //
+  // 2 = 手机 + 一台别的。再多仍然会顶替，且顶替一定会弹 HUD 和通知。
+  maxDevices: 2,
   // 已配对的设备，每台一个独立令牌。丢一台单独吊销即可。
   devices: [],
   // 已信任的网络。只有在这些网络里才会把服务暴露到局域网；
@@ -399,6 +409,102 @@ function pruneDefaults(value, defaults) {
   }
   // 整个子对象都等于默认 → 连这个键都不写
   return Object.keys(out).length ? out : undefined
+}
+
+/**
+ * 派生字段：**运行时探测出来的，永远不落盘**。
+ *
+ * 和 saveConfig 里那行解构必须保持一致（那边把它们剥掉再写盘）。抄成两份是
+ * 有意的取舍：合并成一个常量会让 saveConfig 的解构失去「一眼看全」的性质，
+ * 而那段解构上面挂着两天的事故注释。这里用测试钉住两者一致。
+ */
+export const DERIVED_KEYS = ['baseUrl', 'altUrl', 'lanIp', 'localHost', 'tailscaleIp', 'tunnelUrl', 'persistedPort']
+
+/** 凭证和设备列表：诊断输出里一律不出现原值 */
+const SECRET_KEYS = ['token', 'devices', 'trustedNetworks']
+
+/**
+ * 内部记账，不是配置。
+ *
+ * persistedPort 存的是「盘上那个端口」，唯一用途是让 saveConfig 别把
+ * CLAMICRO_PORT 的临时覆盖固化下来。把它列进面向人的配置树，既是噪音，
+ * 又会被标成「运行时探测」——而它根本不是探测出来的。
+ */
+const INTERNAL_KEYS = ['persistedPort']
+
+/**
+ * 摊开当前**真正生效**的配置，并标出每一项是哪一层给的。
+ *
+ * ## 为什么要有这个
+ *
+ * 33 个生效配置项里，只有 9 项写在 config.json 里，**其余 24 项只存在于源码的
+ * DEFAULTS 中**——`cat config.json` 看不到它们，而它们全都在影响行为。
+ *
+ * 这不是假想的不便。maxDevices 曾经默认是 1，配置文件里没有这一项，于是
+ * 「手机为什么老要重新扫码」查了半天，而答案就是那个看不见的默认值。
+ *
+ * ## 为什么必须标来源，而不是只打最终值
+ *
+ * 「10 秒」和「10 秒 ← 你自己改的」在排查时是两件完全不同的事。只打最终值
+ * 只能回答「现在是多少」，标了来源才能回答「为什么是这个数」——后者才是
+ * 你盯着一个不对劲的行为时真正想知道的。
+ *
+ * 四层，优先级从低到高：
+ *   默认值     源码里的 DEFAULTS
+ *   配置文件   config.json 里显式写着的
+ *   环境变量   目前只有 CLAMICRO_PORT
+ *   运行时探测 每次启动重新算，从不落盘（IP、Bonjour 名、隧道地址）
+ *
+ * @param config  loadConfig() 的结果
+ * @param onDisk  config.json 的原始内容；不传则现读
+ * @returns [{ key, value, source }]，key 是点分路径
+ */
+export function explainConfig(config, onDisk = undefined) {
+  let disk = onDisk
+  if (disk === undefined) {
+    try {
+      disk = existsSync(CONFIG_FILE) ? JSON.parse(readFileSync(CONFIG_FILE, 'utf8')) : {}
+    } catch {
+      disk = {} // 读不出来就当空的：这是诊断命令，不该因为配置坏了而自己也挂掉
+    }
+  }
+
+  const at = (obj, path) => path.reduce((o, k) => (o == null ? undefined : o[k]), obj)
+  const rows = []
+
+  const walk = (value, path) => {
+    const top = path[0]
+    if (SECRET_KEYS.includes(top)) return // 凭证不进诊断输出，一个字节都不进
+    if (INTERNAL_KEYS.includes(top)) return
+    if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+      for (const [k, v] of Object.entries(value)) walk(v, [...path, k])
+      return
+    }
+    const key = path.join('.')
+    const def = at(DEFAULTS, path)
+    let source
+    if (DERIVED_KEYS.includes(top)) source = '运行时探测'
+    else if (key === 'port' && process.env.CLAMICRO_PORT) source = '环境变量'
+    else if (at(disk, path) !== undefined) source = '配置文件'
+    /**
+     * 盘上没有、却又和 DEFAULTS 不一样 → 只可能是启动过程改的。
+     *
+     * `bind` 就是这一条的由来：默认值是 `['127.0.0.1', null]`，那个 null 是
+     * 「启动时探测局域网 IP」的占位符，loadConfig 会把它换成真实 IP。少了这条
+     * 分支，它会显示成 `[127.0.0.1, 192.168.1.42] 默认值` —— 一个**不存在于
+     * 任何默认值里**的数组被标成默认值。
+     *
+     * 而 bind 恰恰是这个项目里代价最大的那个字段（探测结果被固化落盘，换网络后
+     * EADDRNOTAVAIL，服务只剩回环，而 status 显示一切正常，查了两天）。在一个
+     * 专门用来止损的诊断命令里把它标错，等于把陷阱又埋了一遍。
+     */
+    else if (def !== undefined && JSON.stringify(value) !== JSON.stringify(def)) source = '运行时探测'
+    else source = '默认值'
+    rows.push({ key, value, source })
+  }
+
+  walk(config, [])
+  return rows.sort((a, b) => a.key.localeCompare(b.key))
 }
 
 /**
