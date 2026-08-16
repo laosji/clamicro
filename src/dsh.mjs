@@ -93,11 +93,23 @@ const FRESH_PATCH = (port) => [
  * 最后一条是关键：改不认识的 YAML 比不改危险得多。写坏了 DSH 整个 profile
  * 都起不来，而用户根本不会想到是装 clamicro 弄的。
  */
-export function patchProfile(port, { read = readFileSync, write = writeAtomic } = {}) {
+export function patchProfile(port, {
+  read = readFileSync,
+  write = writeAtomic,
+  exists = existsSync,
+  mkdir = (d) => mkdirSync(d, { recursive: true }),
+} = {}) {
   const rows = insertRows(port)
 
-  if (!existsSync(PATCH_FILE)) {
-    mkdirSync(join(PROFILES, 'web'), { recursive: true })
+  /**
+   * exists 和 mkdir 也要能注入。
+   *
+   * 原来这两个是直连真实文件系统的，只有 read/write 可换——于是在一台没有
+   * ~/.dsh 的机器上跑这套测试，会**真的创建** ~/.dsh/profiles/web。
+   * 这和 removePlugins 的 rmSync 打到真实文件系统是同一个错，上次只修了那一半。
+   */
+  if (!exists(PATCH_FILE)) {
+    mkdir(join(PROFILES, 'web'))
     write(PATCH_FILE, FRESH_PATCH(port))
     return { action: 'created' }
   }

@@ -414,7 +414,15 @@ if (hasDsh()) {
         // 而用户根本不会想到是装 clamicro 弄的。
         say(`  ${c.y('⚠')} ${PATCH_FILE} 的格式不认识，没敢动。请手动把下面几行加进 ${c.b('- insert:')} 下面：`)
         say('')
-        for (const line of r.rows) say(`  ${c.dim(line)}`)
+        /**
+         * **不要给这几行加任何前缀。**
+         *
+         * 这条路径的全部意义就是让人照抄，而 YAML 里缩进就是结构。
+         * 原来写的是 say(`  ${line}`)，于是屏幕上是 6 个空格、文件里要的是 4 个，
+         * 抄下去正好破坏那个 `- insert:` 块——而我们绕这么大弯子不敢动它，
+         * 就是为了别把它弄坏。
+         */
+        for (const line of r.rows) say(line)
         say('')
       } else if (r.action === 'already') {
         say(`  ${c.dim('补丁层里已经有了，没重复写')}`)

@@ -32,6 +32,7 @@ function fake(initial) {
     },
     write: (_p, data) => { box.text = data; box.writes++ },
     rm: (dir) => box.removed.push(dir),
+    mkdir: () => {},
     // 补丁文件当作存在，插件目录当作不存在（除非某条用例另说）
     exists: (p) => (p.endsWith('.yml') ? box.text !== null : false),
   }
@@ -120,6 +121,37 @@ test('没装过时摘除是空操作', () => {
   const f = fake(EXISTING)
   removePlugins(f)
   assert.equal(f.box.writes, 0, '没有我们的东西还写盘，卸载的下界是「什么都没变」')
+})
+
+test('manual 给出的行，照抄下去要和自动写的一模一样', () => {
+  /**
+   * manual 这条路径的**全部意义**就是让人照抄，而 YAML 里缩进就是结构。
+   *
+   * 这里真踩过：install.mjs 打印时写的是 say(`  ${line}`)，屏幕上就成了
+   * 6 个空格，而文件里要的是 4 个。抄下去正好破坏那个 `- insert:` 块——
+   * 而我们绕这么大弯子不敢自动改它，就是为了别把它弄坏。
+   *
+   * 所以钉的性质是：manual 返回的行，必须和「文件不存在时我们自己写出来的
+   * 那份」里对应的行**逐字符相同**。屏幕上多一个空格，这条就该红。
+   */
+  const weird = fake('somethingElse:\n  nested: true\n')
+  const manual = patchProfile(8765, weird)
+  assert.equal(manual.action, 'manual')
+
+  const fresh = fake(null)
+  fresh.exists = () => false
+  patchProfile(8765, fresh)
+  const written = fresh.box.text.split('\n')
+
+  for (const row of manual.rows) {
+    assert.ok(
+      written.includes(row),
+      `这一行不在自动生成的文件里，说明缩进或内容对不上：${JSON.stringify(row)}`,
+    )
+  }
+  // 缩进具体是多少也钉死：条目 4 空格、子键 6 空格
+  assert.equal(manual.rows[0], '    - id: pet-cat')
+  assert.equal(manual.rows[1], '      name: dsh-pet-cat')
 })
 
 test('删目录也走注入 —— 测试绝不能碰真实的 ~/.dsh', () => {
