@@ -5,6 +5,22 @@ import { fileURLToPath } from 'node:url'
 const HERE = dirname(fileURLToPath(import.meta.url))
 
 /**
+ * 「进程根本没起来」用一个专门的退出码。
+ *
+ * done(code) 只在 code 为真时才走回落（onFail）。原来 spawn 失败的两处
+ * 都传 0 —— 而 0 的语义是「播成功了」，于是回落永远不触发：osascript 没装、
+ * 被安全策略拦下、fork 失败……这些情况下那条提醒**彻底消失**，
+ * 而日志和健康计数还都显示正常。
+ *
+ * 这正是这个项目最忌讳的形态：**失败被记成成功**。用一个非 0 的专用码，
+ * 让它走和「退出码非 0」同一条回落路径，只是日志说得更准。
+ *
+ * 放模块级而不是 pump() 里：另一个用它的地方在 createHudQueue 的回调里，
+ * 那是另一个作用域——写在 pump() 里 node --check 照样过，运行时才 ReferenceError。
+ */
+const SPAWN_FAILED = -1
+
+/**
  * 屏幕顶部居中的胶囊提示，仿系统连接外设时那一条。
  *
  * ## 先说清楚它不是什么
@@ -72,7 +88,11 @@ export function createHudQueue(run) {
       // 非 0 退出说明胶囊根本没画出来（osascript 崩了、被杀、拿不到 WindowServer）。
       // 这类失败以前完全无声——正是这个项目反复踩的那一类，所以留一行。
       if (code) {
-        console.error(`[hud] 提示未能显示（退出码 ${code}）`)
+        console.error(
+          code === SPAWN_FAILED
+            ? '[hud] 提示未能显示（osascript 没能启动）'
+            : `[hud] 提示未能显示（退出码 ${code}）`,
+        )
         // 画不出来时回落到别的通道。最常见的原因是**服务是孤儿进程**
         // （nohup 起的，PPID=1），拿不到图形会话，窗口永远不参与合成——
         // 而这正是本项目服务的常态。见 hud.jxa.js 里的自检。
@@ -88,7 +108,9 @@ export function createHudQueue(run) {
       run(item, done)
     } catch (err) {
       console.error(`[hud] 启动失败: ${err.message}`)
-      done(0)
+      // **不能传 0**：0 的意思是「播成功了」，回落就不会触发，
+      // 那条提醒于是彻底消失。见 SPAWN_FAILED 的注释
+      done(SPAWN_FAILED)
     }
   }
 
@@ -185,7 +207,9 @@ const hud = createHudQueue((item, done) => {
   p.on('exit', done)
   p.on('error', (err) => {
     console.error(`[hud] 启动失败: ${err.message}`)
-    done(0)
+    // 同上：spawn 起不来是**失败**，必须让回落接手。
+    // 传 0 的话这条提醒就没了，而且健康计数还会把它记成成功
+    done(SPAWN_FAILED)
   })
 })
 

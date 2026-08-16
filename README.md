@@ -185,7 +185,9 @@ Claude Code's own permission rules restricting which tools may run at all.
 - The QR itself is no longer sufficient on its own: it is one-time, expires in 60 seconds, and pairing
   additionally requires pressing **Allow** in a dialog on the Mac. Someone who photographs the code
   still cannot pair without you. That said, don't leave it on screen — belt and braces
-- If you suspect it leaked, rotate immediately: `npx clamicro rotate-token` (every logged-in device is signed out at once)
+- If you suspect it leaked, rotate immediately: `npx clamicro rotate-token`. Every logged-in device is
+  signed out at once and takes effect on the running service immediately — no restart needed. You will
+  need to pair your phone again. To revoke just one device, use `npx clamicro forget <id>` instead
 - The login cookie expires after 30 days; scan again then
 
 ### The remaining risk: plaintext HTTP

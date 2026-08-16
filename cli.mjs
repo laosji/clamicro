@@ -4,6 +4,7 @@ import { existsSync, openSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { APP_DIR, appPaths, installedInfo } from './src/paths.mjs'
+import { isOurService } from './src/service-id.mjs'
 import { LOG_FILE } from './src/log.mjs'
 import { isNewer, checkUpdate } from './src/update.mjs'
 
@@ -88,6 +89,10 @@ function listeners(p) {
   const r = spawnSync('lsof', ['-ti', `tcp:${p}`, '-sTCP:LISTEN'], { encoding: 'utf8' })
   return (r.stdout ?? '').trim().split('\n').filter(Boolean)
 }
+
+// 身份判定在 src/service-id.mjs —— install.mjs 也用同一份。
+// 不各写一份：这个项目已经吃过一次「同一个判据两处实现、只修了一处」的亏
+// （underIgnored 修了、风险模块没跟着改，见 src/risk/assess.mjs 的注释）。
 
 /**
  * 打到**正在跑的那个服务**上。
@@ -276,8 +281,20 @@ switch (cmd) {
   case 'stop': {
     const p = await port()
     const pids = listeners(p)
+    if (!pids.length) {
+      console.log(c.dim('  服务本来就没在跑'))
+      break
+    }
+    // 先确认端口上那个真的是我们的，再动手。见 isOurService
+    if (!(await isOurService(p, pids))) {
+      console.log(`\n  ${c.y('没有停止任何进程')}`)
+      console.log(`  ${p} 端口上有进程在监听（PID ${pids.join('、')}），但它${c.b('不是 clamicro')}。`)
+      console.log(c.dim('  clamicro 可能没在跑，而这个端口被别的程序占了。'))
+      console.log(c.dim(`  想看是谁： lsof -nP -iTCP:${p} -sTCP:LISTEN\n`))
+      break
+    }
     for (const pid of pids) spawnSync('kill', [pid])
-    console.log(pids.length ? c.g(`  ✓ 已停止（${pids.length} 个进程）`) : c.dim('  服务本来就没在跑'))
+    console.log(c.g(`  ✓ 已停止（${pids.length} 个进程）`))
     break
   }
 

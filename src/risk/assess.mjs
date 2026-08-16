@@ -63,6 +63,63 @@ export function secretExposure(cmd) {
 }
 
 /**
+ * 这个路径是不是落在工作目录之外。
+ *
+ * ## 原来的写法漏掉三整类
+ *
+ * 判据曾是 `cwd && p.startsWith('/') && !p.startsWith(cwd)`，裸字符串前缀比。
+ * 三个洞，都实测复现过（cwd = `/Users/me/proj`）：
+ *
+ *   · **兄弟目录**：`/Users/me/proj-other/x`、`/Users/me/proj2/x` 的前缀
+ *     确实是 `/Users/me/proj`，于是被当成「在工作目录内」→ 判 normal
+ *   · **`..` 逃逸**：`/Users/me/proj/../secret` 前缀匹配通过，不规范化就看不出
+ *     它其实指向 `/Users/me/secret`
+ *   · **相对路径**：`../../etc/passwd` 不以 `/` 开头，直接跳过整条检查
+ *
+ * 三者都落到 normal，也就是 **10 秒自动通过**。
+ *
+ * 这跟 routes/hooks.mjs 里 `underIgnored` 踩过的是**同一个错误**——那边
+ * 修过了并写了注释（「必须按路径分段比，不能裸 startsWith」），但风险模块
+ * 没跟着改。同一个错误在两个地方，只修了一个，是这次最该记住的教训。
+ *
+ * ## 现在的判据
+ *
+ * 先规范化（吃掉 `.`/`..`/重复斜杠），相对路径按 cwd 解析，然后**按路径分段**
+ * 比。`/a/b` 和 `/a/bc` 的分段不同，前缀却相同——分段比是唯一不会被
+ * 目录名后缀骗到的写法。
+ *
+ * 规范化失败（畸形输入）时返回 true：算不出来就当越界，让人看一眼。
+ */
+export function escapesWorkspace(p, cwd) {
+  if (!p || !cwd) return false
+  const norm = (s) => {
+    const abs = s.startsWith('/')
+    const out = []
+    for (const seg of s.split('/')) {
+      if (!seg || seg === '.') continue
+      if (seg === '..') {
+        // 相对路径开头的 `..` 要留着，它是「往上走」的语义，不能吃掉
+        if (out.length && out[out.length - 1] !== '..') out.pop()
+        else if (!abs) out.push('..')
+        continue
+      }
+      out.push(seg)
+    }
+    return (abs ? '/' : '') + out.join('/')
+  }
+  try {
+    const base = norm(cwd)
+    // 相对路径按工作目录解析——`../../etc/passwd` 只有解析过才看得出它去了哪
+    const full = p.startsWith('/') ? norm(p) : norm(`${base}/${p}`)
+    if (full === base) return false
+    // 按分段比：`/a/b` 是 `/a/bc` 的字符串前缀，但不是它的父目录
+    return !full.startsWith(base.endsWith('/') ? base : base + '/')
+  } catch {
+    return true // 算不出来就当越界，宁可多问一次
+  }
+}
+
+/**
  * 影响面标签。**认不出来就说认不出来**，不要假装只读。
  */
 export function impactOf(toolName, toolInput) {
@@ -128,12 +185,45 @@ export function riskSpans(text) {
  *
  * @param cwd 会话工作目录，用来识别「写到工作目录之外」
  */
-export function assessRisk(toolName, toolInput, cwd) {
+export function assessRisk(toolName, toolInput, cwd, { argsKnown = true } = {}) {
   const reasons = []
   const t = toolInput && typeof toolInput === 'object' ? toolInput : {}
 
-  if (toolName === 'Bash') {
-    const cmd = String(t.command ?? '')
+  /**
+   * 参数**不知道**的时候，一律按高危处理。
+   *
+   * 这条路径来自 DSH：它的 ApprovalRequest 刻意不带工具参数，桥接侧靠
+   * callId 回查 session log，查不到就只能说「不知道」（见 plugins/dsh-bridge）。
+   *
+   * 「不知道」和「没有参数」必须分开——传个 {} 进来的话，下面每条规则都
+   * 匹配不上，于是算出 normal，于是进入自动通过的档位。那就是一次**没有
+   * 任何人真正看过内容的放行**，而且卡片上还会显得人畜无害。
+   *
+   * 判成 high 的直接后果是不自动通过（见 approvals.create 的 canAuto），
+   * 必须由人点一下。参数未知时让人多看一眼，是这里唯一说得过去的默认值。
+   */
+  if (!argsKnown) {
+    return { level: 'high', reasons: ['工具参数未知，无法评估'] }
+  }
+
+  /**
+   * shell 规则的触发条件是「**有没有命令**」，不是「工具叫不叫 Bash」。
+   *
+   * 原来写的是 `toolName === 'Bash'`，精确匹配 Claude Code 的工具名。
+   * 接 DSH 时实测发现它的工具叫 **`bash`**（小写），于是整套 HIGH_RISK_BASH
+   * 规则一条都不会跑——`rm -rf /` 判普通风险，10 秒自动放行。
+   * 名字差一个字母，安全核心就整个静默失效了，而且没有任何报错。
+   *
+   * 所以判据换成「参数里有 command 字符串」：命令是什么形状由参数决定，
+   * 跟哪个后端、工具叫什么名字无关。名字仍然认（大小写不敏感），
+   * 那是为了 command 字段哪天改名时还有第二道。
+   *
+   * 代价是可能对一个恰好带 command 参数的别的工具跑一遍 shell 规则，
+   * 结果是**多判几次高危**——那是安全的方向：多让人点一下，
+   * 而不是少拦一次 rm -rf。
+   */
+  const cmd = String(t.command ?? t.cmd ?? '')
+  if (cmd || String(toolName ?? '').toLowerCase() === 'bash') {
     for (const { re, why } of HIGH_RISK_BASH) if (re.test(cmd)) reasons.push(why)
     // 曾经漏掉的一整类：SENSITIVE_PATH 只作用于 file_path 参数，
     // 于是 `cat ~/.ssh/id_rsa` 判普通风险、10 秒自动放行。
@@ -144,7 +234,7 @@ export function assessRisk(toolName, toolInput, cwd) {
   const p = String(t.file_path ?? t.path ?? t.notebook_path ?? '')
   if (p) {
     if (SENSITIVE_PATH.test(p)) reasons.push('触及密钥/凭证文件')
-    if (cwd && p.startsWith('/') && !p.startsWith(cwd)) reasons.push('写入工作目录之外')
+    if (cwd && escapesWorkspace(p, cwd)) reasons.push('触及工作目录之外')
   }
 
   if (toolName?.startsWith('mcp__')) reasons.push('经由 MCP 对外调用')

@@ -303,6 +303,7 @@
 
   .tag{font-size:12px; padding:4px 9px; border-radius:20px; background:var(--monobg); color:var(--dim)}
   .tag.tool{font-family:ui-monospace,Menlo,monospace; color:var(--fg); font-weight:600}
+  .tag.agent{background:transparent; box-shadow:inset 0 0 0 1px var(--line)}
   .tag.warn{background:var(--warnbg); color:var(--warn)}
   .tag.danger{background:var(--warnbg); color:var(--no); font-weight:600}
   .tag.calm{color:var(--calm)}
@@ -574,6 +575,8 @@ function render(a) {
   const isAsk = !!(a.choices && a.choices.length);
 
   $('tags').innerHTML =
+    // 后端出身放在最前：一眼看出「这条是哪个 harness 问的」，再读工具和影响
+    (a.agent_label ? `<span class="tag agent">${esc(a.agent_label)}</span>` : '') +
     // 工具名对人零信息量，选择题连这个标签都不必要——影响项那个「等你回答」
     // 已经把它是什么说清楚了
     (isAsk ? '' : `<span class="tag tool">${esc(a.tool_name)}</span>`) +

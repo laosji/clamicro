@@ -8,7 +8,15 @@ import { timingSafeEqual } from 'node:crypto'
  * 它经过了推送服务商，所以只够开那一条审批的详情页，不足以授权整个看板。
  */
 
-/** 常数时间比较，避免给出可测的时间差 */
+/**
+ * 常数时间比较，避免给出可测的时间差。
+ *
+ * `x.length === y.length &&` 前面的长度短路会泄露「长度是否猜对」这一 bit，
+ * 但这里**不是可利用洞**：所有调用方（主令牌 / 设备令牌 / per-approval key /
+ * 配对券）都是 `randomBytes(...).toString('base64url')` 的**定长**输出，长度
+ * 由算法决定、本就不保密。将来若引入**变长** secret，这里要改成先
+ * `sha256` 两侧再 `timingSafeEqual`（把长度差异也压成定长），否则会真的泄露长度。
+ */
 export function safeEq(a, b) {
   const x = Buffer.from(String(a ?? ''))
   const y = Buffer.from(String(b ?? ''))
@@ -35,7 +43,22 @@ export function cookieToken(req) {
  *                配对成功会往里加设备，鉴权必须看到最新的那份
  */
 export function makeAuth(token, devices = () => []) {
-  const sameToken = (given) => typeof given === 'string' && given.length > 0 && safeEq(given, token)
+  /**
+   * 主令牌**每次现取**，不在这里捕获成常量。
+   *
+   * 原来是 `safeEq(given, token)`，token 是构造时那一刻的值。于是
+   * `clamicro rotate-token` 从另一个进程改完磁盘，运行中的服务还拿着旧的：
+   * 泄漏的旧令牌继续能批操作，新令牌反而 401——一个「紧急吊销」按钮
+   * 按下去什么都没吊销，而且不报错。
+   *
+   * 传函数就能让服务在配置热加载后立刻生效（见 server.mjs 的 watchConfig）。
+   * 兼容传字符串的老写法。
+   */
+  const current = typeof token === 'function' ? token : () => token
+  const sameToken = (given) => {
+    const t = current()
+    return typeof given === 'string' && given.length > 0 && typeof t === 'string' && t.length > 0 && safeEq(given, t)
+  }
 
   /**
    * 认哪台设备。返回设备对象或 null。
@@ -76,7 +99,19 @@ export function makeAuth(token, devices = () => []) {
      * 带上，表现是每次都像没登录过、要重新扫码。Lax 放行顶层 GET 导航，
      * 跨站 POST 仍然拦住。
      */
-    loginCookie(baseUrl, value = token) {
+    /**
+     * @param value 要写进 cookie 的令牌。省略时用主令牌。
+     *
+     * 默认值必须是 `current()` 而不是 `token`：`token` 现在**可能是个函数**
+     * （makeAuth 支持传 getter，见上面 sameToken 的注释）。写成 `= token`
+     * 的话，任何不传 value 的调用都会把**函数本身**序列化进 Set-Cookie，
+     * 得到 `ccm=(given)%20%3D%3E%20...` 这种东西——登录当场失效，
+     * 而且报错发生在浏览器那头，服务端看不到任何异常。
+     *
+     * 现在两个调用方都显式传了值，所以这颗雷还没被踩到。正因为如此才要拆：
+     * 它只会在将来某次「顺手加个调用」时炸，那时没人会想到是这里。
+     */
+    loginCookie(baseUrl, value = current()) {
       return [
         `ccm=${encodeURIComponent(value)}`,
         'HttpOnly',

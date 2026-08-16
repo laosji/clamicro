@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 import { createInterface } from 'node:readline/promises'
 import { spawn, spawnSync } from 'node:child_process'
-import { existsSync, mkdirSync, openSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, openSync, rmSync, writeFileSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { loadConfig, CONFIG_FILE } from './src/config.mjs'
 import { install, uninstall, SETTINGS_FILE } from './src/settings.mjs'
+import { isOurService } from './src/service-id.mjs'
 import { fingerprint, isTrusted, trust } from './src/network.mjs'
 import { saveConfig } from './src/config.mjs'
 import { syncApp, appPaths, APP_DIR } from './src/paths.mjs'
@@ -60,8 +61,17 @@ function listening(port) {
  * 不等的话新实例会撞 EADDRINUSE 直接退出，而旧实例还在服务——
  * 表现是「升级完了但跑的还是旧版」，且没有任何报错。踩过。
  */
-function stopExisting(port) {
+async function stopExisting(port) {
   const pids = listening(port)
+  if (!pids.length) return 0
+  /**
+   * 不是我们的就一个都不碰，交给调用方去告诉用户。
+   *
+   * 这一步在安装流程里尤其要紧：它是**自动**跑的，用户没有机会喊停。
+   * 不校验就 kill，等于「装一次 clamicro 顺手杀掉占用 8765 的任何东西」。
+   * 判据见 src/service-id.mjs（和 cli.mjs stop 共用同一份）。
+   */
+  if (!(await isOurService(port, pids))) return { foreign: true, pids }
   for (const pid of pids) spawnSync('kill', [pid], { stdio: 'ignore' })
   for (let i = 0; i < 30 && listening(port).length; i++) {
     spawnSync('sleep', ['0.1'])
@@ -132,16 +142,46 @@ const closePrompt = () => {
 // ---------------- 卸载 ----------------
 if (has('--uninstall')) {
   say(c.b('\n  卸载 clamicro\n'))
-  const { removed, backupPath } = uninstall({ statusLinePath: STATUSLINE })
-  say(`  ${c.g('✓')} 已从 settings.json 摘除：${removed.length ? removed.join('、') : '（无）'}`)
-  say(`  ${c.dim(`备份 ${backupPath}`)}`)
+
+  /**
+   * 在一台从没装过的机器上跑卸载，**不该凭空造出配置**。
+   *
+   * 下面那句 `loadConfig()` 会建 ~/.claude/clamicro 目录、生成一个新 token
+   * 并写盘——于是「卸载」的净效果是**多了**一份配置和一把新钥匙。
+   * 而这条命令最常见的误用场景恰恰就是「我好像装过？先卸一下试试」。
+   *
+   * 端口读盘上那份；没有就用默认值，不走 loadConfig 的生成逻辑。
+   */
+  const uninstallPort = (() => {
+    try {
+      return JSON.parse(readFileSync(CONFIG_FILE, 'utf8')).port ?? 8765
+    } catch {
+      return 8765
+    }
+  })()
+
+  const { removed, backupPath, absent } = uninstall({ statusLinePath: STATUSLINE })
+  if (absent) {
+    // 说实话：这台机器上就没有 settings.json，所以没什么可摘的，也没动任何东西
+    say(`  ${c.dim(`${SETTINGS_FILE} 不存在 —— 没有需要摘除的东西`)}`)
+  } else {
+    say(`  ${c.g('✓')} 已从 settings.json 摘除：${removed.length ? removed.join('、') : '（无）'}`)
+    if (backupPath) say(`  ${c.dim(`备份 ${backupPath}`)}`)
+  }
 
   // 老版本注册过 LaunchAgent，现在这个功能没了，但别人机器上那个 plist 还在，
   // 不清掉它会继续按老路径拉起服务。**删掉**而不是只 unload：留着下次开机又回来。
   clearLegacyAutostart()
-  const n = stopExisting(loadConfig().port)
-  say(`  ${c.g('✓')} 已停止服务${n ? '' : c.dim('（本来就没在跑）')}`)
-  say(`\n  ${c.dim(`配置与数据仍在 ${CONFIG_FILE}，可手动删除`)}\n`)
+  const n = await stopExisting(uninstallPort)
+  if (n?.foreign) {
+    say(`  ${c.y('⚠')} ${uninstallPort} 端口上有进程（PID ${n.pids.join('、')}），但不是 clamicro —— 没有动它`)
+  } else {
+    say(`  ${c.g('✓')} 已停止服务${n ? '' : c.dim('（本来就没在跑）')}`)
+  }
+  // 没有配置文件就别提它 —— 那句话会让人以为卸载留下了东西
+  say(existsSync(CONFIG_FILE)
+    ? `\n  ${c.dim(`配置与数据仍在 ${CONFIG_FILE}，可手动删除`)}\n`
+    : '\n')
   process.exit(0)
 }
 
@@ -199,7 +239,19 @@ if (!(await confirm('\n  继续？'))) {
   process.exit(0)
 }
 const applied = install({ port: config.port, statusLinePath: STATUSLINE, sessionStartPath: SESSIONSTART })
-say(`  ${c.g('✓')} 已写入，备份 ${c.dim(applied.backupPath ?? '（原文件不存在）')}`)
+/**
+ * 三种结果要分开说，`backupPath` 为空**不等于**「原文件不存在」。
+ *
+ * install 现在在内容没变时直接返回（不写盘也不备份，见 settings.mjs 的注释：
+ * 自愈每 5 分钟一轮，无条件写盘会让备份文件无限堆积）。原来这里把
+ * `backupPath == null` 一律渲染成「原文件不存在」，于是重复安装时会显示
+ * 「已写入，备份（原文件不存在）」——两句都是错的：既没写入，文件也在。
+ */
+say(
+  applied.unchanged
+    ? `  ${c.g('✓')} hooks 已是最新 ${c.dim('（配置无改动，未写盘）')}`
+    : `  ${c.g('✓')} 已写入，备份 ${c.dim(applied.backupPath ?? '（原文件此前不存在）')}`,
+)
 
 // 3. 网络信任 —— 不做这步，服务只绑回环，手机连不上，装完等于白装
 const net = fingerprint(config.lanIp)
@@ -231,7 +283,21 @@ if (clearLegacyAutostart()) say(`  ${c.g('✓')} 已移除旧版的开机自启�
 // 会在服务没跑时把它拉起来，Claude 不开的时候它也不需要在。少一个持久的
 // 系统级改动，卸载也少一件要收拾的东西。
 {
-  stopExisting(config.port)
+  /**
+   * 端口被别人占着时**不抢**，而且要说出来。
+   *
+   * 抢了的话表现是「装完好像成功了」，实际杀掉了用户另一个服务，
+   * 而我们自己也未必起得来。说清楚让人自己决定换端口还是关掉那个程序。
+   */
+  const stopped = await stopExisting(config.port)
+  if (stopped?.foreign) {
+    say(`\n  ${c.y('⚠ 端口被占用')}`)
+    say(`  ${config.port} 上有进程在监听（PID ${stopped.pids.join('、')}），但${c.b('不是 clamicro')}，没有动它。`)
+    say(c.dim(`  看是谁： lsof -nP -iTCP:${config.port} -sTCP:LISTEN`))
+    say(c.dim(`  换个端口： CLAMICRO_PORT=8899 npx clamicro install\n`))
+    closePrompt()
+    process.exit(1)
+  }
   const out = join(homedir(), 'Library', 'Logs', 'clamicro.log')
   // ~/Library/Logs 在正常 macOS 账户上一定存在，但不能拿它当前提：
   // 目录一旦缺失，openSync 抛 ENOENT，安装在最后一步崩掉，

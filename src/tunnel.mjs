@@ -3,6 +3,7 @@ import { openSync, readFileSync, writeFileSync, unlinkSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { TUNNEL_PID_FILE, tunnelAlive } from './config.mjs'
+import { writeAtomic } from './atomic.mjs'
 
 const LOG = join(homedir(), 'Library', 'Logs', 'clamicro-tunnel.log')
 const PID_FILE = TUNNEL_PID_FILE
@@ -63,7 +64,10 @@ export async function startTunnel(port, timeoutMs = 30_000) {
     stdio: ['ignore', fd, fd],
   })
   child.unref()
-  writeFileSync(PID_FILE, String(child.pid))
+  // 原子写 + 0600，跟 config.json / history.json 一致。
+  // 里面只是个 PID，但「配置目录下的文件统一 0600」是一条不该有例外的纪律——
+  // 有例外就得每次判断「这个算不算敏感」，而判断会出错
+  writeAtomic(PID_FILE, String(child.pid), 0o600)
 
   // cloudflared 把地址打在日志里，轮询等它出现
   const deadline = Date.now() + timeoutMs

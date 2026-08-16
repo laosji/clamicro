@@ -17,13 +17,37 @@ import { randomUUID } from 'node:crypto'
 export class Inbox extends EventEmitter {
   #queues = new Map() // sessionId -> [{id, text, at}]
 
+  /**
+   * 排一条消息。队列满了返回 null。
+   *
+   * ## 为什么要有条数上限
+   *
+   * 单条早就有 4000 字截断，条数一直没有。而消息**只在下一次 Stop 时才送达**
+   * ——会话要是一直不再跑（终端关了、任务早结束了），队列就一直涨。
+   * 手机上多按几次发送、或者哪个客户端循环调了这个接口，内存无界。
+   * 而且它们会在某次 Stop 时**一次性全部注入**，模型收到一大坨陈年指令。
+   *
+   * ## 为什么是拒绝而不是丢最旧的
+   *
+   * HUD 那边满了是丢最旧的，因为那是**状态**——积压时旧状态早就过期了。
+   * 这里是**用户的指令**：每一条都是他明确要说的话，静默丢掉哪一条都不行。
+   * 拒绝新的至少发生在他按下发送的那一刻，手机上能当场告诉他。
+   *
+   * 20 条：手机上一次输入是有成本的，正常用法远到不了；到得了就说明
+   * 那个会话根本不会再跑了，这时候提醒他比继续收下更有用。
+   */
   queue(sessionId, text) {
-    const msg = { id: randomUUID(), text: String(text).slice(0, 4000), at: Date.now() }
     if (!this.#queues.has(sessionId)) this.#queues.set(sessionId, [])
-    this.#queues.get(sessionId).push(msg)
+    const q = this.#queues.get(sessionId)
+    if (q.length >= Inbox.MAX_PER_SESSION) return null
+
+    const msg = { id: randomUUID(), text: String(text).slice(0, 4000), at: Date.now() }
+    q.push(msg)
     this.emit('change', sessionId)
     return msg
   }
+
+  static MAX_PER_SESSION = 20
 
   list(sessionId) {
     return this.#queues.get(sessionId) ?? []

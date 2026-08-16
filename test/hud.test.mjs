@@ -168,3 +168,40 @@ test('idle()：等队列放完', async (t) => {
     assert.equal(done, true)
   })
 })
+
+// ---------------------------------------------------------------------------
+/**
+ * 2026-08 架构审查：HUD 起不来时回落没触发。
+ *
+ * done(code) 只在 code 为真时才走回落（onFail → 系统横幅）。原来 spawn 失败的
+ * 两处都传 0 —— 而 0 的语义是「播成功了」。于是 osascript 没装、被安全策略
+ * 拦下、fork 失败这些情况下，那条提醒**彻底消失**，日志和健康计数还都显示正常。
+ *
+ * HUD 在这个产品里不是装饰：提醒通道只有 Mac 本地通知这一条，回落不触发
+ * 就等于那次审批**没有任何东西叫你**，然后它会静静等到超时被自动处置。
+ */
+test('起不来的时候必须回落，不能记成成功', async (t) => {
+  const fellBack = (run) => new Promise((resolve) => {
+    const q = createHudQueue(run)
+    let hit = false
+    q.push({ icon: 'x', title: 't', onFail: () => { hit = true } })
+    setTimeout(() => resolve(hit), 30)
+  })
+
+  await t.test('run 同步抛异常（osascript 不存在之类）', async () => {
+    assert.equal(await fellBack(() => { throw new Error('boom') }), true)
+  })
+
+  await t.test('spawn 异步报 error', async () => {
+    // p.on('error') 那条路径传的是 SPAWN_FAILED，不是 0
+    assert.equal(await fellBack((item, done) => done(-1)), true)
+  })
+
+  await t.test('退出码非 0（画不出来）', async () => {
+    assert.equal(await fellBack((item, done) => done(1)), true)
+  })
+
+  await t.test('正常播完则不回落 —— 否则每条提醒都发两遍', async () => {
+    assert.equal(await fellBack((item, done) => done(0)), false)
+  })
+})

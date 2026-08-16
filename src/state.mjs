@@ -1,6 +1,7 @@
 import { EventEmitter } from 'node:events'
 import { noRedact } from './redact.mjs'
 import { plainText } from './text.mjs'
+import { DEFAULT_AGENT, normalizeAgent } from './agents.mjs'
 
 // 状态机（对应计划 §3）
 export const STATE = {
@@ -89,6 +90,9 @@ export class Store extends EventEmitter {
     if (!s) {
       s = {
         session_id: id,
+        // 哪个后端在跑这个会话。决定手机端给不给暂停/取消/发消息的入口，
+        // 见 src/agents.mjs。老 hook 不带这个字段，缺省即 Claude Code。
+        agent: DEFAULT_AGENT,
         session_name: null,
         cwd: null,
         state: STATE.IDLE,
@@ -99,6 +103,9 @@ export class Store extends EventEmitter {
         limits: null,
         context: null,
         cost_usd: null,
+        // 累计 token。只有按 API key 计费、没有窗口配额的后端会有（quota:'tokens'）。
+        // 不换算成金额：那要一张会悄悄过期的价目表，而一个不准的金额比没有更糟
+        tokens: null,
         model: null,
       }
       this.#sessions.set(id, s)
@@ -116,6 +123,26 @@ export class Store extends EventEmitter {
 
   statusLineSeenAt() {
     return this.#statusLineSeenAt
+  }
+
+  /**
+   * 每个后端最后一次上报是什么时候。
+   *
+   * ## 为什么需要它
+   *
+   * 「这个后端没有会话」和「这个后端已经不上报了」在屏幕上长得一模一样：
+   * 两种情况列表里都是空的。可它们该做的事完全相反——前者什么都不用做，
+   * 后者说明桥接插件挂了 / hooks 掉了 / DSH 进程没了，而你正靠它替你盯着操作。
+   *
+   * 这是这个项目反复踩的同一类坑（hooks 静默失败、statusLine 不上报、
+   * 服务连不上却只显示空白）：**故障被显示成「正常但没有内容」**。
+   * 有了时间戳，界面才说得出「Claude Code 12 分钟没动静了」。
+   *
+   * 记的是「收到过任何上报」，不是「有活跃会话」——会话结束了后端仍然活着，
+   * 这两件事必须分开。
+   */
+  agentsSeen() {
+    return Object.fromEntries(this.#agentSeen)
   }
 
   events(sinceId = 0, sessionId = null) {
@@ -196,6 +223,11 @@ export class Store extends EventEmitter {
 
     if (payload.cwd) s.cwd = payload.cwd
     if (payload.session_name) s.session_name = payload.session_name
+    // 认不得的 agent 落回 Claude Code 而不是原样存下：存下来的话，UI 那边
+    // capOf() 同样会落回默认能力，但会话卡片上会显示一个谁也不认识的后端名。
+    if (payload.agent) s.agent = normalizeAgent(payload.agent)
+    // 记在会话之外：会话结束了后端仍然活着，两件事分开看才判得出「后端没动静了」
+    this.#agentSeen.set(s.agent, Date.now())
 
     const label = s.session_name || (s.cwd ? s.cwd.split('/').filter(Boolean).pop() : id.slice(0, 8))
     let notify = null
@@ -249,7 +281,13 @@ export class Store extends EventEmitter {
         // 此时宁可多推一次，也别漏掉一次任务完成。
         const elapsed = s.turn_started_at ? Date.now() - s.turn_started_at : Infinity
         const msg = truncate(payload.last_assistant_message ?? '', 300)
-        this.#touch(s, { state: STATE.DONE, sub_state: null, last_message: msg, turn_started_at: null })
+        // 按 API key 计费的后端没有滚动窗口配额，累计 token 是唯一说得出口的
+        // 用量。只在真的报了的时候才写——没有和 0 是两回事
+        const tokens = Number(payload.tokens)
+        this.#touch(s, {
+          state: STATE.DONE, sub_state: null, last_message: msg, turn_started_at: null,
+          ...(Number.isFinite(tokens) && tokens > 0 ? { tokens } : {}),
+        })
         this.#log(id, 'stop', msg)
         if (notifyConfig.onStop && elapsed >= notifyConfig.minTurnMs) {
           notify = {
@@ -353,6 +391,8 @@ export class Store extends EventEmitter {
   // 表现是额度一直空白且毫无错误。记一笔「有没有被调用过」，好把
   // 「还没有会话上报」和「有会话但额度拿不到」区分开。
   #statusLineSeenAt = null
+  // agent -> 最后一次收到该后端任何上报的时间。见 agentsSeen()
+  #agentSeen = new Map()
 
   applyStatusLine(payload, opts = {}) {
     this.#statusLineSeenAt = Date.now()

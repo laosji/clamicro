@@ -1,9 +1,11 @@
-import { readFileSync, writeFileSync, mkdirSync, existsSync, chmodSync, copyFileSync } from 'node:fs'
+import { readFileSync, mkdirSync, existsSync, chmodSync, copyFileSync } from 'node:fs'
 import { homedir, networkInterfaces } from 'node:os'
 import { join } from 'node:path'
 import { randomBytes } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
 import { SELF_DEADLINE_MS } from './limits.mjs'
+import { writeAtomic } from './atomic.mjs'
+import { commandOf } from './service-id.mjs'
 
 export const CONFIG_DIR = join(homedir(), '.claude', 'clamicro')
 export const CONFIG_FILE = join(CONFIG_DIR, 'config.json')
@@ -26,10 +28,24 @@ export function tunnelAlive() {
   if (!pid) return false
   try {
     process.kill(pid, 0) // 信号 0 只探测存在性，不真的发信号
-    return true
   } catch {
     return false
   }
+  /**
+   * 光「这个号上有进程」不够——**PID 会被系统回收**。
+   *
+   * cloudflared 死掉之后它的号可以被分配给完全无关的新进程，于是：
+   *
+   *   · tunnelAlive 返回 true → baseUrl 继续用那个 trycloudflare 地址，
+   *     而隧道早就没了。之后生成的每个二维码、每条推送深链都指向一个
+   *     打不开的域名，且没有任何报错——正是这个函数上面注释里说
+   *     「踩过一次」的那个故障，只是这次的成因是 PID 复用。
+   *   · stopTunnel 会 kill 那个号 → **杀掉一个无辜进程**。
+   *
+   * 所以要再确认一次这个号现在归谁。判据放宽到只认 `cloudflared`：
+   * 它的完整命令行带一长串参数，形状不稳定，但可执行文件名是确定的。
+   */
+  return /cloudflared/.test(commandOf(pid))
 }
 
 /**
@@ -302,8 +318,9 @@ export function loadConfig() {
     //
     // 一开始只修了 saveConfig，键数纹丝不动——因为服务启动走的是这一条。
     // 两条写路径都得剪，漏一条等于没修。
-    writeFileSync(CONFIG_FILE, JSON.stringify(pruneDefaults(config, DEFAULTS), null, 2))
-    chmodSync(CONFIG_FILE, 0o600) // 含访问 token
+    // 原子写：0600 在 rename **之前**就设好，所以不存在「文件已就位但还是
+    // 0644」的窗口——这个文件里有主令牌。见 src/atomic.mjs
+    writeAtomic(CONFIG_FILE, JSON.stringify(pruneDefaults(config, DEFAULTS), null, 2), 0o600)
     console.log(`[config] 已写入 ${CONFIG_FILE}`)
   }
 
@@ -364,8 +381,15 @@ export function saveConfig(config) {
     persist.bind = [...new Set(persist.bind.map((h) => (h && (h === lanIp || h === tailscaleIp) ? null : h)))]
     if (!persist.bind.includes(null)) persist.bind.push(null)
   }
-  writeFileSync(CONFIG_FILE, JSON.stringify(pruneDefaults(persist, DEFAULTS), null, 2))
-  chmodSync(CONFIG_FILE, 0o600)
+  /**
+   * 原子写，两个理由：
+   *   · 服务在热加载这个文件（server.mjs 的 watchConfig）。非原子写会让它
+   *     读到半截 JSON——那边有兜底，但兜底是最后一道，不该当第一道。
+   *   · 写到一半被打断，config.json 就永久半截了：令牌和已配对设备全没，
+   *     手机得重新扫码。
+   * 0600 在 rename 前设好，避免「已就位但仍是 0644」那一瞬——里面有主令牌。
+   */
+  writeAtomic(CONFIG_FILE, JSON.stringify(pruneDefaults(persist, DEFAULTS), null, 2), 0o600)
 }
 
 /**
@@ -430,7 +454,7 @@ const SECRET_KEYS = ['token', 'devices', 'trustedNetworks']
  * CLAMICRO_PORT 的临时覆盖固化下来。把它列进面向人的配置树，既是噪音，
  * 又会被标成「运行时探测」——而它根本不是探测出来的。
  */
-const INTERNAL_KEYS = ['persistedPort']
+const INTERNAL_KEYS = ['persistedPort', 'onboardedAt']
 
 /**
  * 摊开当前**真正生效**的配置，并标出每一项是哪一层给的。

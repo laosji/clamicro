@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 import { createServer } from 'node:http'
-import { readFileSync } from 'node:fs'
+import { readFileSync, watch } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { loadConfig, saveConfig, detectLanIp, CONFIG_FILE } from './src/config.mjs'
+import { AGENTS } from './src/agents.mjs'
 import { Store, STATE } from './src/state.mjs'
 import { makeNotifier } from './src/notify.mjs'
 import { ApprovalStore } from './src/approvals.mjs'
@@ -33,7 +34,33 @@ const HERE = dirname(fileURLToPath(import.meta.url))
  * 区别很重要：一次性进程**不该有副作用**，也**不该发通知**——它跑完就
  * `process.exit(0)`，而 HUD 是子进程，进程一走就被带走，通知只会留在日志里。
  */
-const ONE_SHOT = process.argv.some((a) => a.startsWith('--'))
+/**
+ * 一次性查询的**白名单**。下面每一个都有对应的处理分支，跑完就 exit。
+ * 加新的一次性命令时，这里和那个分支要一起加。
+ */
+const ONE_SHOT_FLAGS = new Set([
+  '--qr', '--trust', '--untrust', '--rotate-token',
+  '--devices', '--forget', '--networks', '--config', '--test-push',
+])
+
+/**
+ * 这次是被 CLI 借来跑一条一次性查询，还是真的要起服务。
+ *
+ * 判据是「**是不是已知的一次性命令**」，不是「有没有带 `--` 参数」。
+ *
+ * 原来写的是 `argv.some(a => a.startsWith('--'))`。当前两条常驻启动路径
+ * （`cli.mjs start` 和 SessionStart hook）都不带参数，所以它一直是对的——
+ * 但那是**巧合**，不是保证。哪天给常驻服务加一个 `--port=` 或 `--foreground`，
+ * ONE_SHOT 会当场翻成 true，于是巡检和自愈定时器全部不装：
+ * 服务照常监听、healthz 照常回 ok、日志里连时间戳都还在，
+ * 只是再也不会自我修复了。这种「看起来完全正常但少了一半功能」的故障，
+ * 是这个代码库里最不想要的那一类。
+ *
+ * `--untrust=x` / `--forget=x` 带值，所以按 `=` 前半截比。
+ * 从下标 2 开始：前两项是 node 路径和脚本路径，不是参数。
+ * （node 自己的标志走 execArgv，本来就不在 argv 里。）
+ */
+const ONE_SHOT = process.argv.slice(2).some((a) => ONE_SHOT_FLAGS.has(a.split('=')[0]))
 
 /**
  * 常驻服务的每一行日志都带时间戳；一次性查询不带。
@@ -150,6 +177,8 @@ if (!ONE_SHOT) {
  * 那比不自愈更糟。
  */
 let warnedHooksGone = false
+// 「补了但补不回来」只喊一次。这是 5 分钟一轮的巡检，每轮都喊等于没喊
+let warnedHooksStuck = false
 function healHooks() {
   try {
     const v = verifyHooks({ port: config.port, statusLinePath: appPaths().statusLine })
@@ -167,17 +196,59 @@ function healHooks() {
     }
     console.warn(`[hooks] 检测到缺失：${v.missing.join('、')}，正在补回`)
     const { statusLine, sessionStart } = appPaths()
-    install({ port: config.port, statusLinePath: statusLine, sessionStartPath: sessionStart })
-    console.warn('[hooks] ✓ 已补回（原文件已备份）')
-    notify({
-      title: 'Clamicro',
-      icon: '⚠',
-      tint: 'warn',
-      compact: true,
-      short: 'hooks 已修复',
-      subtitle: 'hooks 被覆盖，已自动补回',
-      body: `缺失：${v.missing.join('、')}`,
-    }).catch(() => {})
+    const r = install({ port: config.port, statusLinePath: statusLine, sessionStartPath: sessionStart })
+
+    /**
+     * **补完要复查**，不能补完就宣布成功。
+     *
+     * 有一类缺失 install 修不好：用户把某个 hook 事件手写成了非数组
+     * （对象、字符串），install 只能 skip。原来这里无条件打印「✓ 已补回」
+     * 并推一条通知，于是——
+     *
+     *   · 每 5 分钟一次「hooks 已修复」的通知，而它一次都没修好
+     *   · 用户以为好了，实际上那个事件**永远收不到**
+     *
+     * 「说自己修好了但其实没修」比「没修」危险得多：后者你还会去查，
+     * 前者你不会。这跟审批那条「宁可没有功能也不能做假功能」是同一条。
+     */
+    const after = verifyHooks({ port: config.port, statusLinePath: statusLine })
+    if (after.ok) {
+      warnedHooksStuck = false
+      console.warn('[hooks] ✓ 已补回（原文件已备份）')
+      notify({
+        title: 'Clamicro',
+        icon: '⚠',
+        tint: 'warn',
+        compact: true,
+        short: 'hooks 已修复',
+        subtitle: 'hooks 被覆盖，已自动补回',
+        body: `缺失：${v.missing.join('、')}`,
+      }).catch(() => {})
+      return
+    }
+
+    // 补不回来。只说一次——这是每 5 分钟跑一次的巡检，
+    // 每轮喊一遍等于没喊，真正要紧的那行会被自己刷掉
+    const stuck = r.changes.filter((c) => c.kind === 'skip')
+    if (!warnedHooksStuck) {
+      warnedHooksStuck = true
+      const how = stuck.length
+        ? `${stuck.map((c) => `${c.event}（${c.why}）`).join('、')}`
+        : after.missing.join('、')
+      console.warn(
+        `[hooks] ✗ 补不回来：${how}\n` +
+        `        自动修复对这几项无效，需要手工改 ~/.claude/settings.json：\n` +
+        `        把这些事件的值改成数组（[]），然后重跑 npx clamicro install\n` +
+        `        在此之前，这些事件的上报收不到——手机上会安静地少掉对应的状态。`,
+      )
+      notify({
+        title: 'Clamicro',
+        icon: '⚠',
+        tint: 'warn',
+        subtitle: 'hooks 修不回来，需要你手工处理',
+        body: `${after.missing.join('、')} —— 看终端日志里的说明`,
+      }).catch(() => {})
+    }
   } catch (err) {
     // 自愈本身不能把服务搞挂
     console.error(`[hooks] 自愈失败: ${err.message}`)
@@ -295,20 +366,27 @@ if (process.argv.includes('--trust')) {
  *
  * 换掉之后所有旧 cookie 自动失效——sameToken 比的是新值，旧的一律不匹配。
  */
+/**
+ * 轮换主令牌，**并吊销所有已配对设备**。
+ *
+ * 原来只换主令牌、设备簿原样保留，还打印「已配对的 N 台设备不受影响」——
+ * 而 README 承诺的是「every logged-in device is signed out at once」。
+ * 代码和文档说的是相反的两件事。
+ *
+ * 按文档改代码而不是反过来：这条命令的**使用场景**是「怀疑令牌泄漏」。
+ * 那种时刻你要的是一个能一键清干净的开关，不是一个还留着若干扇后门、
+ * 需要你再去逐台 forget 的半吊子。想精确吊销某一台，forget <id> 一直都在。
+ */
 if (process.argv.includes('--rotate-token')) {
   const { randomBytes } = await import('node:crypto')
-  config.token = randomBytes(32).toString('base64url')
-  saveConfig(config)
   const n = config.devices?.length ?? 0
-  console.log(`\n  ✓ 已换发主令牌`)
-  console.log(`  \x1b[2m主令牌只给 CLI 和二维码用。\x1b[0m`)
-  console.log(
-    n
-      ? `  \x1b[2m已配对的 ${n} 台设备各有自己的令牌，不受影响，继续能用。\x1b[0m`
-      : `  \x1b[2m目前没有已配对的设备。\x1b[0m`,
-  )
-  console.log(`  \x1b[2m要吊销某台设备： npx clamicro forget <id>（先 npx clamicro devices 看 id）\x1b[0m`)
-  console.log(`\n  重启服务生效： npx clamicro stop  然后新开一个 Claude Code 会话\n`)
+  config.token = randomBytes(32).toString('base64url')
+  config.devices = []
+  saveConfig(config)
+  console.log(`\n  ✓ 已换发主令牌${n ? `，并吊销全部 ${n} 台已配对设备` : ''}`)
+  console.log(`  \x1b[2m泄漏的旧令牌和所有旧设备登录即刻失效。\x1b[0m`)
+  if (n) console.log(`  \x1b[2m手机需要重新扫码配对： npx clamicro qr\x1b[0m`)
+  console.log(`  \x1b[2m只想吊销某一台？下次用 npx clamicro forget <id>，不必全部重配。\x1b[0m\n`)
   process.exit(0)
 }
 
@@ -389,8 +467,9 @@ if (process.argv.includes('--devices')) {
     config.devices = which === 'all' ? [] : all.filter((d) => !d.id.startsWith(which))
     saveConfig(config)
     console.log(`\n  ✓ 已吊销：${gone.map((d) => `${d.name}（${d.id}）`).join('、')}`)
-    console.log(`  这些设备上的登录立即失效，其他设备不受影响。`)
-    console.log(`  重启服务生效： npx clamicro stop  然后新开一个 Claude Code 会话\n`)
+    // 原来这里两行自相矛盾：先说「立即失效」，紧接着说「重启服务生效」。
+    // 现在服务会热加载配置（server.mjs 的 watchConfig），「立即」是真的了
+    console.log(`  这些设备上的登录即刻失效，其他设备不受影响。\n`)
     process.exit(0)
   }
 }
@@ -476,6 +555,12 @@ function publicApproval(a, withKey = false) {
     id: a.id,
     ...(withKey ? { key: a.key } : {}),
     session_id: a.session_id,
+    // 后端出身。审批卡片要能一眼看出「这条是哪个 harness 问的」——
+    // 两个后端同时有待审批时，没有出身字段的卡片长得一模一样，而它们的
+    // 后续能力（暂停/取消）和语义并不相同。agent_label 由服务端一次解析好，
+    // 前端不必再拉能力表；认不出就落回原始 key，不假装是 Claude Code。
+    agent: s?.agent ?? null,
+    agent_label: s?.agent ? (AGENTS[s.agent]?.label ?? s.agent) : null,
     session_name: s?.session_name ?? null,
     cwd: s?.cwd ?? null,
     tool_name: a.tool_name,
@@ -510,7 +595,68 @@ const pairing = new PairingStore()
 // 等 Mac 确认的那一段。扫码请求立刻返回等待页，结果落这里，手机轮询取。
 const confirms = new ConfirmStore()
 // 传函数不是数组：配对成功会往 config.devices 里加，鉴权必须看到最新的那份
-const auth0 = makeAuth(config.token, () => config.devices ?? [])
+// 两个都传函数：令牌和设备簿都可能被 CLI 从另一个进程改掉，见 watchConfig
+const auth0 = makeAuth(() => config.token, () => config.devices ?? [])
+
+/**
+ * 配置热加载 —— 让吊销真的是「立即」。
+ *
+ * ## 修的是什么
+ *
+ * `clamicro forget <id>`（手机丢了的标准处置）和 `clamicro rotate-token`
+ * （怀疑令牌泄漏的标准处置）都是**独立的 CLI 进程**：它们只改磁盘上的
+ * config.json，而运行中的服务在启动那一刻就把配置读进内存了，此后再没读过。
+ *
+ * 后果是这两条命令**都不生效，直到重启服务**：
+ *   · forget 之后，丢掉的那台手机继续能批准 rm -rf
+ *   · rotate 之后，泄漏的旧令牌继续有效，新令牌反而 401
+ *
+ * 而 forget 自己打印的是「这些设备上的登录**立即失效**」——紧接着下一行
+ * 又说「重启服务生效」。两行自相矛盾，而先看到的那行是假的。
+ * 在一个安全工具里，「我以为已经吊销了」比「知道自己没吊销」危险得多。
+ *
+ * ## 只热加载安全相关的三项
+ *
+ * token / devices / trustedNetworks。端口、baseUrl 这些是启动时确定的
+ * （套接字已经绑好了），中途换掉只会让内存状态和实际监听对不上。
+ *
+ * ## 解析失败就保持原样
+ *
+ * saveConfig 不是原子写，watch 完全可能读到写了一半的文件。这时候
+ * **保留当前配置**是唯一安全的选择：把 token 换成 undefined 会让所有
+ * 请求 401，把 devices 换成空数组会让所有手机掉线——一次写盘抖动
+ * 不该造成全员登出。
+ */
+function watchConfig() {
+  let timer = null
+  try {
+    watch(CONFIG_FILE, () => {
+      // fs.watch 一次写盘常常触发多次，压一下
+      clearTimeout(timer)
+      timer = setTimeout(() => {
+        let next
+        try {
+          next = loadConfig()
+        } catch {
+          return // 多半是读到了写一半的文件，下一次事件会再来
+        }
+        if (!next || typeof next.token !== 'string' || !next.token) return
+        const before = { token: config.token, n: config.devices?.length ?? 0 }
+        config.token = next.token
+        config.devices = next.devices ?? []
+        config.trustedNetworks = next.trustedNetworks ?? {}
+        const after = { token: config.token, n: config.devices.length }
+        // 只在真的变了时说话，否则每次写盘都刷一行
+        if (before.token !== after.token) console.log('[config] 主令牌已轮换，旧令牌即刻失效')
+        if (before.n !== after.n) console.log(`[config] 设备簿已更新：${before.n} → ${after.n} 台`)
+      }, 150)
+    })
+  } catch (err) {
+    // 监听不了不该拖垮服务——退化成「重启才生效」，也就是修之前的行为
+    console.warn(`[config] 无法监听配置文件，吊销类命令需重启服务才生效：${err?.message ?? err}`)
+  }
+}
+if (!ONE_SHOT) watchConfig()
 const { sameToken, authorized, loginCookie } = auth0
 
 const auth = auth0
@@ -550,7 +696,23 @@ async function handler(req, res) {
       // 就不属于本机了——手机连过来是超时而不是报错，终端里一片安静，
       // 典型的静默失败。这里现场重新探测一次，让 SessionStart hook 据此决定
       // 要不要重启（服务本来就跟着 Claude Code 的生命周期走，不另开巡检）。
-      return json(res, 200, { ok: true, stale: detectLanIp() !== config.lanIp })
+      /**
+       * `service` 只对**回环**请求返回。
+       *
+       * 用途：CLI 在 kill 之前确认「端口上这个进程真的是 clamicro」。
+       * 原来 stop / 安装流程是 `lsof -ti tcp:8765` 拿到 PID 就直接 kill，
+       * 不校验身份——8765 不是保留端口，被别的程序占着的话，
+       * `npx clamicro stop` 会**杀掉一个无辜进程**，而且悄无声息。
+       *
+       * 不对局域网返回：`{ok:true}` 是匿名的，加上 service 就等于告诉
+       * 同网段的任何扫描者「这台机器上有个能批准操作的服务」。
+       * 本机的 CLI 走回环，拿得到；外面拿不到。
+       */
+      return json(res, 200, {
+        ok: true,
+        stale: detectLanIp() !== config.lanIp,
+        ...(isLoopback(req) ? { service: 'clamicro', pid: process.pid } : {}),
+      })
     }
 
     // hooks / statusLine 一律只认本机来源，见 isLoopback 的说明

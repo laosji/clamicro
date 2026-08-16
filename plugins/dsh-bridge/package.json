@@ -1,0 +1,36 @@
+{
+  "name": "clamicro-dsh-bridge",
+  "version": "0.1.0",
+  "description": "把 DeepSeek Harness 的会话状态桥接到 Clamicro 手机端",
+  "keywords": [
+    "dsh-plugin",
+    "deepseek-harness",
+    "clamicro",
+    "approval",
+    "mobile"
+  ],
+  "license": "MIT",
+  "type": "module",
+  "main": "index.js",
+  "files": [
+    "index.js",
+    "lib/",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "peerDependencies": {
+    "cordis": "*"
+  },
+  "peerDependenciesMeta": {
+    "cordis": {
+      "optional": true
+    }
+  },
+  "clamicro": {
+    "_comment": "本插件核对过的 DSH 版本。改这里的同时要改 lib/compat.js 的 TESTED_DSH（运行时用的是那个）。升级流程见 README「版本兼容」。",
+    "testedAgainstDsh": "0.1.0-rc.6",
+    "verifiedBy": "类型定义逐字段核对 + headless 会话 43 条事件流逐条比对 + 真实 DSH 会话跑通审批闭环（工具名翻译、callId 参数回查、风险判定 high、手机决定回传 denied）"
+  }
+}

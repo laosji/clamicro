@@ -10,9 +10,10 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, writeFileSync, rmSync, mkdirSync, unlinkSync, readFileSync } from 'node:fs'
+import { mkdtempSync, writeFileSync, rmSync, mkdirSync, unlinkSync, readFileSync, chmodSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { spawn } from 'node:child_process'
 
 const HOME = mkdtempSync(join(tmpdir(), 'clamicro-test-'))
 process.env.HOME = HOME
@@ -54,14 +55,46 @@ test('隧道地址以进程存活为准，不以配置为准', async (t) => {
     assert.equal(c.tunnelUrl, null)
   })
 
-  await t.test('pid 指向存活进程 → 采用隧道地址', () => {
+  await t.test('pid 指向存活的 cloudflared → 采用隧道地址', () => {
+    // 造一个真的叫 cloudflared 的进程：判据看的是命令行，不能拿别的冒充
+    const fake = join(HOME, 'cloudflared')
+    writeFileSync(fake, '#!/bin/sh\nsleep 30\n')
+    chmodSync(fake, 0o755)
+    const child = spawn(fake, [], { stdio: 'ignore' })
+    try {
+      writeConfig({ publicBaseUrl: DEAD })
+      writeFileSync(PID_FILE, String(child.pid))
+      const un = silence()
+      const c = loadConfig()
+      un()
+      assert.equal(c.tunnelUrl, DEAD)
+      assert.equal(c.baseUrl, DEAD)
+    } finally {
+      child.kill()
+      try { unlinkSync(PID_FILE) } catch { /* 已经没了 */ }
+    }
+  })
+
+  /**
+   * PID 会被系统回收 —— 「这个号上有进程」不等于「隧道还活着」。
+   *
+   * cloudflared 死掉之后它的号可能已经属于别的进程。只探存在性的话：
+   *   · baseUrl 继续用那个 trycloudflare 地址，而隧道早没了 →
+   *     之后每个二维码、每条深链都指向打不开的域名，且没有任何报错
+   *   · stopTunnel 会 kill 那个号 → 杀掉一个无辜进程
+   *
+   * 这两条都是这个文件上面那句「以进程是否存在为准」当初想解决的问题的
+   * **第二种成因**，只看 kill(pid,0) 挡不住。
+   */
+  await t.test('pid 被别的进程占了（PID 复用）→ 不认，回落', () => {
     writeConfig({ publicBaseUrl: DEAD })
+    // 当前测试进程是 node，不是 cloudflared —— 正是「号还在但换了主人」
     writeFileSync(PID_FILE, String(process.pid))
     const un = silence()
     const c = loadConfig()
     un()
-    assert.equal(c.tunnelUrl, DEAD)
-    assert.equal(c.baseUrl, DEAD)
+    assert.equal(c.tunnelUrl, null, '号被别人占着时不该采用隧道地址')
+    assert.ok(!c.baseUrl.includes('trycloudflare'))
     unlinkSync(PID_FILE)
   })
 

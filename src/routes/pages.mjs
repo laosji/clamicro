@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { readFileSync, unlinkSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { readBody, json, html, inlineJson } from '../http/respond.mjs'
@@ -18,6 +18,42 @@ import { isLoopback } from '../http/security.mjs'
  * 限制在一条审批上，不足以授权看板。审批页里的 hasSession 就是用来区分
  * 这两者的：只有真的持有登录 cookie，决策后才跳回首页。
  */
+/**
+ * 弹给用户看的那张配对二维码。
+ *
+ * 固定文件名（不是每次一个新名字）：磁盘上永远只有一张，重复配对是覆盖写。
+ * 但**用完必须收掉**，见 dismissPairImage。
+ */
+const PAIR_PNG = join(tmpdir(), 'clamicro-pair.png')
+
+/**
+ * 配对券一旦被兑换，就把屏幕上那张码收掉。
+ *
+ * 两件事一起做，缺一件都留下半个残局：
+ *   · 删文件 —— 那张 PNG 编码的是配对 URL。券已经作废了，图还躺在 /tmp 里
+ *     纯属多余；何况下一次配对会覆盖它，中间这段时间它只是个过期凭证的残影。
+ *   · 关窗口 —— 只删文件的话，Preview 会**继续显示已经读进内存的那一张**。
+ *     用户扫完了、手机也进去了，Mac 上却还挂着一张看起来有效的码，每配一次
+ *     多挂一个窗口。那张码此刻已经扫不动了，留着只会让人以为还能再扫一台。
+ *
+ * 只关**文件名匹配**的窗口，不碰用户自己开的其它 Preview 窗口。
+ * `is running` 不会把没开的 Preview 拉起来——否则「收拾残局」反而弹出一个新 App。
+ *
+ * 全程 best-effort：这是收尾动作，失败了配对本身已经成了，不能因此报错。
+ */
+function dismissPairImage() {
+  try { unlinkSync(PAIR_PNG) } catch { /* 本来就没有（没装 qrencode 时走的是弹地址） */ }
+  if (process.platform !== 'darwin') return
+  import('node:child_process')
+    .then(({ spawn }) => {
+      spawn('osascript', ['-e',
+        'if application "Preview" is running then tell application "Preview" to close ' +
+        '(every window whose name is "clamicro-pair.png")',
+      ], { detached: true, stdio: 'ignore' }).unref()
+    })
+    .catch(() => {})
+}
+
 export function pageRoutes(ctx) {
   requireDeps('pageRoutes', ctx, [
     'config', 'approvals', 'notify', 'auth', 'publicApproval', 'HERE',
@@ -88,12 +124,11 @@ export function pageRoutes(ctx) {
         const { id } = pairing.begin()
         const loginUrl = `${config.baseUrl}/ui/pair/${id}`
         const { spawnSync, spawn } = await import('node:child_process')
-        const png = join(tmpdir(), 'clamicro-pair.png')
         // 缺二进制时 spawnSync 返回 status=null（不是非零），所以只能判 === 0
-        const q = spawnSync('qrencode', ['-o', png, '-s', '10', '-m', '3', loginUrl])
+        const q = spawnSync('qrencode', ['-o', PAIR_PNG, '-s', '10', '-m', '3', loginUrl])
         const qr = q.status === 0
         if (qr) {
-          spawn('open', [png], { detached: true, stdio: 'ignore' }).unref()
+          spawn('open', [PAIR_PNG], { detached: true, stdio: 'ignore' }).unref()
         } else {
           // 没装 qrencode 就把地址本身弹出来（见 confirm.mjs 的 createUrlShower）。
           // 不这么做的话 Mac 屏幕上什么都没有，而这里、通知、两个前端页面
@@ -167,6 +202,15 @@ export function pageRoutes(ctx) {
         html(res, 410, page('pair-expired.html'))
         return true
       }
+
+      /**
+       * 券在这一行已经作废了（redeem 是一次性的），所以屏幕上那张码此刻起
+       * 就是废纸——立刻收掉，不等 Mac 那道确认的结果。
+       *
+       * 确认被拒也一样收：那张码同样已经不能再用，留着只会让人以为
+       * 「再扫一次就好」，而实际上要重新 `clamicro qr`。
+       */
+      dismissPairImage()
 
       const tunnelHost = (() => {
         try { return new URL(config.tunnelUrl).host.toLowerCase() } catch { return null }
@@ -251,6 +295,24 @@ export function pageRoutes(ctx) {
         return true
       }
       const device = addDevice(config, { name: meta.name })
+
+      /**
+       * 新手引导只在**这台 Mac 上第一次有设备配上来**时走一遍。
+       *
+       * 不用 devices.length 判断：设备会被顶替（maxDevices=2），也会被
+       * `forget all` 清空，于是「列表空了」既可能是从没配过，也可能是刚清过——
+       * 后者再走一次引导就是在给老用户重放新手教程。
+       *
+       * 这个时间戳只写一次，此后永不清除（forget 也不清），它记的是
+       * 「这个人已经知道这东西怎么用了」，而不是「现在有几台设备」。
+       *
+       * 注意引导的拦截发生在首页的同步脚本里（localStorage，见 ui/home.html），
+       * 拦截时机早于任何 fetch，所以服务端只能借这次响应把结论**捎给**手机，
+       * 由手机自己写进 localStorage。
+       */
+      const firstEver = !config.onboardedAt
+      if (firstEver) config.onboardedAt = Date.now()
+
       saveConfig(config)
 
       // 顶替必须**高声**说出来。设备上限的全部价值就是可检测性——
@@ -281,7 +343,7 @@ export function pageRoutes(ctx) {
           'ccm_w=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0',
         ],
       })
-      res.end(JSON.stringify({ state: 'allowed' }))
+      res.end(JSON.stringify({ state: 'allowed', firstEver }))
       return true
     }
 
