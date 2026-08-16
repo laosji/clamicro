@@ -4,6 +4,7 @@ import { requireDeps } from './deps.mjs'
 import { MAX_APPROVAL_TIMEOUT_MS, MIN_APPROVAL_TIMEOUT_MS } from '../config.mjs'
 import { notifyHealth } from '../notify.mjs'
 import { AGENTS, capOf, detectAgents } from '../agents.mjs'
+import { installedInfo } from '../paths.mjs'
 
 /**
  * 审批结束后，那条深链 `?k=` 还能用多久。
@@ -204,6 +205,17 @@ export function apiRoutes(ctx) {
         // 后端能力矩阵。全是静态布尔，不含凭证。
         // 由服务端下发而不是让网页硬编码：网页是缓存得最久的那一层，
         // 能力表跟着服务端版本走，才不会出现「服务端已支持、手机上还是灰的」。
+        /**
+         * 服务端版本。前端拿它判断「我这份页面是不是过期了」。
+         *
+         * 页面靠 SSE 长驻，**自己永远不会重新加载 HTML**——升级之后不手动
+         * 刷新就一直跑旧 JS。服务端发了 no-store，但那只保证「下次真去取
+         * 的时候是新的」，而这个页面可能几天都不去取一次。
+         *
+         * 表现是最难查的那一类：界面看着正常、数据也在更新（那走的是 API），
+         * 只有渲染逻辑是旧的。修好的 bug 在手机上「还在」，而服务端明明是对的。
+         */
+        version: installedInfo()?.version ?? null,
         agents: AGENTS,
         // 本机装了哪些后端。是个**数组**——多个后端同时在用是常态，不是边界情况。
         // 只用来决定空状态的文案；谁在跑以上报为准，见 src/agents.mjs 的注释

@@ -769,6 +769,12 @@ let agentFilter = null;
 // 不能留白——留白看起来像功能没做完，而不是连不上
 let fetchFailed = false;
 /**
+ * 第一次见到的服务端版本。和后续拉到的对不上 = 服务升级过，而这个页面
+ * 还在跑旧 JS。见 refresh() 里的说明。
+ */
+let seenVersion = null;
+let staleClient = false;
+/**
  * 手动收掉的「已完成」。只在内存里，不落 localStorage——
  * 它标的是「这一条我看过了」，刷新页面之后那件事本来就该重新判断一次。
  */
@@ -1532,6 +1538,19 @@ function renderHome() {
     }
   }
 
+  /**
+   * 服务升级了但这个页面还是旧的。给一条能点的提示，而不是自动重载——
+   * 自动重载会在你读命令读到一半时把页面抽走。
+   */
+  if (staleClient) {
+    h += `<div class="card alert notice">
+      <div class="top"><span class="name">↻ 有新版本</span></div>
+      <div class="path" style="white-space:normal">服务已经升级到 ${esc(cfg?.version ?? '')}，
+        而这个页面还是旧的——界面行为可能和实际不一致。
+        <a href="#" id="reloadnow" style="color:var(--run)">点这里刷新</a></div>
+    </div>`;
+  }
+
   h += autoDenyBanner();
 
   // 主控台先于列表：它是「现在什么情况」的答案，列表是「都有哪些」的明细。
@@ -2003,6 +2022,9 @@ function render() {
   if (tab === 'home') { attachListSwipes(); tickDeadlines(); maybeShowA2HS(); }
 
   // 重连按钮。断线态每次重绘都会重建这个节点，所以必须在这里重新绑
+  const rl = document.getElementById('reloadnow');
+  if (rl) rl.onclick = (e) => { e.preventDefault(); location.reload(); };
+
   const rb = document.getElementById('oretry');
   if (rb) rb.onclick = () => {
     // 立刻给反馈：断线时点一个没反应的按钮，人会以为连按钮也坏了
@@ -2080,6 +2102,22 @@ async function refresh() {
   if (a) { pending = a.approvals ?? []; recentlyExpired = a.recentlyExpired || []; }
   if (c) {
     cfg = c;
+    /**
+     * 页面靠 SSE 长驻，**自己永远不会重新加载 HTML**——服务升级之后，
+     * 你不手动刷新就一直跑旧 JS。服务端发了 no-store，但那只保证「下次
+     * 真去取的时候是新的」，而这个页面可能几天都不去取一次。
+     *
+     * 表现是最难查的那一类：界面看着正常、数据也在更新（那走 API），
+     * 只有渲染逻辑是旧的——修好的 bug 在手机上「还在」，而服务端明明是对的。
+     * 这一轮就因此误判过好几次。
+     *
+     * **只提示，不自动刷新**：你可能正在读一条待审批的命令原文，
+     * 页面在那一刻自己重载等于把它从你眼前抽走。
+     */
+    if (c.version) {
+      if (seenVersion === null) seenVersion = c.version;
+      else if (c.version !== seenVersion) staleClient = true;
+    }
     /**
      * 趁连得上的时候把服务报的所有地址存下来。
      *
