@@ -11,6 +11,7 @@ import { isOurService } from './src/service-id.mjs'
 import { fingerprint, isTrusted, trust } from './src/network.mjs'
 import { saveConfig } from './src/config.mjs'
 import { syncApp, appPaths, APP_DIR } from './src/paths.mjs'
+import { hasDsh, installPlugins, patchProfile, removePlugins, PATCH_FILE } from './src/dsh.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const PLIST_DEST = join(homedir(), 'Library', 'LaunchAgents', 'com.clamicro.plist')
@@ -168,6 +169,18 @@ if (has('--uninstall')) {
     say(`  ${c.g('✓')} 已从 settings.json 摘除：${removed.length ? removed.join('、') : '（无）'}`)
     if (backupPath) say(`  ${c.dim(`备份 ${backupPath}`)}`)
   }
+
+  /**
+   * DSH 那边也要摘干净。
+   *
+   * 这个项目对卸载的承诺是「只摘掉自己加的东西」，那就包括我们写进
+   * 别人家配置的部分。留着的后果比留个空目录严重：补丁层里还指着
+   * clamicro-dsh-bridge，而插件已经不在了——DSH 下次启动会报一个
+   * 找不到模块的错，而用户刚刚才「卸载」完，绝对想不到是这里。
+   */
+  const dsh = removePlugins()
+  if (dsh.removed.length) say(`  ${c.g('✓')} 已从 DSH 摘除：${dsh.removed.join('、')}`)
+  if (dsh.patch) say(`  ${c.dim(`已清理 ${dsh.patch}`)}`)
 
   // 老版本注册过 LaunchAgent，现在这个功能没了，但别人机器上那个 plist 还在，
   // 不清掉它会继续按老路径拉起服务。**删掉**而不是只 unload：留着下次开机又回来。
@@ -379,6 +392,47 @@ say('')
 say(`  ${c.dim('想直接看二维码：npx clamicro qr')}`)
 say('')
 
+/**
+ * 探测到 DeepSeek Harness 就问一句要不要接上。
+ *
+ * **必须问**：这会往用户的 `~/.dsh/profiles` 里拷目录、改 cordis.patch.yml。
+ * 那是另一个产品的配置，不是我们的地盘，装 clamicro 顺手改掉它不合适。
+ *
+ * 用 optIn=true，所以 `--yes` 批量确认也不会把它捎带过去——理由同上。
+ */
+if (hasDsh()) {
+  say('')
+  say(`  ${c.b('检测到 DeepSeek Harness')} ${c.dim('~/.dsh')}`)
+  say(`  ${c.dim('接上之后，DSH 的操作也会走手机审批，首页按模型分开显示。')}`)
+  if (await confirm(`  要现在接上吗？${c.dim('（会写 ~/.dsh/profiles）')}`, true)) {
+    try {
+      const done = installPlugins(APP_DIR)
+      const r = patchProfile(config.port ?? 8765)
+      if (done.length) say(`  ${c.g('✓')} 插件已装：${done.join('、')}`)
+      if (r.action === 'manual') {
+        // 认不出那个 YAML 的形状。不猜着改——写坏了 DSH 整个 profile 起不来，
+        // 而用户根本不会想到是装 clamicro 弄的。
+        say(`  ${c.y('⚠')} ${PATCH_FILE} 的格式不认识，没敢动。请手动把下面几行加进 ${c.b('- insert:')} 下面：`)
+        say('')
+        for (const line of r.rows) say(`  ${c.dim(line)}`)
+        say('')
+      } else if (r.action === 'already') {
+        say(`  ${c.dim('补丁层里已经有了，没重复写')}`)
+      } else {
+        say(`  ${c.g('✓')} 补丁层已更新 ${c.dim(PATCH_FILE)}`)
+        say(`  ${c.dim('重启 DSH（dsh web）后生效')}`)
+      }
+    } catch (e) {
+      // 接 DSH 失败不该让整个安装失败：Claude Code 那条链路已经装好了
+      say(`  ${c.y('⚠ 接 DSH 没成功：')}${e.message}`)
+      say(`  ${c.dim('Claude Code 那边不受影响。手动接法见 plugins/README.md')}`)
+    }
+  } else {
+    say(`  ${c.dim('跳过。以后想接：重跑 npx clamicro install')}`)
+  }
+}
+
+say('')
 say(`  配对完点「发一条测试审批」，在手机上批一次 ${c.dim('—— 这就是验收')}`)
 say(``)
 say(`  ${c.dim('现在已经能用了：需要审批时 Mac 会弹通知并响一声，终端状态栏也会显示待审批数。')}`)

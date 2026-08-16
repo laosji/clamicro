@@ -22,7 +22,9 @@ export function syncApp() {
   if (existsSync(APP_DIR)) rmSync(APP_DIR, { recursive: true, force: true })
   mkdirSync(APP_DIR, { recursive: true })
 
-  for (const item of ['server.mjs', 'src', 'ui', 'bin']) {
+  // plugins 也要同步：安装 DSH 桥接时是从 APP_DIR 取源的。漏了它的表现是
+  // 「补丁层写好了、插件文件一个没装」——DSH 下次启动去加载一个不存在的模块。
+  for (const item of ['server.mjs', 'src', 'ui', 'bin', 'plugins']) {
     const from = join(SOURCE_DIR, item)
     if (existsSync(from)) cpSync(from, join(APP_DIR, item), { recursive: true })
   }

@@ -132,9 +132,13 @@ noticing, quietly showing you a wrong number.
 
 ### Attaching DSH
 
-Needs a bridge plugin, **not shipped inside the clamicro npm package** — see
-[`plugins/`](./plugins/). There's also an optional pixel cat that sits on the DSH web
-UI; tapping it opens the phone dashboard (or the pairing QR if you haven't paired yet).
+`npx clamicro install` detects `~/.dsh` and offers to wire it up: it installs the bridge
+plugin plus an optional pixel cat that sits on the DSH web UI (tapping it opens the phone
+dashboard, or the pairing QR if you haven't paired yet).
+
+It writes into **someone else's config** (`~/.dsh/profiles`), so it always asks first and
+`--yes` will not answer for you. Uninstall removes it again. For the manual route and the
+bridge's three hard constraints, see [`plugins/`](./plugins/).
 
 ### Gestures
 
