@@ -335,7 +335,12 @@ export class Store extends EventEmitter {
 
       case 'stop-failure': {
         const msg = truncate(payload.error ?? payload.last_assistant_message ?? '任务因 API 错误终止', 300)
-        this.#touch(s, { state: STATE.ERROR, sub_state: null, last_message: msg, turn_started_at: null })
+        const tokens = Number(payload.tokens)
+        this.#touch(s, {
+          state: STATE.ERROR, sub_state: null, last_message: msg, turn_started_at: null,
+          ...(Number.isFinite(tokens) && tokens > 0 ? { tokens } : {}),
+          ...(typeof payload.usage_reported === 'boolean' ? { usage_reported: payload.usage_reported } : {}),
+        })
         this.#log(id, 'error', msg)
         if (notifyConfig.onError) {
           notify = { title: 'Clamicro', icon: '✕', tint: 'danger', subtitle: `${label} 出错`, body: msg }

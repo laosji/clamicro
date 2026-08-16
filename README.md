@@ -94,6 +94,48 @@ To upgrade, run `npx clamicro install` again.
 | Pause / Resume / Cancel the current turn | `PreToolUse` gate |
 | Quota-nearly-exhausted warning | `statusLine` |
 
+> This table describes **Claude Code**. With another backend attached, what you can do
+> depends on that backend — see "More than Claude Code" below.
+
+---
+
+## More than Claude Code
+
+Since 2.14.0 one dashboard can watch several backends at once. Today that means
+Claude Code and [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH).
+
+The home screen **groups by model**: each model gets a heading with its own status,
+recent activity and usage. The order is fixed by which backend connected first, so
+cards don't jump around when one of them gets busy.
+
+**Pending approvals are never grouped** — they stay at the top, across all backends.
+They run on a countdown; putting one inside a section means you have to find that
+section before you can see it, and a missed approval is a silent automatic decision.
+
+### Backends differ in what they can do
+
+|  | Claude Code | DeepSeek Harness |
+|---|:--:|:--:|
+| Approve from phone | ✓ | ✓ |
+| Pause / Resume | ✓ | — |
+| Cancel the turn | ✓ | — (protocol supports it, not wired yet) |
+| Send a message from the phone | ✓ | — (protocol supports it, not wired yet) |
+| Usage | 5h / 7d rolling window | cumulative tokens |
+
+The UI **renders by capability**: an action a backend can't do gets no entry point at
+all. A button that does nothing when tapped is worse than no button — you assume the
+pause worked and walk away.
+
+DSH usage is reported in tokens, never converted to money: DSH doesn't compute cost,
+and converting needs a per-model price table that would go stale without anyone
+noticing, quietly showing you a wrong number.
+
+### Attaching DSH
+
+Needs a bridge plugin, **not shipped inside the clamicro npm package** — see
+[`plugins/`](./plugins/). There's also an optional pixel whale that sits on the DSH web
+UI; tapping it opens the phone dashboard (or the pairing QR if you haven't paired yet).
+
 ### Gestures
 
 Swipe left to reject, right to approve — on both the detail page and the home list. Approvals get a 3-second undo window.
@@ -132,7 +174,9 @@ npx clamicro untrust    # revoke — current network by default, or untrust <id-
 
 Trust is **revocable.** Trusting a network by mistake (tapping "yes" at a café) shouldn't be permanent — otherwise that network stays on the list forever and re-exposes you the next time you connect.
 
-The fingerprint combines **gateway IP + gateway MAC + subnet**. SSID needs Location permission on recent macOS and is often unavailable; and `00:00:5e:00:01:xx` is a VRRP virtual MAC that is *not* unique across enterprise networks — matching on MAC alone would treat two different corporate networks as the same one.
+The fingerprint combines **gateway IP + gateway MAC + subnet + SSID + DHCP server + search domain + DNS list**.
+
+The first three are not enough: SSID needs Location permission on recent macOS and simply does not exist on Ethernet, and `00:00:5e:00:01:xx` is a VRRP virtual MAC that is *not* unique across enterprise networks. A real collision was reproduced — two different companies both on `192.168.1.0/24`, both with gateway `192.168.1.1`, both behind VRRP, neither exposing an SSID: all four fields identical, so **once you trusted company A, company B's network counted as trusted**. The last three signals come from DHCP, need no permission, and are almost never all identical across organisations.
 
 ### Implemented protections
 
@@ -145,7 +189,7 @@ The fingerprint combines **gateway IP + gateway MAC + subnet**. SSID needs Locat
 | **CSP `frame-ancestors 'none'`** | Clickjacking: a malicious page framing the approval screen and tricking you into swiping |
 | **Constant-time comparison** | Timing side channels on the token and per-approval keys |
 | **`SameSite=Lax` + `HttpOnly`** | CSRF, while still keeping you logged in when arriving from another app (`Strict` would force a re-scan every time) |
-| **Per-approval key** | A leaked deep link can only decide that one approval, and expires with it |
+| **Per-approval key** | A leaked deep link can only decide that one approval, and stops working 2 minutes after it settles (that short grace exists because the result page re-fetches with it right after you tap) |
 | **Nothing credential-shaped in the terminal** | The installer prints a plain URL. It carries no token and never expires, so scrollback, screen recordings and shoulder-surfing get you nothing. The credential is minted only after you tap the button on the phone, and only ever renders on the Mac's screen |
 
 ### Risk detection is a hint, not a sandbox
@@ -247,6 +291,14 @@ Two channels were tried and both removed: an ntfy relay with action buttons (app
 **Approvals and events are persisted** to `~/.claude/clamicro/history.json` — debounced writes, atomic rename. Anything still pending at restart becomes `abandoned`: those hook connections are long gone, and showing them as "waiting" would be a lie.
 
 **Hooks hot-reload; statusLine doesn't.** Hook changes take effect in the current session; statusLine needs a new one.
+
+**Revocation is immediate — no restart.** `forget` / `rotate-token` / `untrust` are separate CLI processes that only touch the config file, while the service read that file once at startup. So before 2.14.0 all three were **no-ops until you restarted** — yet `forget` printed "those devices are signed out immediately". The service now watches the config file and hot-reloads the token, device book and trusted networks, which makes that sentence true.
+
+**Config and `settings.json` are written atomically** — temp file in the same directory, then rename. Two paths actually hit the non-atomic version: the hot-reload watcher reading half-written JSON, and a process interrupted mid-write leaving the file permanently truncated (a half `config.json` means the token and every paired device are gone; a half `settings.json` means Claude Code won't start). Permissions are set before the rename, so there is no window where the file is in place but still `0644`.
+
+**Nothing gets killed without an identity check.** Both `stop` and the installer kill whatever listens on the port — and 8765 is not reserved. The check is `service: 'clamicro'` from `/healthz` (returned only to loopback, so a LAN scanner never sees it), not command-line matching, whose shape isn't stable. A foreign process is reported, never taken over.
+
+**Risk assessment doesn't look at the tool name.** It triggers on "does the input carry a `command`". It used to be `toolName === 'Bash'` — and DSH names its tool lowercase `bash`, so exact matching made the entire high-risk ruleset **never run**: `rm -rf /` scored as ordinary and auto-approved after 10s. One letter of difference, and the safety core fails silently with no error.
 
 ---
 

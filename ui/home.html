@@ -990,7 +990,7 @@ function statusConsole(only) {
 
   let cls = '', dotLabel = '空闲', right = '', body = '', meta = '';
 
-  if (off) {
+  if (!only && off) {
     cls = 'is-off'; dotLabel = '连接已断开';
     /**
      * 断线态**只有一张卡**。
@@ -1019,7 +1019,7 @@ function statusConsole(only) {
              在 Mac 上跑 <code>npx clamicro qr</code> 重新扫码</div>
       </details>
     </div>`;
-  } else if (pending.length && undoing.has(pending[0].id)) {
+  } else if (!only && pending.length && undoing.has(pending[0].id)) {
     /**
      * 主控台这条**刚被滑批准**，正在 3 秒撤销窗口里。
      *
@@ -1037,7 +1037,7 @@ function statusConsole(only) {
       <span>已批准 · <b id="undo-${a.id}">3</b> 秒后执行</span>
       <button onclick="cancelUndo('${a.id}')">撤销</button>
     </div>`;
-  } else if (pending.length) {
+  } else if (!only && pending.length) {
     // 有事等你做决定 —— 这是整个产品存在的理由，压过其他一切状态
     const a = pending[0];
     cls = 'is-wait' + (pending.length > 1 ? ' queued' : ''); dotLabel = '等待批准';
@@ -1533,6 +1533,8 @@ function renderHome() {
    */
   const kinds = [...agentKinds()];
   if (kinds.length > 1) {
+    // 断线 / 待审批是全局态，跟后端无关，只渲染一次——否则会重复进每个后端组
+    if (isDisconnected() || pending.length) h += statusConsole();
     for (const k of kinds) {
       const cap = cfg?.agents?.[k] ?? {};
       const mine = sessions.filter((s) => (s.agent || 'claude-code') === k);

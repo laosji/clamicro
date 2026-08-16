@@ -239,9 +239,16 @@ export class Translator {
         const text = this.#lastText.get(sessionId) ?? ''
         if (kind === 'error') {
           const err = d.reason.error
+          const seen = this.#tokens.has(sessionId)
+          const tokens = this.#tokens.get(sessionId)
           return {
             event: 'stop-failure',
-            payload: { error: err?.message ?? err?.code ?? '任务因错误终止' },
+            payload: {
+              error: err?.message ?? err?.code ?? '任务因错误终止',
+              // 失败轮也消耗 token，且「没报用量」这个事实同样要说清（见 stop 分支）
+              usage_reported: seen,
+              ...(tokens && tokens > 0 ? { tokens } : {}),
+            },
           }
         }
         const seen = this.#tokens.has(sessionId)
