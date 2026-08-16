@@ -11,7 +11,7 @@ import { isOurService } from './src/service-id.mjs'
 import { fingerprint, isTrusted, trust } from './src/network.mjs'
 import { saveConfig } from './src/config.mjs'
 import { syncApp, appPaths, APP_DIR } from './src/paths.mjs'
-import { hasDsh, installPlugins, patchProfile, removePlugins, PATCH_FILE } from './src/dsh.mjs'
+import { wireUp, removePlugins } from './src/dsh.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const PLIST_DEST = join(homedir(), 'Library', 'LaunchAgents', 'com.clamicro.plist')
@@ -400,45 +400,14 @@ say('')
  *
  * 用 optIn=true，所以 `--yes` 批量确认也不会把它捎带过去——理由同上。
  */
-if (hasDsh()) {
-  say('')
-  say(`  ${c.b('检测到 DeepSeek Harness')} ${c.dim('~/.dsh')}`)
-  say(`  ${c.dim('接上之后，DSH 的操作也会走手机审批，首页按模型分开显示。')}`)
-  if (await confirm(`  要现在接上吗？${c.dim('（会写 ~/.dsh/profiles）')}`, true)) {
-    try {
-      const done = installPlugins(APP_DIR)
-      const r = patchProfile(config.port ?? 8765)
-      if (done.length) say(`  ${c.g('✓')} 插件已装：${done.join('、')}`)
-      if (r.action === 'manual') {
-        // 认不出那个 YAML 的形状。不猜着改——写坏了 DSH 整个 profile 起不来，
-        // 而用户根本不会想到是装 clamicro 弄的。
-        say(`  ${c.y('⚠')} ${PATCH_FILE} 的格式不认识，没敢动。请手动把下面几行加进 ${c.b('- insert:')} 下面：`)
-        say('')
-        /**
-         * **不要给这几行加任何前缀。**
-         *
-         * 这条路径的全部意义就是让人照抄，而 YAML 里缩进就是结构。
-         * 原来写的是 say(`  ${line}`)，于是屏幕上是 6 个空格、文件里要的是 4 个，
-         * 抄下去正好破坏那个 `- insert:` 块——而我们绕这么大弯子不敢动它，
-         * 就是为了别把它弄坏。
-         */
-        for (const line of r.rows) say(line)
-        say('')
-      } else if (r.action === 'already') {
-        say(`  ${c.dim('补丁层里已经有了，没重复写')}`)
-      } else {
-        say(`  ${c.g('✓')} 补丁层已更新 ${c.dim(PATCH_FILE)}`)
-        say(`  ${c.dim('重启 DSH（dsh web）后生效')}`)
-      }
-    } catch (e) {
-      // 接 DSH 失败不该让整个安装失败：Claude Code 那条链路已经装好了
-      say(`  ${c.y('⚠ 接 DSH 没成功：')}${e.message}`)
-      say(`  ${c.dim('Claude Code 那边不受影响。手动接法见 plugins/README.md')}`)
-    }
-  } else {
-    say(`  ${c.dim('跳过。以后想接：重跑 npx clamicro install')}`)
-  }
-}
+const dsh = await wireUp({
+  here: APP_DIR,
+  port: config.port ?? 8765,
+  confirm,
+  say,
+  ui: { b: c.b, dim: c.dim, g: c.g, y: c.y },
+})
+if (dsh.action === 'failed') process.exitCode = 0 // 接 DSH 失败不影响整体安装
 
 say('')
 say(`  配对完点「发一条测试审批」，在手机上批一次 ${c.dim('—— 这就是验收')}`)

@@ -161,6 +161,76 @@ export function installPlugins(here) {
 }
 
 /**
+ * 安装器里那段「问一句、装、改补丁层」的完整流程。
+ *
+ * 从 install.mjs 里抽出来，是为了**能被断言**。它出过一个真 bug：打印待粘贴
+ * 的行时多加了两个空格前缀，屏幕上是 6 空格、文件里要的是 4 空格，照抄正好
+ * 破坏那个 `- insert:` 块——而这条路径的全部意义就是「不敢自动改，给你抄本」。
+ *
+ * 那个 bug 单测 insertRows 抓不到（行本身是对的），只有断言**实际打印出来的
+ * 内容**才能抓到。留在 install.mjs 里就只能靠人肉跑一遍安装才看得见。
+ *
+ * 依赖全部从参数进来（confirm / say / 各个文件操作），所以测试不碰真实环境。
+ *
+ * @param confirm  (问题, optIn) => Promise<boolean>。optIn=true 表示 --yes 也不替用户答应
+ * @param ui       文字装饰。默认全是恒等函数，测试里就能拿到干净的字符串
+ */
+export async function wireUp({
+  here,
+  port,
+  confirm,
+  say,
+  ui = {},
+  detect = hasDsh,
+  install = installPlugins,
+  patch = patchProfile,
+} = {}) {
+  const t = { b: (s) => s, dim: (s) => s, g: (s) => s, y: (s) => s, ...ui }
+  if (!detect()) return { action: 'no-dsh' }
+
+  say('')
+  say(`  ${t.b('检测到 DeepSeek Harness')} ${t.dim('~/.dsh')}`)
+  say(`  ${t.dim('接上之后，DSH 的操作也会走手机审批，首页按模型分开显示。')}`)
+
+  // optIn=true：这会写另一个产品的配置，`--yes` 不该把它捎带过去
+  if (!await confirm(`  要现在接上吗？${t.dim('（会写 ~/.dsh/profiles）')}`, true)) {
+    say(`  ${t.dim('跳过。以后想接：重跑 npx clamicro install')}`)
+    return { action: 'declined' }
+  }
+
+  try {
+    const done = install(here)
+    const r = patch(port)
+    if (done.length) say(`  ${t.g('✓')} 插件已装：${done.join('、')}`)
+
+    if (r.action === 'manual') {
+      say(`  ${t.y('⚠')} ${PATCH_FILE} 的格式不认识，没敢动。请手动把下面几行加进 ${t.b('- insert:')} 下面：`)
+      say('')
+      /**
+       * **不要给这几行加任何前缀。**
+       *
+       * YAML 里缩进就是结构。原来写的是 say(`  ${line}`)，屏幕上就成了 6 个
+       * 空格而文件里要 4 个，抄下去正好破坏那个块。test/dsh-wire.test.mjs
+       * 逐字符钉着这件事。
+       */
+      for (const line of r.rows) say(line)
+      say('')
+    } else if (r.action === 'already') {
+      say(`  ${t.dim('补丁层里已经有了，没重复写')}`)
+    } else {
+      say(`  ${t.g('✓')} 补丁层已更新 ${t.dim(PATCH_FILE)}`)
+      say(`  ${t.dim('重启 DSH（dsh web）后生效')}`)
+    }
+    return { action: r.action, installed: done }
+  } catch (e) {
+    // 接 DSH 失败不该让整个安装失败：Claude Code 那条链路已经装好了
+    say(`  ${t.y('⚠ 接 DSH 没成功：')}${e.message}`)
+    say(`  ${t.dim('Claude Code 那边不受影响。手动接法见 plugins/README.md')}`)
+    return { action: 'failed', error: e.message }
+  }
+}
+
+/**
  * 摘除：删插件目录 + 把补丁层里我们那几行拿掉。
  *
  * 卸载的正确下界是「什么都没变」。所以只删**我们放进去的**东西，
