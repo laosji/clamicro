@@ -520,16 +520,23 @@
 
   /* 后端状态条：每个后端一行。只在多后端时出现，见 agentStatusStrip */
   .astrip{margin-top:12px; border:1px solid var(--line); border-radius:14px; overflow:hidden}
-  .arow{display:flex; align-items:center; gap:10px; padding:11px 14px; font-size:13px;
-    border-bottom:1px solid var(--line)}
+  .arow{padding:11px 14px; font-size:13px; border-bottom:1px solid var(--line); position:relative}
   .arow:last-child{border-bottom:none}
-  /* 左边一个小圆点表示这个后端此刻的状态，颜色和会话状态同一套语义 */
-  .arow::before{content:''; width:7px; height:7px; border-radius:50%; flex:0 0 auto; background:var(--dim)}
+  /* 名称行和用量行左边缘对齐：小圆点用绝对定位，不占流内宽度，
+     否则用量那行要么和名称错开、要么得手工补一个等宽的缩进 */
+  .arow::before{content:''; position:absolute; left:14px; top:16px;
+    width:7px; height:7px; border-radius:50%; background:var(--dim)}
   .arow.run::before{background:var(--run)}
   .arow.wait::before{background:var(--warn)}
   .arow.stale::before{background:var(--no)}
+  .arow .aline{display:flex; align-items:center; gap:10px; padding-left:17px}
   .arow .an{font-weight:500; flex:0 0 auto}
   .arow .as{color:var(--dim); margin-left:auto; text-align:right}
+  /* 用量是补充信息：更小、更淡，且**不与状态争同一行** */
+  .arow .au{padding-left:17px; margin-top:3px; font-size:11.5px; color:var(--dim);
+    font-variant-numeric:tabular-nums}
+  /* 过期的数字要看得出来是过期的 —— 人先看数字，光在旁边写小字不够 */
+  .arow .au.stale{opacity:.55; text-decoration:line-through dotted}
   /* 没动静是要看见的：它和「空闲」在语义上完全不同，不能都是灰的 */
   .arow.stale .as{color:var(--no)}
   .arow.wait .as{color:var(--warn)}
@@ -1535,6 +1542,50 @@ function agentKinds() {
 const AGENT_STALE_MS = 600_000;
 
 /**
+ * 一个后端的用量，放在状态条那一行下面。
+ *
+ * ## 为什么按后端分开而不是并成一个数
+ *
+ * 它们根本不是同一种量：Claude Code 是**滚动窗口配额**（5h / 7d，用完就得等
+ * 窗口滚过去），DSH 是**累计 token**（按 API key 计费，没有窗口概念）。
+ * 硬凑成一个数字要么得编一个汇率，要么得挑一个丢掉另一个——两条都是在骗人。
+ *
+ * 放进状态条还顺带修了一个位置问题：5h/7d 是 **Claude Code 账户**的属性，
+ * 原来摆在通栏的额度块里，看着像是全局的。挂到它自己那一行，归属就清楚了。
+ *
+ * @returns {{html, stale}|null} null = 这个后端没有可说的用量
+ */
+function agentUsage(kind, cap, mine) {
+  if (cap.quota === 'tokens') {
+    // 累计 token。**不换算成金额**——那要一张会悄悄过期的价目表
+    const total = mine.reduce((n, s) => n + (Number(s.tokens) || 0), 0);
+    if (!total) return null; // 没上报过就不显示，而不是显示 0（那是两回事）
+    return { html: `${esc(fmtTokens(total))} tok`, stale: false };
+  }
+
+  if (cap.quota !== 'window') return null;
+
+  /**
+   * 窗口配额是**账户级**的，不属于某一个会话，所以取 store 的 accountLimits
+   * 而不是从 mine 里凑。
+   *
+   * 拿不到数字时说清是哪一种「没有」——它们该做的事完全不同：
+   *   · statusLine 从没到过 → 这个界面不调它（桌面版/IDE 不画状态栏）
+   *   · 到过但没带额度字段 → 上报在跑，只是这次没有
+   */
+  if (!quota) {
+    const why = quotaWhy();
+    return {
+      html: why === 'hooks-only' ? '额度只有终端里的 claude 会上报' : '暂无额度数据',
+      stale: true,
+    };
+  }
+  const five = Math.round(quota.five_hour?.pct ?? 0);
+  const seven = Math.round(quota.seven_day?.pct ?? 0);
+  return { html: `5h ${five}%　·　7d ${seven}%`, stale: quotaStale() };
+}
+
+/**
  * 后端状态条：每个后端一行，说清它**现在是不是还活着**。
  *
  * ## 为什么必须有
@@ -1581,9 +1632,13 @@ function agentStatusStrip() {
       text = seen ? `${ago(seen)}没有上报` : '还没有过上报';
     } else text = mine.length ? `${mine.length} 个会话 · 空闲` : '空闲';
 
+    const use = agentUsage(k, cap, mine);
     return `<div class="arow ${tone}">
-      <span class="an">${esc(cap.label || k)}</span>
-      <span class="as">${esc(text)}</span>
+      <div class="aline">
+        <span class="an">${esc(cap.label || k)}</span>
+        <span class="as">${esc(text)}</span>
+      </div>
+      ${use ? `<div class="au${use.stale ? ' stale' : ''}">${use.html}</div>` : ''}
     </div>`;
   }).join('')}</div>`;
 }

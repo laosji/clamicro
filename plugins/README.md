@@ -5,8 +5,8 @@
 
 | 插件 | 作用 | 默认 |
 |---|---|---|
-| [`dsh-bridge`](dsh-bridge/) | 把 DSH 的会话状态和审批请求桥接到手机 | 状态镜像开、审批**关** |
-| [`dsh-pet-dolphin`](dsh-pet-dolphin/) | Web UI 上的像素海豚；点一下打开手机看板 / 配对二维码 | 联动开 |
+| [`dsh-bridge`](dsh-bridge/) | 把 DSH 的会话状态和审批请求桥接到手机 | 状态镜像开、审批**关**（要审批得配 `approve: true`） |
+| [`dsh-pet-dolphin`](dsh-pet-dolphin/) | Web UI 上的像素鲸鱼；点一下打开手机看板 / 配对二维码 | 联动开 |
 
 两个可以单独装，装一个也能用。
 
@@ -24,6 +24,10 @@ dsh plugin --profile web add <包名>
       name: clamicro-dsh-bridge
       config:
         origin: http://127.0.0.1:8765
+        # 关键：approve 默认 false（只镜像、不审批）。要手机审批必须显式开，
+        # 并指定哪些工具每次调用都问（默认 bash）。
+        approve: true
+        askTools: ['bash']
     - id: pet-dolphin
       name: dsh-pet-dolphin
 ```
