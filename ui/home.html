@@ -1115,10 +1115,18 @@ function statusConsole(only) {
     // 空闲：没有更多要处理的事，用量是此刻唯一值得看的信息
     right = `<span class="ctag">${mine.length} 个会话</span>`;
     if (only) {
-      // 多后端分区：用量已经在 .ahead 的 .au 里按后端各说各的（agentUsage），
-      // 这里不能再画全局的 Claude Code 5h/7d —— 那会把 Claude Code 的额度
-      // 塞进 DSH 的分区里，一张卡同时出现「该后端不上报用量」和 5h/7d
-      body = '';
+      /**
+       * 分区模式下**不画全局额度**：那是 Claude Code 账户的窗口配额，
+       * 画进 DSH 的分区里就会出现「该后端不上报用量」和「5h 22%」并存。
+       *
+       * 但也不能留一张空卡。数字已经在分区标题里（agentUsage），这里只补
+       * 一句「为什么没有数字 / 怎么才有」——而且只对**用窗口配额的后端**说，
+       * 因为那句话讲的就是 statusLine，跟按 token 计费的后端无关。
+       */
+      const cap = capOf({ agent: only });
+      body = (cap.quota === 'window' && !quota)
+        ? `<div style="font-size:12px;color:var(--dim);line-height:1.55">${QUOTA_WHY_TEXT[quotaWhy()]}</div>`
+        : '';
       meta = '';
     } else {
       body = quotaBody();
@@ -1202,13 +1210,27 @@ function quotaWhy() {
   return 'no-field';
 }
 
+/**
+ * 「为什么这里没有额度」的一句话版本。
+ *
+ * 原来每条都是两三行的完整解释。那是「一屏只有 Claude Code」时代写的——
+ * 那时候空闲卡除了额度没别的内容，长一点无妨。多后端之后每个分区都有
+ * 自己的标题、状态、用量，再塞一段科普就变成了页面上最长的一块，
+ * 而它讲的还是别人的事。
+ *
+ * 现在一律一句话，只回答「**要不要做点什么**」：
+ *   · 不用做 → 说清没数字的原因就够
+ *   · 要做   → 把那条命令给出来，不解释来龙去脉
+ *
+ * 完整的原委留在这些注释里，不占用户的屏幕。
+ */
 const QUOTA_WHY_TEXT = {
-  'no-cc': '5 小时 / 7 天窗口是 <b>Claude Code 账户</b>的额度。当前没有 Claude Code 会话在跑，所以这里没有数字。',
-  'hooks-only': 'hooks 在正常上报（会话状态是活的），但 statusLine <b>一次都没到过</b>。'
-    + 'statusLine 是<b>终端状态栏</b>的东西：桌面版和 IDE 插件不画状态栏，也就不会调用它，'
-    + '这里不会出现数字。想看额度，在终端里跑 <code>claude</code>。',
-  nothing: 'Claude Code 只在会话<b>启动时</b>读取 statusLine，装 Clamicro 之前就开着的会话不会上报。下次新开会话时这里会出现数字。',
-  'no-field': '暂无额度数据 —— 已收到上报，但这次没有额度字段',
+  'no-cc': '5h / 7d 是 Claude Code 账户的额度，当前没有它的会话。',
+  // statusLine 是终端状态栏的东西，桌面版 / IDE 插件不画状态栏也就不会调它
+  'hooks-only': '这个界面不刷新额度，想看就在终端里跑 <code>claude</code>。',
+  // statusLine 只在会话启动时读一次，装 clamicro 之前开着的会话不会上报
+  nothing: '新开一个会话后这里会出现数字。',
+  'no-field': '这次上报没带额度字段。',
 };
 
 /** 空闲态里的用量两行。没数据就说清为什么没有，而不是留一片空白 */
@@ -1235,10 +1257,11 @@ function quotaBody() {
   if (unrefreshable) {
     const five = Math.round(quota.five_hour?.pct ?? 0);
     const seven = Math.round(quota.seven_day?.pct ?? 0);
+    // 一行说完：旧值 + 多旧 + 怎么才能看到新的。
+    // 旧值放前面是因为它才是你瞥一眼想知道的东西，理由跟在后面
     return `<div style="font-size:12.5px;color:var(--dim);line-height:1.6">
-      这个界面不调用 statusLine，额度停在 ${esc(ago(quota.at))}前，不会再刷新。<br>
-      想看当前额度，在终端里跑 <code>claude</code>。
-      <div style="margin-top:7px;opacity:.6">当时是 5h ${five}%　·　7d ${seven}%</div>
+      <span style="opacity:.6">5h ${five}%　·　7d ${seven}%</span>
+      —— ${esc(ago(quota.at))}前，此界面不刷新，想看当前值在终端跑 <code>claude</code>。
     </div>`;
   }
 

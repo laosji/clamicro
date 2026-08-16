@@ -21,7 +21,7 @@ function subStateForTool(toolName, toolInput) {
   if (toolName === 'Task' || toolName === 'Agent') return 'Delegating'
   if (toolName === 'Bash') {
     const cmd = toolInput?.command ?? ''
-    if (/\b(test|pytest|jest|vitest|go test|cargo test|npm t\b|npm run test)/.test(cmd)) {
+    if (/\b(test|pytest|jest|vitest|go test|cargo test|npm t|npm run test)\b/.test(cmd)) {
       return 'Running Test'
     }
     return 'Running Command'
