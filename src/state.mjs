@@ -171,7 +171,16 @@ export class Store extends EventEmitter {
   }
 
   restoreLimits(limits) {
-    if (limits?.five_hour) this.#accountLimits = limits
+    if (limits?.five_hour) {
+      this.#accountLimits = limits
+      /**
+       * statusLineSeenAt 没单独落盘，但「有额度数据」这件事本身就说明
+       * statusLine 来过。用 limits.at（最后一次带额度的上报时间）恢复，
+       * 否则重启后 statusLineSeenAt 是 null，前端 quotaWhy() 会误判成
+       * 「statusLine 一次都没来过」（hooks-only），把「旧数据」说成「不调用」。
+       */
+      if (limits.at) this.#statusLineSeenAt = limits.at
+    }
   }
   get nextEventId() {
     return this.#nextEventId

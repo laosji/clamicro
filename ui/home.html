@@ -1108,8 +1108,16 @@ function statusConsole(only) {
   } else {
     // 空闲：没有更多要处理的事，用量是此刻唯一值得看的信息
     right = `<span class="ctag">${mine.length} 个会话</span>`;
-    body = quotaBody();
-    meta = quotaMeta();
+    if (only) {
+      // 多后端分区：用量已经在 .ahead 的 .au 里按后端各说各的（agentUsage），
+      // 这里不能再画全局的 Claude Code 5h/7d —— 那会把 Claude Code 的额度
+      // 塞进 DSH 的分区里，一张卡同时出现「该后端不上报用量」和 5h/7d
+      body = '';
+      meta = '';
+    } else {
+      body = quotaBody();
+      meta = quotaMeta();
+    }
   }
 
   // 窗口到点时主动重画一次。不然要等下一个 30 秒轮询，
@@ -1172,7 +1180,19 @@ function elapsed(from) {
 function quotaWhy() {
   const anyWindow = sessions.some((s) => capOf(s).quota === 'window');
   if (sessions.length && !anyWindow) return 'no-cc';
-  if (!slSeen) return sessions.length ? 'hooks-only' : 'nothing';
+  /**
+   * `slSeen` 只要**历史上**收到过一次就永远非空。直接拿它判「statusLine
+   * 在不在报」，会把「12 小时前报过、之后再没动静」判成 `no-field`
+   * （在报，只是这次没带额度字段）——而那两件事该说的话完全相反：
+   * 前者要告诉你「这个界面不会再刷新它」，后者是「等下一次上报就有了」。
+   *
+   * 实测撞到过：服务重启后 slSeen 是 11.7 小时前的值，界面于是把一份
+   * 刷不出来的旧额度当成「马上就会更新」摆在最显眼处。
+   *
+   * 所以要的是「**最近**有没有在报」，判据跟额度自身的陈旧线同源（10 分钟）。
+   */
+  const slFresh = slSeen && Date.now() - slSeen <= 600000;
+  if (!slFresh) return sessions.length ? 'hooks-only' : 'nothing';
   return 'no-field';
 }
 
