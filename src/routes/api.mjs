@@ -94,6 +94,8 @@ export function apiRoutes(ctx) {
         // 每个后端最后一次上报的时间。用来区分「这个后端没有会话」和
         // 「这个后端已经不上报了」——两者在列表上长得一样，处置完全相反
         agentsSeen: store.agentsSeen(),
+        // 首页分区的排序依据：谁先连上谁在前。见 store.agentsFirstSeen 的注释
+        agentsFirstSeen: store.agentsFirstSeen(),
       }),
     },
     {

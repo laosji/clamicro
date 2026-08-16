@@ -148,6 +148,17 @@ export class Store extends EventEmitter {
     return Object.fromEntries(this.#agentSeen)
   }
 
+  /**
+   * 每个后端**第一次**上报的时间，给首页分区定顺序用。
+   *
+   * 单独一个方法而不是把 agentsSeen 的值改成 {first,last}：那样会让
+   * 缓存着旧页面的手机把对象当时间戳减，算出 NaN → 永远显示「没有上报」。
+   * 加字段是安全的，改字段的形状不是。
+   */
+  agentsFirstSeen() {
+    return Object.fromEntries(this.#agentFirstSeen)
+  }
+
   events(sinceId = 0, sessionId = null) {
     return this.#events.filter(
       (e) => e.id > sinceId && (!sessionId || e.session_id === sessionId),
@@ -231,6 +242,7 @@ export class Store extends EventEmitter {
     if (payload.agent) s.agent = normalizeAgent(payload.agent)
     // 记在会话之外：会话结束了后端仍然活着，两件事分开看才判得出「后端没动静了」
     this.#agentSeen.set(s.agent, Date.now())
+    if (!this.#agentFirstSeen.has(s.agent)) this.#agentFirstSeen.set(s.agent, Date.now())
 
     const label = s.session_name || (s.cwd ? s.cwd.split('/').filter(Boolean).pop() : id.slice(0, 8))
     let notify = null
@@ -397,6 +409,19 @@ export class Store extends EventEmitter {
   #statusLineSeenAt = null
   // agent -> 最后一次收到该后端任何上报的时间。见 agentsSeen()
   #agentSeen = new Map()
+  /**
+   * agent -> **第一次**上报的时间。用来给首页的模型分区定顺序。
+   *
+   * 不能拿 sessions 的顺序排：那是按 updated_at 倒序的，谁活跃谁就窜到
+   * 前面——卡片位置每来一个事件就换一次，人得重新找「我要看的那个模型
+   * 在哪」。位置本身是一种记忆，不该被活跃度改写。
+   *
+   * 也不用 #agentSeen（最后一次上报）：那同样跟着活跃度变。
+   *
+   * 服务重启后重新计时，所以顺序是「本次运行里谁先连上」。这没问题——
+   * 它仍然稳定，只是锚点是这次启动。
+   */
+  #agentFirstSeen = new Map()
 
   applyStatusLine(payload, opts = {}) {
     this.#statusLineSeenAt = Date.now()
