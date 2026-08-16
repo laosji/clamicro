@@ -1,6 +1,6 @@
 {
   "name": "clamicro-dsh-bridge",
-  "version": "2.15.1",
+  "version": "2.15.2",
   "description": "把 DeepSeek Harness 的会话状态桥接到 Clamicro 手机端",
   "keywords": [
     "dsh-plugin",
