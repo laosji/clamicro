@@ -31,7 +31,7 @@ function usage() {
 
   ${c.b('install')}      安装：接入 hooks、信任网络、启动服务、打印二维码
   ${c.b('uninstall')}    卸载：只摘掉自己加的东西，配置保留
-  ${c.b('qr')}           打印登录二维码（换手机 / 重新登录时用）
+  ${c.b('qr')}           打印登录二维码（换手机 / 重新登录时用）${c.dim('  ← 加 --no-cat 去掉那只猫')}
   ${c.b('status')}       服务、网络、待审批的当前状态
   ${c.b('config')}       摊开当前生效的完整配置${c.dim('  ← 每项标出来自默认值还是你改过')}
   ${c.b('start')}        前台启动服务（调试用；平时由 SessionStart hook 自动拉起）
@@ -225,7 +225,9 @@ switch (cmd) {
   }
 
   case 'qr':
-    runApp(['--qr'])
+    // --no-cat 透传：它是 --qr 的修饰词，不能进 ONE_SHOT_FLAGS——
+    // 进了那里，单独一个 `--no-cat` 就会被当成一次性命令，把常驻启动路径带偏。
+    runApp(['--qr', ...(rest.includes('--no-cat') ? ['--no-cat'] : [])])
     break
   case 'trust':
     runApp(['--trust'])

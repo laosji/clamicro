@@ -507,6 +507,22 @@ if (process.argv.includes('--qr')) {
     process.exit(1)
   }
   const loginUrl = `${config.baseUrl}/ui/pair/${pairId}`
+
+  /**
+   * 猫蹲在二维码上面。
+   *
+   * 不是随手贴的吉祥物：它在 DSH 网页里的**唯一职责**就是点一下把这个二维码
+   * 叫出来，这里是同一件事换了个界面。
+   *
+   * 画不出来（非 TTY、NO_COLOR、只有 16 色）就返回空串，一个字都不打——
+   * 它是点缀，绝不能挤走二维码本身，更不能在管道里吐一屏转义序列。
+   */
+  if (!process.argv.includes('--no-cat')) {
+    const { catBlock } = await import('./src/cat.mjs')
+    const cat = catBlock()
+    if (cat) process.stdout.write(`\n${cat}`)
+  }
+
   console.log(`\n  ${loginUrl}`)
   console.log(`  \x1b[2m一次性，60 秒内有效\x1b[0m\n`)
   const { spawnSync } = await import('node:child_process')
