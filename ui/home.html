@@ -842,8 +842,20 @@ function renderTopUsage() {
     && !sessions.some((s) => s.state === 'Running' || s.state === 'Waiting Approval')
     && !sessions.some((s) => s.state === 'Done' && Date.now() - s.updated_at < 60_000);
 
-  // 空闲时主控台里已经有完整的两行用量，这里再来一条就是重复
-  if (!quota || off || idle) { el.hidden = true; return; }
+  /**
+   * 三种情况不显示这条：
+   *
+   *   idle  —— 空闲时主控台里已经有完整的两行用量，这里再来一条就是重复
+   *   多后端 —— 状态条里每个后端各带自己的用量，比这条通栏更准确（这条
+   *            只可能显示 Claude Code 的窗口配额）。两个都画的话，同一份
+   *            数字在一屏里出现两次，而其中一条还归属不明
+   *   刷不出来的旧数据 —— 这个界面不调 statusLine，数字永远停在那儿。
+   *            把一个看起来确定、其实早已不成立的百分比摆在最顶上，
+   *            比不显示更容易误导。主控台那边会整段说清是怎么回事
+   */
+  const multi = agentKinds().size > 1;
+  const unrefreshable = quotaStale() && quotaWhy() === 'hooks-only';
+  if (!quota || off || idle || multi || unrefreshable) { el.hidden = true; return; }
   el.hidden = false;
 
   const row = (label, w, dim) => {
@@ -1145,6 +1157,32 @@ function quotaBody() {
   if (!quota) {
     return `<div style="font-size:12.5px;color:var(--dim);line-height:1.55">${QUOTA_WHY_TEXT[quotaWhy()]}</div>`;
   }
+
+  /**
+   * **刷不出来的旧数据不该当主角。**
+   *
+   * 这个界面（桌面版 / IDE 插件）不调用 statusLine，所以额度一旦过期就
+   * 永远停在那儿。而空闲态的整张卡片以前是两条粗量表 + 一行小字警告——
+   * 人先看到的是两个醒目的百分比，「这是 11 小时前的」得读完才知道。
+   * 一个看起来确定、其实早已不成立的数字，比没有数字更容易误导。
+   *
+   * 所以这一档反过来：先说清它是什么（一行），再把旧数字缩成一行细字
+   * 放在后面。想看还看得到，但不再是这一屏最抢眼的东西。
+   *
+   * 只对**刷不出来**的那种过期这么做。普通过期（有 statusLine、只是暂时
+   * 没有会话在报）保持原样——那种再开一个会话就刷新了，量表仍然有用。
+   */
+  const unrefreshable = quotaStale() && quotaWhy() === 'hooks-only';
+  if (unrefreshable) {
+    const five = Math.round(quota.five_hour?.pct ?? 0);
+    const seven = Math.round(quota.seven_day?.pct ?? 0);
+    return `<div style="font-size:12.5px;color:var(--dim);line-height:1.6">
+      这个界面不调用 statusLine，额度停在 ${esc(ago(quota.at))}前，不会再刷新。<br>
+      想看当前额度，在终端里跑 <code>claude</code>。
+      <div style="margin-top:7px;opacity:.6">当时是 5h ${five}%　·　7d ${seven}%</div>
+    </div>`;
+  }
+
   return `<div class="cusage${quotaStale() ? ' stale' : ''}">
     <div class="uline"><div class="um">${meter('5h', quota.five_hour?.pct)}</div>
       <span class="ur">${resetCell(quota.five_hour)}</span></div>
@@ -1162,6 +1200,11 @@ function quotaBody() {
 function quotaMeta() {
   if (!quota) return '';
   if (Date.now() - quota.at <= 600000) return '';
+  /**
+   * 「刷不出来」那一档由 quotaBody 自己整段说清了，这里再来一条就是
+   * 同一句话说两遍。一屏里重复的警告不会让人更重视，只会让人开始忽略警告。
+   */
+  if (quotaWhy() === 'hooks-only') return '';
   // 「怎么才能刷新」的答案跟 quotaBody 是同一套判据。原来这里无条件说
   // 「新开一个 Claude Code 会话才会刷新」——对一个根本不调 statusLine 的
   // 界面来说，那是一句让人白忙的话
