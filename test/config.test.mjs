@@ -10,10 +10,9 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, writeFileSync, rmSync, mkdirSync, unlinkSync, readFileSync, chmodSync } from 'node:fs'
+import { mkdtempSync, writeFileSync, rmSync, mkdirSync, unlinkSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { spawn } from 'node:child_process'
 
 const HOME = mkdtempSync(join(tmpdir(), 'clamicro-test-'))
 process.env.HOME = HOME
@@ -23,6 +22,9 @@ const CONFIG_FILE = join(HOME, '.claude', 'clamicro', 'config.json')
 const PID_FILE = join(HOME, '.claude', 'clamicro', 'tunnel.pid')
 
 const { loadConfig, saveConfig } = await import('../src/config.mjs')
+const { __setCommandOf, commandOf } = await import('../src/service-id.mjs')
+const realCommandOf = commandOf
+test.after(() => __setCommandOf(realCommandOf))
 
 const writeConfig = (o) => writeFileSync(CONFIG_FILE, JSON.stringify({ token: 't'.repeat(43), ...o }, null, 2))
 const silence = () => {
@@ -56,21 +58,18 @@ test('隧道地址以进程存活为准，不以配置为准', async (t) => {
   })
 
   await t.test('pid 指向存活的 cloudflared → 采用隧道地址', () => {
-    // 造一个真的叫 cloudflared 的进程：判据看的是命令行，不能拿别的冒充
-    const fake = join(HOME, 'cloudflared')
-    writeFileSync(fake, '#!/bin/sh\nsleep 30\n')
-    chmodSync(fake, 0o755)
-    const child = spawn(fake, [], { stdio: 'ignore' })
+    // 判据看的是命令行。用 mock 冒充「这个 pid 的命令行是 cloudflared」，
+    // 不 spawn 真进程、不依赖真 ps——ps 在极简容器/沙箱里可能不存在
+    __setCommandOf(() => '/usr/local/bin/cloudflared tunnel --url http://127.0.0.1:8765')
     try {
       writeConfig({ publicBaseUrl: DEAD })
-      writeFileSync(PID_FILE, String(child.pid))
+      writeFileSync(PID_FILE, String(process.pid))
       const un = silence()
       const c = loadConfig()
       un()
       assert.equal(c.tunnelUrl, DEAD)
       assert.equal(c.baseUrl, DEAD)
     } finally {
-      child.kill()
       try { unlinkSync(PID_FILE) } catch { /* 已经没了 */ }
     }
   })
@@ -87,15 +86,36 @@ test('隧道地址以进程存活为准，不以配置为准', async (t) => {
    * **第二种成因**，只看 kill(pid,0) 挡不住。
    */
   await t.test('pid 被别的进程占了（PID 复用）→ 不认，回落', () => {
-    writeConfig({ publicBaseUrl: DEAD })
-    // 当前测试进程是 node，不是 cloudflared —— 正是「号还在但换了主人」
-    writeFileSync(PID_FILE, String(process.pid))
-    const un = silence()
-    const c = loadConfig()
-    un()
-    assert.equal(c.tunnelUrl, null, '号被别人占着时不该采用隧道地址')
-    assert.ok(!c.baseUrl.includes('trycloudflare'))
-    unlinkSync(PID_FILE)
+    // 「号还在但换了主人」：命令行不是 cloudflared
+    __setCommandOf(() => 'node /opt/clamicro/server.mjs')
+    try {
+      writeConfig({ publicBaseUrl: DEAD })
+      writeFileSync(PID_FILE, String(process.pid))
+      const un = silence()
+      const c = loadConfig()
+      un()
+      assert.equal(c.tunnelUrl, null, '号被别人占着时不该采用隧道地址')
+      assert.ok(!c.baseUrl.includes('trycloudflare'))
+    } finally {
+      try { unlinkSync(PID_FILE) } catch { /* 已经没了 */ }
+    }
+  })
+
+  await t.test('ps 不可用（读不到命令行）→ 不认，回落', () => {
+    // 模拟 ps 失败：commandOf 返回空串。tunnelAlive 必须 fail-closed——拿不准
+    // 就不信任 PID，绝不能因为读不到命令行就反过来当成「是自己的隧道」
+    __setCommandOf(() => '')
+    try {
+      writeConfig({ publicBaseUrl: DEAD })
+      writeFileSync(PID_FILE, String(process.pid))
+      const un = silence()
+      const c = loadConfig()
+      un()
+      assert.equal(c.tunnelUrl, null, '读不到命令行时不该采用隧道地址')
+      assert.ok(!c.baseUrl.includes('trycloudflare'))
+    } finally {
+      try { unlinkSync(PID_FILE) } catch { /* 已经没了 */ }
+    }
   })
 
   await t.test('回落不修改盘上的 publicBaseUrl（读取不该有写副作用）', () => {

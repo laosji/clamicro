@@ -54,9 +54,33 @@ export async function isOurService(port, pids = []) {
  *
  * 这个项目里有两处踩这条：服务的 stop（见上），以及隧道的 tunnelAlive /
  * stopTunnel（见 config.mjs）。共用这一个读取口，判据各自定。
+ *
+ * ## 为什么用 `let` 导出
+ *
+ * 让测试能经 `__setCommandOf` 替换它，从而不依赖真实 `ps`（极简容器 / 沙箱里
+ * 没有 ps）。生产代码不调用 setter。
  */
-export function commandOf(pid) {
-  return spawnSync('ps', ['-o', 'command=', '-p', String(pid)], { encoding: 'utf8' }).stdout ?? ''
+export let commandOf = function commandOf(pid) {
+  const r = spawnSync('ps', ['-o', 'command=', '-p', String(pid)], { encoding: 'utf8' })
+  /**
+   * `r.error` 说明 spawn 本身失败（ps 不在 PATH、被沙箱禁了……），**不是**
+   * 「进程不存在」。这种要**说出口**——静默的代价是：无 ps 的环境里 tunnelAlive
+   * 永远判「不是 cloudflared」，隧道地址被静默丢弃，用户只看到「地址不见了」
+   * 而不知道为什么。那正是「故障被显示成正常」那一类坑。
+   *
+   * `r.status !== 0` 不告警：那通常只是「pid 已经没了」，是正常信号。
+   * 方向始终 fail-closed：拿不准就返回 ''，让调用方不信任这个 PID。
+   */
+  if (r.error) {
+    console.warn(`[service-id] ps 不可用（${r.error.code ?? r.error.message}），无法校验 PID ${pid} 的命令行，按「非目标进程」处理`)
+    return ''
+  }
+  return r.stdout ?? ''
+}
+
+/** 测试 seam：把 `commandOf` 换成 mock（生产代码不调用）。 */
+export function __setCommandOf(fn) {
+  commandOf = fn
 }
 
 /** 这个 PID 的命令行像不像我们的 server.mjs */
