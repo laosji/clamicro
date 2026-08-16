@@ -1,0 +1,27 @@
+{
+  "name": "dsh-pet-dolphin",
+  "version": "0.1.0",
+  "description": "Pixel-art DeepSeek dolphin pet floating over the DSH web GUI (shell.overlay slot).",
+  "type": "module",
+  "exports": {
+    ".": {
+      "default": "./lib/index.js"
+    },
+    "./client": {
+      "default": "./lib/client.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "client": {
+      "platform": "web",
+      "inject": [],
+      "immediately": true
+    }
+  },
+  "license": "MIT",
+  "files": [
+    "lib",
+    "README.md"
+  ]
+}
