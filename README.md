@@ -7,12 +7,12 @@ Watch Claude Code from your phone, and approve what it wants to run.
 Stop babysitting the terminal. When Claude Code needs permission, your Mac notifies you; open the page on your phone, read the command and a one-line summary, swipe to approve or reject — Claude Code continues immediately.
 
 <p align="center">
-  <img src="./docs/images/notch.png" width="620" alt="A notification capsule rendered at the Mac's notch: a green check badge, the project name, and the result line">
+  <img src="https://raw.githubusercontent.com/laosji/clamicro/main/docs/images/notch.png" width="620" alt="A notification capsule rendered at the Mac's notch: a green check badge, the project name, and the result line">
 </p>
 
 | Running | Something needs you | The decision |
 |:--:|:--:|:--:|
-| <img src="./docs/images/home-running.png" width="230" alt="Home screen while Claude Code is working: a breathing status console and a scrolling list of recent tool calls"> | <img src="./docs/images/home-pending.png" width="230" alt="Home screen with a pending approval at the top and a second one listed below"> | <img src="./docs/images/approval-detail.png" width="230" alt="Approval detail: risk level, impact, the command in full, and a drag-to-decide bar pinned to the bottom"> |
+| <img src="https://raw.githubusercontent.com/laosji/clamicro/main/docs/images/home-running.png" width="230" alt="Home screen while Claude Code is working: a breathing status console and a scrolling list of recent tool calls"> | <img src="https://raw.githubusercontent.com/laosji/clamicro/main/docs/images/home-pending.png" width="230" alt="Home screen with a pending approval at the top and a second one listed below"> | <img src="https://raw.githubusercontent.com/laosji/clamicro/main/docs/images/approval-detail.png" width="230" alt="Approval detail: risk level, impact, the command in full, and a drag-to-decide bar pinned to the bottom"> |
 
 *The screenshots are the real UI, not mockups. The notch capsule is a screen capture from a Mac.*
 

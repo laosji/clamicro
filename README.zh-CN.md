@@ -7,12 +7,12 @@
 跑任务时不用一直盯着终端——需要授权时 Mac 会弹通知，在手机上打开页面，看清命令和一句摘要，滑动批准或拒绝，Claude Code 随即继续。
 
 <p align="center">
-  <img src="./docs/images/notch.png" width="620" alt="Mac 刘海位置的通知胶囊：绿色对勾徽章、项目名、结果行">
+  <img src="https://raw.githubusercontent.com/laosji/clamicro/main/docs/images/notch.png" width="620" alt="Mac 刘海位置的通知胶囊：绿色对勾徽章、项目名、结果行">
 </p>
 
 | 运行中 | 有事等你 | 做决定 |
 |:--:|:--:|:--:|
-| <img src="./docs/images/home-running.png" width="230" alt="运行中的首页：呼吸的状态主控台，下面滚动着最近几次工具调用"> | <img src="./docs/images/home-pending.png" width="230" alt="有待审批时的首页：主控台在最上面，下面列着剩下的"> | <img src="./docs/images/approval-detail.png" width="230" alt="审批详情：风险等级、影响面、命令原文，决策条钉在底部"> |
+| <img src="https://raw.githubusercontent.com/laosji/clamicro/main/docs/images/home-running.png" width="230" alt="运行中的首页：呼吸的状态主控台，下面滚动着最近几次工具调用"> | <img src="https://raw.githubusercontent.com/laosji/clamicro/main/docs/images/home-pending.png" width="230" alt="有待审批时的首页：主控台在最上面，下面列着剩下的"> | <img src="https://raw.githubusercontent.com/laosji/clamicro/main/docs/images/approval-detail.png" width="230" alt="审批详情：风险等级、影响面、命令原文，决策条钉在底部"> |
 
 *截图是真实界面，不是效果图。刘海那张是 Mac 上实拍的屏幕截图。*
 
