@@ -133,7 +133,7 @@ noticing, quietly showing you a wrong number.
 ### Attaching DSH
 
 Needs a bridge plugin, **not shipped inside the clamicro npm package** — see
-[`plugins/`](./plugins/). There's also an optional pixel whale that sits on the DSH web
+[`plugins/`](./plugins/). There's also an optional pixel cat that sits on the DSH web
 UI; tapping it opens the phone dashboard (or the pairing QR if you haven't paired yet).
 
 ### Gestures

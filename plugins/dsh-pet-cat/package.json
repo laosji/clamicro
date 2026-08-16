@@ -1,7 +1,7 @@
 {
-  "name": "dsh-pet-dolphin",
+  "name": "dsh-pet-cat",
   "version": "0.2.0",
-  "description": "Pixel-art DeepSeek whale pet that swims around the DSH web GUI (shell.overlay slot).",
+  "description": "Pixel-art cat pet that hops around the DSH web GUI (shell.overlay slot).",
   "type": "module",
   "exports": {
     ".": {
