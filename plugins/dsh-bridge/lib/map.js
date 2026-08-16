@@ -174,6 +174,26 @@ export class Translator {
         if (text) this.#lastText.set(sessionId, text)
         // usage 只在这条事件上出现，且「适配器没报」时整个字段缺席。
         // 累计起来给 turn/end 用——手机是在两轮之间看的，一轮报一次正好
+        /**
+         * 只累加 inputTokens + outputTokens，**不含 cacheReadTokens**。
+         *
+         * 实测一次真实会话（299 条 assistant/message，条条带 usage）：
+         *   inputTokens  合计     378,333
+         *   outputTokens 合计     431,013
+         *   cacheReadTokens 合计  103,517,952   ← 比前两者大两个数量级
+         *   reasoningTokens 合计    318,125
+         *
+         * 把 cacheRead 加进去，数字会从 80 万跳到 1 亿——而缓存命中的计费
+         * 和新鲜 token 完全不是一个价，摆在手机上只会让人以为自己烧了天量。
+         * 所以这个数的含义是「**新鲜计费量**」，不是「处理过的总 token」。
+         *
+         * 也不是「上下文有多大」：inputTokens 是每一步重发的上下文，逐条
+         * 相加必然远大于任何时刻的上下文规模（同一会话最后一步只有 303）。
+         * 想要上下文规模得取最后一条，那是另一个指标，不该和这个混。
+         *
+         * reasoningTokens 大概率已经含在 outputTokens 里（318k vs 431k），
+         * 没有单独加——拿不准的时候宁可少算，也别把一个数重复计两次。
+         */
         const u = d?.usage
         if (u) {
           const prev = this.#tokens.get(sessionId) ?? 0

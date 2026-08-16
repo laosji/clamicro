@@ -186,13 +186,17 @@ test('事件翻译', async (t) => {
     // usage 只出现在 assistant/message 上，且适配器没报时整个字段缺席
     tr.map('s', { type: 'assistant/message', message: { content: [] }, usage: { inputTokens: 100, outputTokens: 50 } })
     tr.map('s', { type: 'assistant/message', message: { content: [] }, usage: { inputTokens: 10, outputTokens: 5 } })
-    assert.equal(tr.map('s', { type: 'turn/end', reason: { kind: 'completed' } }).payload.tokens, 165)
+    const p = tr.map('s', { type: 'turn/end', reason: { kind: 'completed' } }).payload
+    assert.equal(p.tokens, 165)
+    assert.equal(p.usage_reported, true)
 
-    // 一次 usage 都没有 → 整个字段不出现。报 0 会被显示成「用了 0 个 token」，
-    // 而真实情况是「适配器没报用量」，两者完全不同
+    // 一次 usage 都没有 → tokens 字段不出现，但 usage_reported 显式为 false。
+    // 「没报用量」和「0 token」靠这个布尔分开：字段缺席有两种读法，布尔只有一种
     const quiet = translator()
     quiet.map('q', { type: 'assistant/message', message: { content: [] } })
-    assert.equal('tokens' in quiet.map('q', { type: 'turn/end', reason: { kind: 'completed' } }).payload, false)
+    const q = quiet.map('q', { type: 'turn/end', reason: { kind: 'completed' } }).payload
+    assert.equal('tokens' in q, false)
+    assert.equal(q.usage_reported, false)
   })
 
   await t.test('token 不换算成金额 —— DSH 的 TokenUsage 里根本没有 cost', () => {
