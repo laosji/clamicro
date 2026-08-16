@@ -323,6 +323,15 @@
   /* direction:rtl 会把行尾的标点甩到前面，用 bdi 隔离方向 */
   .ctick .tr>bdi{direction:ltr}
   .ctick .tr.now{color:var(--run)}
+  /* 新的一条滑进来。只给最上面那条，且只在它真的变了的时候——
+     整列都动会让人以为四条全是新的，而「在动」在这个界面里是有含义的 */
+  .ctick .tr.fresh{animation:tick-in .34s cubic-bezier(.2,.9,.3,1) both}
+  @keyframes tick-in{
+    from{opacity:0; transform:translateY(-7px)}
+    to{opacity:1; transform:translateY(0)}
+  }
+  /* 关掉动效偏好时不动 —— 它是提示，不是必需信息，信息本身在文字里 */
+  @media (prefers-reduced-motion: reduce){ .ctick .tr.fresh{animation:none} }
 
   /* 非空闲时的用量条：安静、贴着 header、不抢注意力 */
   /* ── 终端路径行 ── */
@@ -736,6 +745,12 @@
 <script>
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+/* 各后端官方 logo（内联 SVG）。跟在名称前面，用各自品牌色，尺寸对齐文字 */
+const AGENT_LOGOS = {
+  'claude-code': '<svg viewBox="0 0 1200 1200" width="15" height="15" aria-hidden="true" style="vertical-align:-2px;margin-right:5px"><path fill="#D97757" d="m19.6 66.5 19.7-11 .3-1-.3-.5h-1l-3.3-.2-11.2-.3L14 53l-9.5-.5-2.4-.5L0 49l.2-1.5 2-1.3 2.9.2 6.3.5 9.5.6 6.9.4L38 49.1h1.6l.2-.7-.5-.4-.4-.4L29 41l-10.6-7-5.6-4.1-3-2-1.5-2-.6-4.2 2.7-3 3.7.3.9.2 3.7 2.9 8 6.1L37 36l1.5 1.2.6-.4.1-.3-.7-1.1L33 25l-6-10.4-2.7-4.3-.7-2.6c-.3-1-.4-2-.4-3l3-4.2L28 0l4.2.6L33.8 2l2.6 6 4.1 9.3L47 29.9l2 3.8 1 3.4.3 1h.7v-.5l.5-7.2 1-8.7 1-11.2.3-3.2 1.6-3.8 3-2L61 2.6l2 2.9-.3 1.8-1.1 7.7L59 27.1l-1.5 8.2h.9l1-1.1 4.1-5.4 6.9-8.6 3-3.5L77 13l2.3-1.8h4.3l3.1 4.7-1.4 4.9-4.4 5.6-3.7 4.7-5.3 7.1-3.2 5.7.3.4h.7l12-2.6 6.4-1.1 7.6-1.3 3.5 1.6.4 1.6-1.4 3.4-8.2 2-9.6 2-14.3 3.3-.2.1.2.3 6.4.6 2.8.2h6.8l12.6 1 3.3 2 1.9 2.7-.3 2-5.1 2.6-6.8-1.6-16-3.8-5.4-1.3h-.8v.4l4.6 4.5 8.3 7.5L89 80.1l.5 2.4-1.3 2-1.4-.2-9.2-7-3.6-3-8-6.8h-.5v.7l1.8 2.7 9.8 14.7.5 4.5-.7 1.4-2.6 1-2.7-.6-5.8-8-6-9-4.7-8.2-.5.4-2.9 30.2-1.3 1.5-3 1.2-2.5-2-1.4-3 1.4-6.2 1.6-8 1.3-6.4 1.2-7.9.7-2.6v-.2H49L43 72l-9 12.3-7.2 7.6-1.7.7-3-1.5.3-2.8L24 86l10-12.8 6-7.9 4-4.6-.1-.5h-.3L17.2 77.4l-4.7.6-2-2 .2-3 1-1 8-5.5Z"/></svg>',
+  'dsh': '<svg viewBox="0 0 50 50" width="16" height="16" aria-hidden="true" style="vertical-align:-3px;margin-right:5px"><path fill="#4D6BFE" d="M48.8354 10.0479C48.3232 9.79199 48.1025 10.2798 47.8032 10.5278C47.7007 10.6079 47.6143 10.7119 47.5273 10.8076C46.7793 11.624 45.9048 12.1597 44.7622 12.0957C43.0923 12 41.666 12.5356 40.4058 13.8398C40.1377 12.2319 39.2476 11.272 37.8926 10.6558C37.1836 10.3359 36.4668 10.0156 35.9702 9.31982C35.6235 8.82373 35.5293 8.27197 35.356 7.72754C35.2456 7.3999 35.1353 7.06396 34.7651 7.00781C34.3633 6.94385 34.2056 7.2876 34.0479 7.57568C33.418 8.75195 33.1733 10.0479 33.1973 11.3599C33.2524 14.312 34.4736 16.6641 36.8999 18.3359C37.1758 18.5278 37.2466 18.7197 37.1597 19C36.9946 19.5757 36.7974 20.1357 36.624 20.7119C36.5137 21.0801 36.3486 21.1597 35.9624 21C34.6309 20.4321 33.481 19.5918 32.4644 18.5757C30.7393 16.8721 29.1792 14.9917 27.2334 13.52C26.7764 13.1758 26.3193 12.856 25.8467 12.5518C23.8618 10.584 26.1069 8.96777 26.627 8.77588C27.1704 8.57568 26.8159 7.8877 25.0591 7.896C23.3022 7.90381 21.6953 8.50391 19.647 9.30371C19.3477 9.42383 19.0322 9.51172 18.7095 9.58398C16.8501 9.22363 14.9199 9.14355 12.9033 9.37598C9.10596 9.80762 6.07275 11.6396 3.84326 14.7681C1.16455 18.5278 0.53418 22.7998 1.30664 27.2559C2.11768 31.9521 4.46582 35.8398 8.07373 38.8799C11.8159 42.0322 16.1255 43.5762 21.041 43.2803C24.0269 43.104 27.3516 42.6963 31.1016 39.4561C32.0469 39.936 33.0396 40.1279 34.686 40.272C35.9546 40.3921 37.1758 40.208 38.1211 40.0078C39.6021 39.688 39.4995 38.2881 38.9639 38.0322C34.623 35.9678 35.5762 36.8081 34.71 36.1279C36.9155 33.4639 40.2402 30.6958 41.54 21.728C41.6426 21.0161 41.5557 20.5679 41.54 19.9917C41.5322 19.6396 41.6108 19.5039 42.0049 19.4639C43.0923 19.3359 44.1479 19.0317 45.1167 18.4878C47.9292 16.9199 49.064 14.3438 49.3315 11.2559C49.3711 10.7837 49.3237 10.2959 48.8354 10.0479Z"/></svg>',
+};
+function agentLogo(agent) { return AGENT_LOGOS[agent] || ''; }
 
 let tab = sessionStorage.getItem('ccm-tab') || 'home';
 let sessions = [], pending = [], cfg = null, quota = null, inbox = {}, slSeen = null, recentlyExpired = [], recentTools = [], doneTimer = null;
@@ -786,6 +801,9 @@ function meter(label, pct) {
  * 只取当前会话的、只留最近 4 条、去掉连续重复的。空的时候整块不出现，
  * 不留一条空轨道占位。
  */
+/** sid -> 上一次渲染时最新的那条。用来判断「这次是不是真的有新东西」 */
+const tickerTop = new Map();
+
 function activityTicker(sid) {
   const rows = [];
   for (let i = recentTools.length - 1; i >= 0 && rows.length < 4; i--) {
@@ -807,8 +825,25 @@ function activityTicker(sid) {
    * 竖排让卡片自己长高。多出来的那点高度远比"省下来但读不到"划算，
    * 最多 4 条本来就有上限，不会长到失控。
    */
+  /**
+   * **有新的一条进来时才动**，不做持续滚动。
+   *
+   * 「感觉是静止的」这个观感是真的：两次工具调用之间它确实不动。但解法
+   * 不是让它一直滚——那就退回跑马灯那三个问题（读的时机被动画决定、
+   * 长路径被截断、手机上不熟悉的横向手势）。
+   *
+   * 这个项目对动效的一贯立场是「**有东西在动本身应该是个信号，不是装饰**」
+   * （原来那句注释就写在滚动判定旁边）。所以只在最新一条**变了**的时候，
+   * 给它一个入场动画：动一下 = 刚才真的跑了一个新工具。
+   *
+   * 只认最上面那条：整列都动会让人以为四条全是新的。
+   */
+  const key = sid || '*';
+  const fresh = tickerTop.get(key) !== rows[0];
+  tickerTop.set(key, rows[0]);
+
   return `<div class="ctick">${rows
-    .map((t, i) => `<div class="tr${i === 0 ? ' now' : ''}"><bdi>${esc(t)}</bdi></div>`)
+    .map((t, i) => `<div class="tr${i === 0 ? ' now' : ''}${i === 0 && fresh ? ' fresh' : ''}"><bdi>${esc(t)}</bdi></div>`)
     .join('')}</div>`;
 }
 
@@ -1502,7 +1537,7 @@ function renderHome() {
       const use = agentUsage(k, cap, mine);
       h += `<div class="agroup">
         <div class="ahead">
-          <span class="an">${esc(cap.label || k)}</span>
+          <span class="an">${agentLogo(k)}${esc(cap.label || k)}</span>
           ${use ? `<span class="au${use.stale ? ' stale' : ''}">${use.html}</span>` : ''}
         </div>
         ${statusConsole(k)}
@@ -1549,7 +1584,7 @@ function renderHome() {
         </div>
         <div class="head">${esc(a.headline || a.summary)}</div>
         ${a.mismatch ? `<div class="mismatch">⚠️ 这句描述与命令不符，点进去看原文</div>` : ''}
-        <div class="chips">${mixed && a.agent_label ? `<span class="chip agent">${esc(a.agent_label)}</span>` : ''}${(a.impact||[]).map((i) => `<span class="chip ${i.tone==='danger'?'danger':i.tone==='calm'?'':'warn'}">${esc(i.label)}</span>`).join('')}
+        <div class="chips">${mixed && a.agent_label ? `<span class="chip agent">${agentLogo(a.agent)}${esc(a.agent_label)}</span>` : ''}${(a.impact||[]).map((i) => `<span class="chip ${i.tone==='danger'?'danger':i.tone==='calm'?'':'warn'}">${esc(i.label)}</span>`).join('')}
           <a class="chip" href="/ui/a/${a.id}" style="color:var(--run)">${a.choices && a.choices.length ? '去回答 ›' : a.risk.level === 'high' ? '需详情页批准 ›' : '详情 ›'}</a>
         </div>
         <div class="dl" data-exp="${a.expires_at}" data-born="${a.created_at}" data-auto="${a.auto_decision}">
@@ -1698,7 +1733,7 @@ function renderSessions() {
         ${kinds.map((k) => {
           const n = sessions.filter((s) => (s.agent || 'claude-code') === k).length;
           const label = cfg?.agents?.[k]?.label || k;
-          return `<button data-af="${esc(k)}" class="${agentFilter === k ? 'on' : ''}">${esc(label)} ${n}</button>`;
+          return `<button data-af="${esc(k)}" class="${agentFilter === k ? 'on' : ''}">${agentLogo(k)}${esc(label)} ${n}</button>`;
         }).join('')}
       </div>`
     : '';
@@ -1716,7 +1751,7 @@ function renderSessions() {
       <div class="path">${esc(s.cwd || '')}</div>
       ${c ? `<div class="meters">${meter('ctx', c.used_pct)}</div>` : ''}
       <div class="chips">
-        ${mixed && cap.label ? `<span class="chip agent">${esc(cap.label)}</span>` : ''}
+        ${mixed && cap.label ? `<span class="chip agent">${agentLogo(s.agent)}${esc(cap.label)}</span>` : ''}
         ${s.model ? `<span class="chip">${esc(s.model)}</span>` : ''}
         ${s.cost_usd != null ? `<span class="chip">$${s.cost_usd.toFixed(4)}</span>` : ''}
         ${cap.quota === 'tokens' && s.tokens ? `<span class="chip">${fmtTokens(s.tokens)} tok</span>` : ''}
