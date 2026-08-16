@@ -106,6 +106,9 @@ export class Store extends EventEmitter {
         // 累计 token。只有按 API key 计费、没有窗口配额的后端会有（quota:'tokens'）。
         // 不换算成金额：那要一张会悄悄过期的价目表，而一个不准的金额比没有更糟
         tokens: null,
+        // 后端有没有上报过用量。null=还没轮完不知道；true=上报过；false=报过
+        // 但适配器不报用量。用它把「没报用量」和「0 token」区分开（见 agentUsage）。
+        usage_reported: null,
         model: null,
       }
       this.#sessions.set(id, s)
@@ -287,6 +290,7 @@ export class Store extends EventEmitter {
         this.#touch(s, {
           state: STATE.DONE, sub_state: null, last_message: msg, turn_started_at: null,
           ...(Number.isFinite(tokens) && tokens > 0 ? { tokens } : {}),
+          ...(typeof payload.usage_reported === 'boolean' ? { usage_reported: payload.usage_reported } : {}),
         })
         this.#log(id, 'stop', msg)
         if (notifyConfig.onStop && elapsed >= notifyConfig.minTurnMs) {

@@ -518,28 +518,16 @@
      不该跟右上角那个状态胶囊抢注意力 */
   .chip.agent{background:transparent; box-shadow:inset 0 0 0 1px var(--line)}
 
-  /* 后端状态条：每个后端一行。只在多后端时出现，见 agentStatusStrip */
-  .astrip{margin-top:12px; border:1px solid var(--line); border-radius:14px; overflow:hidden}
-  .arow{padding:11px 14px; font-size:13px; border-bottom:1px solid var(--line); position:relative}
-  .arow:last-child{border-bottom:none}
-  /* 名称行和用量行左边缘对齐：小圆点用绝对定位，不占流内宽度，
-     否则用量那行要么和名称错开、要么得手工补一个等宽的缩进 */
-  .arow::before{content:''; position:absolute; left:14px; top:16px;
-    width:7px; height:7px; border-radius:50%; background:var(--dim)}
-  .arow.run::before{background:var(--run)}
-  .arow.wait::before{background:var(--warn)}
-  .arow.stale::before{background:var(--no)}
-  .arow .aline{display:flex; align-items:center; gap:10px; padding-left:17px}
-  .arow .an{font-weight:500; flex:0 0 auto}
-  .arow .as{color:var(--dim); margin-left:auto; text-align:right}
-  /* 用量是补充信息：更小、更淡，且**不与状态争同一行** */
-  .arow .au{padding-left:17px; margin-top:3px; font-size:11.5px; color:var(--dim);
+  /* 按模型分区：标题 + 它自己的状态卡。只在多后端时出现，见 renderHome */
+  .agroup{margin-top:16px}
+  .agroup:first-of-type{margin-top:12px}
+  .ahead{display:flex; align-items:baseline; gap:10px; margin:0 4px 7px}
+  .ahead .an{font-weight:600; font-size:13.5px}
+  /* 用量跟在模型名后面：它是这个模型的属性，不该跑到别处去 */
+  .ahead .au{margin-left:auto; font-size:11.5px; color:var(--dim);
     font-variant-numeric:tabular-nums}
   /* 过期的数字要看得出来是过期的 —— 人先看数字，光在旁边写小字不够 */
-  .arow .au.stale{opacity:.55; text-decoration:line-through dotted}
-  /* 没动静是要看见的：它和「空闲」在语义上完全不同，不能都是灰的 */
-  .arow.stale .as{color:var(--no)}
-  .arow.wait .as{color:var(--warn)}
+  .ahead .au.stale{opacity:.55; text-decoration:line-through dotted}
 
   /* 会话列表的后端筛选片。触摸目标 40px 起，手机上再小就开始误点 */
   .afilter{display:flex; gap:8px; flex-wrap:wrap; margin-bottom:2px}
@@ -932,10 +920,18 @@ function altAddressHtml() {
     .join('　')}</div>`;
 }
 
-function statusConsole() {
+/**
+ * 主控台。`only` 传后端 key 时只看那个后端的会话（按模型分区时用）。
+ *
+ * **待审批不受 only 影响**：它有倒计时，被分进某个区块就意味着你得先
+ * 找到那个区块才看得见——漏看一条等于一次静默的自动决策。所以审批态
+ * 始终读全局 pending，跟这张卡挂在谁名下无关。
+ */
+function statusConsole(only) {
   const off = isDisconnected();
-  const busy = sessions.filter((s) => s.state === 'Running' || s.state === 'Waiting Approval');
-  const err = sessions.find((s) => s.state === 'Error');
+  const mine = only ? sessions.filter((s) => (s.agent || 'claude-code') === only) : sessions;
+  const busy = mine.filter((s) => s.state === 'Running' || s.state === 'Waiting Approval');
+  const err = mine.find((s) => s.state === 'Error');
   /**
    * 「已完成」是**一闪而过的状态**，不是一个可以停住的状态。
    *
@@ -948,7 +944,7 @@ function statusConsole() {
    * 过了就该让位给用量。
    */
   const DONE_WINDOW = 60_000;
-  const done = sessions.find((s) =>
+  const done = mine.find((s) =>
     s.state === 'Done'
     && Date.now() - s.updated_at < DONE_WINDOW
     // 手动关掉的那一条不再顶着。键里带 updated_at：**同一个会话下一次跑完
@@ -1074,7 +1070,7 @@ function statusConsole() {
       <div class="ct"><b>${esc(dirOf(done))}</b> 已完成${done.last_message ? ' · ' + esc(done.last_message.slice(0, 40)) : ''}</div></div>`;
   } else {
     // 空闲：没有更多要处理的事，用量是此刻唯一值得看的信息
-    right = `<span class="ctag">${sessions.length} 个会话</span>`;
+    right = `<span class="ctag">${mine.length} 个会话</span>`;
     body = quotaBody();
     meta = quotaMeta();
   }
@@ -1483,10 +1479,38 @@ function renderHome() {
 
   // 主控台先于列表：它是「现在什么情况」的答案，列表是「都有哪些」的明细。
   // 明细排在结论前面，人得先读完才知道该不该关心
-  h += statusConsole();
-  // 后端状态排在主控台**之后**：主控台答的是「现在最要紧的事是什么」，
-  // 状态条答的是「都有谁在跑」。结论在前，清单在后
-  h += agentStatusStrip();
+  /**
+   * 多后端时**按模型分区**：每个模型一个标题，下面是它自己的状态卡。
+   *
+   * ## 为什么比原来的「一张主控台 + 一条状态条」好
+   *
+   * 原来信息被劈成两半：主控台只显示**最忙的那一个**会话（跨后端挑出来的），
+   * 状态条只显示每个后端的**计数**。想知道「DSH 现在在干什么」得在两处拼，
+   * 而且主控台那张卡到底属于谁，脸上并不写。
+   *
+   * 分区之后每个模型的状态是自足的：名字下面就是它的进度、履历、用量。
+   *
+   * 待审批为什么不进分区，见 statusConsole 里的注释。
+   *
+   * 单后端时不分区——那时标题只会把顶栏已经说过的话再说一遍。
+   */
+  const kinds = [...agentKinds()];
+  if (kinds.length > 1) {
+    for (const k of kinds) {
+      const cap = cfg?.agents?.[k] ?? {};
+      const mine = sessions.filter((s) => (s.agent || 'claude-code') === k);
+      const use = agentUsage(k, cap, mine);
+      h += `<div class="agroup">
+        <div class="ahead">
+          <span class="an">${esc(cap.label || k)}</span>
+          ${use ? `<span class="au${use.stale ? ' stale' : ''}">${use.html}</span>` : ''}
+        </div>
+        ${statusConsole(k)}
+      </div>`;
+    }
+  } else {
+    h += statusConsole();
+  }
 
   /**
    * 列表必须列全。
@@ -1602,8 +1626,20 @@ function agentUsage(kind, cap, mine) {
   if (cap.quota === 'tokens') {
     // 累计 token。**不换算成金额**——那要一张会悄悄过期的价目表
     const total = mine.reduce((n, s) => n + (Number(s.tokens) || 0), 0);
-    if (!total) return null; // 没上报过就不显示，而不是显示 0（那是两回事）
-    return { html: `${esc(fmtTokens(total))} tok`, stale: false };
+    if (total) return { html: `${esc(fmtTokens(total))} tok`, stale: false };
+
+    /**
+     * 没有数字时，「还没轮完」和「这个适配器压根不报用量」要分开说。
+     *
+     * 都显示成空白的话，用户会一直等一个永远不会出现的数字——这跟额度那边
+     * 「反复新开会话却等不到 statusLine」是同一个坑。usage_reported 是
+     * 桥接侧在 turn/end 显式给的布尔：字段缺席有两种读法，布尔只有一种。
+     */
+    const done = mine.filter((s) => s.usage_reported !== null);
+    if (done.length && done.every((s) => s.usage_reported === false)) {
+      return { html: '该后端不上报用量', stale: false };
+    }
+    return null; // 还没跑完一轮，不知道 —— 那就先什么都不说
   }
 
   if (cap.quota !== 'window') return null;
@@ -1628,63 +1664,6 @@ function agentUsage(kind, cap, mine) {
   return { html: `5h ${five}%　·　7d ${seven}%`, stale: quotaStale() };
 }
 
-/**
- * 后端状态条：每个后端一行，说清它**现在是不是还活着**。
- *
- * ## 为什么必须有
- *
- * 「这个后端没有会话」和「这个后端已经不上报了」在列表上长得一模一样——
- * 都是空的。可处置完全相反：前者什么都不用做；后者说明桥接插件挂了、
- * hooks 掉了、或者 DSH 进程没了，而你正靠它替你盯着操作。
- *
- * 这是这个项目反复踩的同一类坑：**故障被显示成「正常但没有内容」**。
- *
- * ## 为什么不是切换器
- *
- * 它是**状态展示**，不是模式选择。掏出手机是因为有东西在等你，那一刻
- * 要的是「谁在等我」，不是「先选个后端再看」。两个后端各有一条待审批时，
- * 切换器会让你必须看两次才知道有两条——而审批有倒计时，漏看等于一次
- * 静默的自动决策。
- *
- * 单后端时整条不渲染：那时它只是把标题栏已经说过的话再说一遍。
- */
-function agentStatusStrip() {
-  const kinds = [...agentKinds()];
-  if (kinds.length < 2) return '';
-
-  const now = Date.now();
-  return `<div class="astrip">${kinds.map((k) => {
-    const cap = cfg?.agents?.[k] ?? {};
-    const mine = sessions.filter((s) => (s.agent || 'claude-code') === k);
-    const busy = mine.filter((s) => s.state === 'Running' || s.state === 'Waiting Approval').length;
-    const waiting = pending.filter((a) => {
-      const s = sessions.find((x) => x.session_id === a.session_id);
-      return (s?.agent || 'claude-code') === k;
-    }).length;
-    const seen = (agentsSeen || {})[k];
-    const stale = !seen || now - seen > AGENT_STALE_MS;
-
-    // 等人批 > 在跑 > 没动静 > 空闲。排在前面的更需要你现在就知道
-    let tone = 'idle', text;
-    if (waiting) { tone = 'wait'; text = `${waiting} 条待审批`; }
-    else if (busy) { tone = 'run'; text = `${busy} 个会话在跑`; }
-    else if (stale) {
-      tone = 'stale';
-      // 说「多久没动静」而不是「离线」：我们只知道没收到上报，
-      // 不知道它是死了还是单纯没事干。说得比知道的多就是在猜
-      text = seen ? `${ago(seen)}没有上报` : '还没有过上报';
-    } else text = mine.length ? `${mine.length} 个会话 · 空闲` : '空闲';
-
-    const use = agentUsage(k, cap, mine);
-    return `<div class="arow ${tone}">
-      <div class="aline">
-        <span class="an">${esc(cap.label || k)}</span>
-        <span class="as">${esc(text)}</span>
-      </div>
-      ${use ? `<div class="au${use.stale ? ' stale' : ''}">${use.html}</div>` : ''}
-    </div>`;
-  }).join('')}</div>`;
-}
 
 function renderSessions() {
   if (!sessions.length) {

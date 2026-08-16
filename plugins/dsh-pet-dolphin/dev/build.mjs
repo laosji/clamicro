@@ -8,8 +8,9 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const whale = JSON.parse(readFileSync(new URL("./whale-path.json", import.meta.url), "utf8"));
-const WHALE_PATH = whale.d;
-const SIZE = 64; // display size in px (viewBox is 50x50)
+const WHALE_PATH = whale.body; // 只用主体轮廓（内部镂空子路径会透背景，去掉）
+const EYE = whale.eye;
+const SIZE = 72; // display size in px (viewBox is 50x50)
 
 const client = `window.__ModuleLoader__.load({
   id: "dsh-pet-dolphin",
@@ -33,8 +34,8 @@ const client = `window.__ModuleLoader__.load({
 
     var WHALE_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 50 50" ' +
       'width="' + SIZE + '" height="' + SIZE + '" aria-hidden="true">' +
-      '<path d="' + WHALE_PATH + '" fill="#4D6BFE" fill-rule="nonzero"/>' +
-      '<circle cx="26.6" cy="24.6" r="0.85" fill="#0E1533"/>' +
+      '<path d="' + WHALE_PATH + '" fill="#4D6BFE"/>' +
+      '<circle cx="${EYE.cx}" cy="${EYE.cy}" r="${EYE.r}" fill="${EYE.fill}"/>' +
       '</svg>';
 
     /* ── one-time: inject styles ────────────────────────────────────────── */

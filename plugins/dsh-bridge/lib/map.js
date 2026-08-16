@@ -224,14 +224,19 @@ export class Translator {
             payload: { error: err?.message ?? err?.code ?? '任务因错误终止' },
           }
         }
+        const seen = this.#tokens.has(sessionId)
         const tokens = this.#tokens.get(sessionId)
         return {
           event: 'stop',
           payload: {
             last_assistant_message: text,
-            // 拿不到就不报这个字段。报 0 会被显示成「用了 0 个 token」，
-            // 而真实情况是「适配器没报用量」——两者完全不同
-            ...(tokens ? { tokens } : {}),
+            /**
+             * 显式区分「上报过用量（哪怕是 0）」和「适配器压根没报」。
+             * tokens 只在有正数时才给；「没报」靠 usage_reported 这个布尔说出口，
+             * 而不是靠「没有 tokens 字段」——字段缺席有两种读法，布尔只有一种。
+             */
+            usage_reported: seen,
+            ...(tokens && tokens > 0 ? { tokens } : {}),
           },
         }
       }
