@@ -1,5 +1,6 @@
 import { readBody, json, text } from '../http/respond.mjs'
 import { matchKey } from '../approvals.mjs'
+import { normalizeAgent } from '../agents.mjs'
 import { requireDeps } from './deps.mjs'
 
 /**
@@ -55,6 +56,9 @@ function renderStatusLine(d, approvals) {
   ].join('  ·  ')
 }
 
+// 对账漂移只喊一次：它一旦发生就是每次工具调用都发生，每条都喊等于没喊
+let warnedMatchDrift = false
+
 export function hookRoutes(ctx) {
   requireDeps('hookRoutes', ctx, ['config', 'store', 'approvals', 'control', 'inbox', 'history', 'notify', 'notifyApproval'])
   const { config, store, approvals, control, inbox, history, notify, notifyApproval } = ctx
@@ -73,6 +77,20 @@ export function hookRoutes(ctx) {
 
       const ap = approvals.create({ ...payload, cwd: payload.cwd }, config.approval)
       const s = store.session(payload.session_id)
+
+      /**
+       * 审批这条路**也要认 agent**。
+       *
+       * 这里不走 applyHook，所以 agent 不会被顺带写进去。而 store.session()
+       * 对没见过的 id 是**新建**——缺省 agent 是 claude-code。于是一个 DSH
+       * 会话如果审批先到、session-start 后到（或者压根没到），手机上就会
+       * 按 Claude Code 的能力渲染：暂停和取消按钮都在，点了没有任何反应。
+       *
+       * 「按钮在那儿点了没反应」正是能力矩阵要消灭的东西，不能在这条
+       * 最要紧的路径上把它放回来。
+       */
+      if (payload.agent) s.agent = normalizeAgent(payload.agent)
+
       store.markWaitingApproval(payload.session_id, ap)
 
       // Claude Code 侧断开（会话被 Ctrl-C / 终端自己批了）→ 别让 waiter 悬着
@@ -96,6 +114,22 @@ export function hookRoutes(ctx) {
       const outcome = await approvals.wait(ap.id)
       responded = true
       store.clearWaitingApproval(payload.session_id)
+
+      /**
+       * 响应形状按上报方分。
+       *
+       * `hookSpecificOutput` 是 Claude Code 的 hook 协议，别的后端读不懂；
+       * 反过来也不能给 Claude Code 加一个裸的顶层 `decision`——那个键在
+       * Claude Code 的 hook 输出里另有含义（Stop 用它做 block），加上去
+       * 是在往一个已经定义好的协议里塞歧义。
+       *
+       * 所以：谁来的，就说谁的话。中性形状 { decision, reason } 由调用方
+       * 自己映射（DSH 侧映射成 allowed-once / rejected，见 plugins/dsh-bridge）。
+       */
+      if (payload.agent && payload.agent !== 'claude-code') {
+        json(res, 200, { decision: outcome.decision, reason: outcome.reason ?? null })
+        return true
+      }
 
       json(res, 200, {
         hookSpecificOutput: {
@@ -122,6 +156,36 @@ export function hookRoutes(ctx) {
       if (event === 'pre-tool-use' || event === 'post-tool-use') {
         const gone = approvals.supersede(matchKey(payload.session_id, payload.tool_name, payload.tool_input))
         if (gone) console.log(`[approval] ${gone.id.slice(0, 8)} 已在别处放行，销掉挂起记录`)
+        /**
+         * 对不上账要**说出来**。
+         *
+         * match_key 是 (session_id, tool_name, tool_input) 的逐字哈希。它成立的
+         * 前提是 PermissionRequest 和 PreToolUse 收到的 tool_input **完全相同**
+         * ——今天确实如此（见 approvals.supersede 的注释，那里逐字段比对过），
+         * 但这是 Claude Code 的实现细节，不是它承诺的契约。哪天它在权限阶段
+         * 多注入一个字段，哈希就再也对不上。
+         *
+         * 那时的表现是：同一次工具调用**已经在跑了**，而手机上那条还挂着
+         * 「待审批」，一直挂到超时被自动拒绝——一个已经执行完的操作，
+         * 界面告诉你「已拒绝」。没有任何报错，只有一条看不懂的记录。
+         *
+         * 不去放宽对账键：放宽意味着可能配错，而 supersede 的结果是 **allow**
+         * ——配错等于替另一条审批自动放行，那比幽灵条目危险得多。
+         * 所以只做检测：同会话同工具还挂着待审批、却没对上号，就是漂移的信号。
+         */
+        if (!gone && payload.session_id) {
+          const orphan = approvals.pending(payload.session_id)
+            .find((a) => a.tool_name === payload.tool_name)
+          if (orphan && !warnedMatchDrift) {
+            warnedMatchDrift = true
+            console.warn(
+              `[approval] ${orphan.id.slice(0, 8)}（${payload.tool_name}）已经开始执行，但对账键没匹配上。\n` +
+              `           多半是 Claude Code 改了权限阶段的 tool_input 字段，match_key 逐字哈希因此失配。\n` +
+              `           后果：这条会一直显示「待审批」直到超时，而操作其实已经跑了。\n` +
+              `           见 src/approvals.mjs 的 supersede 注释。`,
+            )
+          }
+        }
       }
 
       // Pause/Cancel 的拦截点。Claude Code 没有运行时暂停原语，

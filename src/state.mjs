@@ -1,6 +1,7 @@
 import { EventEmitter } from 'node:events'
 import { noRedact } from './redact.mjs'
 import { plainText } from './text.mjs'
+import { DEFAULT_AGENT, normalizeAgent } from './agents.mjs'
 
 // 状态机（对应计划 §3）
 export const STATE = {
@@ -20,7 +21,7 @@ function subStateForTool(toolName, toolInput) {
   if (toolName === 'Task' || toolName === 'Agent') return 'Delegating'
   if (toolName === 'Bash') {
     const cmd = toolInput?.command ?? ''
-    if (/\b(test|pytest|jest|vitest|go test|cargo test|npm t\b|npm run test)/.test(cmd)) {
+    if (/\b(test|pytest|jest|vitest|go test|cargo test|npm t|npm run test)\b/.test(cmd)) {
       return 'Running Test'
     }
     return 'Running Command'
@@ -89,6 +90,9 @@ export class Store extends EventEmitter {
     if (!s) {
       s = {
         session_id: id,
+        // 哪个后端在跑这个会话。决定手机端给不给暂停/取消/发消息的入口，
+        // 见 src/agents.mjs。老 hook 不带这个字段，缺省即 Claude Code。
+        agent: DEFAULT_AGENT,
         session_name: null,
         cwd: null,
         state: STATE.IDLE,
@@ -99,6 +103,12 @@ export class Store extends EventEmitter {
         limits: null,
         context: null,
         cost_usd: null,
+        // 累计 token。只有按 API key 计费、没有窗口配额的后端会有（quota:'tokens'）。
+        // 不换算成金额：那要一张会悄悄过期的价目表，而一个不准的金额比没有更糟
+        tokens: null,
+        // 后端有没有上报过用量。null=还没轮完不知道；true=上报过；false=报过
+        // 但适配器不报用量。用它把「没报用量」和「0 token」区分开（见 agentUsage）。
+        usage_reported: null,
         model: null,
       }
       this.#sessions.set(id, s)
@@ -118,6 +128,37 @@ export class Store extends EventEmitter {
     return this.#statusLineSeenAt
   }
 
+  /**
+   * 每个后端最后一次上报是什么时候。
+   *
+   * ## 为什么需要它
+   *
+   * 「这个后端没有会话」和「这个后端已经不上报了」在屏幕上长得一模一样：
+   * 两种情况列表里都是空的。可它们该做的事完全相反——前者什么都不用做，
+   * 后者说明桥接插件挂了 / hooks 掉了 / DSH 进程没了，而你正靠它替你盯着操作。
+   *
+   * 这是这个项目反复踩的同一类坑（hooks 静默失败、statusLine 不上报、
+   * 服务连不上却只显示空白）：**故障被显示成「正常但没有内容」**。
+   * 有了时间戳，界面才说得出「Claude Code 12 分钟没动静了」。
+   *
+   * 记的是「收到过任何上报」，不是「有活跃会话」——会话结束了后端仍然活着，
+   * 这两件事必须分开。
+   */
+  agentsSeen() {
+    return Object.fromEntries(this.#agentSeen)
+  }
+
+  /**
+   * 每个后端**第一次**上报的时间，给首页分区定顺序用。
+   *
+   * 单独一个方法而不是把 agentsSeen 的值改成 {first,last}：那样会让
+   * 缓存着旧页面的手机把对象当时间戳减，算出 NaN → 永远显示「没有上报」。
+   * 加字段是安全的，改字段的形状不是。
+   */
+  agentsFirstSeen() {
+    return Object.fromEntries(this.#agentFirstSeen)
+  }
+
   events(sinceId = 0, sessionId = null) {
     return this.#events.filter(
       (e) => e.id > sinceId && (!sessionId || e.session_id === sessionId),
@@ -130,7 +171,16 @@ export class Store extends EventEmitter {
   }
 
   restoreLimits(limits) {
-    if (limits?.five_hour) this.#accountLimits = limits
+    if (limits?.five_hour) {
+      this.#accountLimits = limits
+      /**
+       * statusLineSeenAt 没单独落盘，但「有额度数据」这件事本身就说明
+       * statusLine 来过。用 limits.at（最后一次带额度的上报时间）恢复，
+       * 否则重启后 statusLineSeenAt 是 null，前端 quotaWhy() 会误判成
+       * 「statusLine 一次都没来过」（hooks-only），把「旧数据」说成「不调用」。
+       */
+      if (limits.at) this.#statusLineSeenAt = limits.at
+    }
   }
   get nextEventId() {
     return this.#nextEventId
@@ -196,6 +246,12 @@ export class Store extends EventEmitter {
 
     if (payload.cwd) s.cwd = payload.cwd
     if (payload.session_name) s.session_name = payload.session_name
+    // 认不得的 agent 落回 Claude Code 而不是原样存下：存下来的话，UI 那边
+    // capOf() 同样会落回默认能力，但会话卡片上会显示一个谁也不认识的后端名。
+    if (payload.agent) s.agent = normalizeAgent(payload.agent)
+    // 记在会话之外：会话结束了后端仍然活着，两件事分开看才判得出「后端没动静了」
+    this.#agentSeen.set(s.agent, Date.now())
+    if (!this.#agentFirstSeen.has(s.agent)) this.#agentFirstSeen.set(s.agent, Date.now())
 
     const label = s.session_name || (s.cwd ? s.cwd.split('/').filter(Boolean).pop() : id.slice(0, 8))
     let notify = null
@@ -249,7 +305,14 @@ export class Store extends EventEmitter {
         // 此时宁可多推一次，也别漏掉一次任务完成。
         const elapsed = s.turn_started_at ? Date.now() - s.turn_started_at : Infinity
         const msg = truncate(payload.last_assistant_message ?? '', 300)
-        this.#touch(s, { state: STATE.DONE, sub_state: null, last_message: msg, turn_started_at: null })
+        // 按 API key 计费的后端没有滚动窗口配额，累计 token 是唯一说得出口的
+        // 用量。只在真的报了的时候才写——没有和 0 是两回事
+        const tokens = Number(payload.tokens)
+        this.#touch(s, {
+          state: STATE.DONE, sub_state: null, last_message: msg, turn_started_at: null,
+          ...(Number.isFinite(tokens) && tokens > 0 ? { tokens } : {}),
+          ...(typeof payload.usage_reported === 'boolean' ? { usage_reported: payload.usage_reported } : {}),
+        })
         this.#log(id, 'stop', msg)
         if (notifyConfig.onStop && elapsed >= notifyConfig.minTurnMs) {
           notify = {
@@ -281,7 +344,12 @@ export class Store extends EventEmitter {
 
       case 'stop-failure': {
         const msg = truncate(payload.error ?? payload.last_assistant_message ?? '任务因 API 错误终止', 300)
-        this.#touch(s, { state: STATE.ERROR, sub_state: null, last_message: msg, turn_started_at: null })
+        const tokens = Number(payload.tokens)
+        this.#touch(s, {
+          state: STATE.ERROR, sub_state: null, last_message: msg, turn_started_at: null,
+          ...(Number.isFinite(tokens) && tokens > 0 ? { tokens } : {}),
+          ...(typeof payload.usage_reported === 'boolean' ? { usage_reported: payload.usage_reported } : {}),
+        })
         this.#log(id, 'error', msg)
         if (notifyConfig.onError) {
           notify = { title: 'Clamicro', icon: '✕', tint: 'danger', subtitle: `${label} 出错`, body: msg }
@@ -353,6 +421,21 @@ export class Store extends EventEmitter {
   // 表现是额度一直空白且毫无错误。记一笔「有没有被调用过」，好把
   // 「还没有会话上报」和「有会话但额度拿不到」区分开。
   #statusLineSeenAt = null
+  // agent -> 最后一次收到该后端任何上报的时间。见 agentsSeen()
+  #agentSeen = new Map()
+  /**
+   * agent -> **第一次**上报的时间。用来给首页的模型分区定顺序。
+   *
+   * 不能拿 sessions 的顺序排：那是按 updated_at 倒序的，谁活跃谁就窜到
+   * 前面——卡片位置每来一个事件就换一次，人得重新找「我要看的那个模型
+   * 在哪」。位置本身是一种记忆，不该被活跃度改写。
+   *
+   * 也不用 #agentSeen（最后一次上报）：那同样跟着活跃度变。
+   *
+   * 服务重启后重新计时，所以顺序是「本次运行里谁先连上」。这没问题——
+   * 它仍然稳定，只是锚点是这次启动。
+   */
+  #agentFirstSeen = new Map()
 
   applyStatusLine(payload, opts = {}) {
     this.#statusLineSeenAt = Date.now()

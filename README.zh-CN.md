@@ -7,12 +7,12 @@
 跑任务时不用一直盯着终端——需要授权时 Mac 会弹通知，在手机上打开页面，看清命令和一句摘要，滑动批准或拒绝，Claude Code 随即继续。
 
 <p align="center">
-  <img src="./docs/images/notch.png" width="620" alt="Mac 刘海位置的通知胶囊：绿色对勾徽章、项目名、结果行">
+  <img src="https://raw.githubusercontent.com/laosji/clamicro/main/docs/images/notch.png" width="620" alt="Mac 刘海位置的通知胶囊：绿色对勾徽章、项目名、结果行">
 </p>
 
 | 运行中 | 有事等你 | 做决定 |
 |:--:|:--:|:--:|
-| <img src="./docs/images/home-running.png" width="230" alt="运行中的首页：呼吸的状态主控台，下面滚动着最近几次工具调用"> | <img src="./docs/images/home-pending.png" width="230" alt="有待审批时的首页：主控台在最上面，下面列着剩下的"> | <img src="./docs/images/approval-detail.png" width="230" alt="审批详情：风险等级、影响面、命令原文，决策条钉在底部"> |
+| <img src="https://raw.githubusercontent.com/laosji/clamicro/main/docs/images/home-running.png" width="230" alt="运行中的首页：呼吸的状态主控台，下面滚动着最近几次工具调用"> | <img src="https://raw.githubusercontent.com/laosji/clamicro/main/docs/images/home-pending.png" width="230" alt="有待审批时的首页：主控台在最上面，下面列着剩下的"> | <img src="https://raw.githubusercontent.com/laosji/clamicro/main/docs/images/approval-detail.png" width="230" alt="审批详情：风险等级、影响面、命令原文，决策条钉在底部"> |
 
 *截图是真实界面，不是效果图。刘海那张是 Mac 上实拍的屏幕截图。*
 
@@ -83,6 +83,44 @@ npm 包只是**安装器**。运行时文件会被复制到 `~/.claude/clamicro/
 | 暂停 / 恢复 / 取消本轮 | `PreToolUse` 拦截点 |
 | 额度接近上限预警 | `statusLine` |
 
+> 这张表说的是 **Claude Code**。接了别的后端时，能做什么由那个后端的能力决定——
+> 见下面「不止 Claude Code」。
+
+---
+
+## 不止 Claude Code
+
+2.14.0 起，同一块看板可以同时盯着多个后端。目前支持 Claude Code 和
+[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）。
+
+首页**按模型分区**：每个模型一个标题，下面是它自己的状态、履历和用量。
+顺序按「谁先连上」固定，不会因为谁刚有动静就换位置。
+
+**待审批不分区**，永远在最上面、跨后端一起显示——它有倒计时，被分进某个
+区块意味着你得先找到那个区块才看得见，而漏看一条等于一次静默的自动决策。
+
+### 不同后端能做的事不一样
+
+|  | Claude Code | DeepSeek Harness |
+|---|:--:|:--:|
+| 手机审批 | ✓ | ✓ |
+| 暂停 / 恢复 | ✓ | — |
+| 取消本轮 | ✓ | —（协议支持，尚未接） |
+| 从手机发消息 | ✓ | —（协议支持，尚未接） |
+| 用量 | 5h / 7d 滚动窗口 | 累计 token |
+
+界面**按能力渲染**：某个后端不支持的操作，入口直接不给。留一个点了没反应的
+按钮比没有按钮更糟——你会以为暂停成功了，然后走开。
+
+DSH 的用量只报 token、不折算金额：DSH 自己不算钱，折算需要一张按模型分档的
+价目表，而它会在你不知情时过期，然后手机上安静地显示一个错的金额。
+
+### 接 DSH
+
+需要装一个桥接插件，**不随 clamicro 的 npm 包发布**，见
+[`plugins/`](./plugins/)。另有一个可选的像素猫挂件，点一下直接打开手机看板
+（没配对过的话那一页就是二维码入口）。
+
 ### 手势
 
 审批卡片左滑拒绝、右滑批准，详情页和首页列表都支持。批准有 3 秒撤销窗口。
@@ -123,7 +161,9 @@ npx clamicro untrust    # 撤销：不带参数撤当前网络，也可 untrust 
 
 信任是**可撤销**的。误信任一个网络（比如在咖啡厅手滑点了「是」）不该是不可逆的——那个网络会永久留在列表里，下次再连上就自动暴露。
 
-网络指纹用**网关 IP + 网关 MAC + 网段**。SSID 在新版 macOS 需要定位权限常常拿不到；而 `00:00:5e:00:01:xx` 是 VRRP 虚拟 MAC，企业网里并不唯一——单靠 MAC 会把不同公司的网络认成同一个，所以必须组合。
+网络指纹用**网关 IP + 网关 MAC + 网段 + SSID + DHCP 服务器 + 搜索域 + DNS 列表**。
+
+前三项不够：SSID 在新版 macOS 需要定位权限、走有线时根本没有；而 `00:00:5e:00:01:xx` 是 VRRP 虚拟 MAC，企业网里并不唯一。实测过一种会碰撞的组合——两个不同公司都用 `192.168.1.0/24`、网关都是 `192.168.1.1`、网关 MAC 都是 VRRP、又都拿不到 SSID，四个字段完全一样，**于是 A 公司信任过之后 B 公司的网络被当成已信任**。后面那三个信号来自 DHCP，不需要任何权限，在不同组织之间几乎不会全部相同。
 
 ### 已实现的防护
 
@@ -138,7 +178,7 @@ npx clamicro untrust    # 撤销：不带参数撤当前网络，也可 untrust 
 | **CSP `frame-ancestors 'none'`** | 点击劫持：恶意页面把审批页嵌进 iframe 诱导你滑动 |
 | **常数时间比较** | token 与审批 key 的时间侧信道 |
 | **SameSite=Lax + HttpOnly** | CSRF；同时保证从别的 App 点链接进来仍是登录态（Strict 会导致每次都要重新扫码） |
-| **单条审批专属 key** | 拿到一条深链只能决定那一条，且随它过期 |
+| **单条审批专属 key** | 拿到一条深链只能决定那一条；审批结束后 2 分钟失效（留这一小段是因为你点完之后结果页还要用它拉一次） |
 
 ### 说人话：配过对的手机等于你 Mac 的钥匙
 
@@ -146,7 +186,9 @@ npx clamicro untrust    # 撤销：不带参数撤当前网络，也可 untrust 
 
 - 二维码本身已经不足以配对：它一次性、60 秒过期，而且还要在 Mac 上按「允许」。
   拍到码的人没有你按那一下也配不上。话虽如此，还是别把它留在屏幕上
-- 怀疑泄露了就立刻换发：`npx clamicro rotate-token`（所有设备上的登录当场失效）
+- 怀疑泄露了就立刻换发：`npx clamicro rotate-token`。所有设备上的登录当场失效，
+  对运行中的服务**即刻生效，不用重启**；之后手机需要重新扫码配对。
+  只想吊销某一台就用 `npx clamicro forget <id>`，其他设备不受影响
 - 登录 cookie 30 天过期，到期重新扫一次
 
 ### 剩下的风险：HTTP 明文
@@ -205,6 +247,14 @@ npx clamicro untrust    # 撤销：不带参数撤当前网络，也可 untrust 
 **审批与事件落盘。** `~/.claude/clamicro/history.json`，防抖写入 + 临时文件原子替换。重启时仍挂起的审批一律转 `abandoned`——那些 hook 的连接早断了，再显示成「待审批」是在骗人。
 
 **hooks 是热加载的，statusLine 不是。** 改完 hooks 当前会话立刻生效；statusLine 要新开会话。
+
+**吊销是即刻的，不用重启。** `forget` / `rotate-token` / `untrust` 都是独立的 CLI 进程，只改磁盘；而服务只在启动时读过一次配置。所以 2.14.0 之前这三条命令**重启前全部无效**——`forget` 却打印着「这些设备上的登录立即失效」。现在服务监听配置文件热加载 token / 设备簿 / 信任网络，那句话才是真的。
+
+**配置和 settings.json 都是原子写。** 先写同目录临时文件再 rename。非原子写有两条会踩到的路径：热加载正好读到写了一半的 JSON；以及进程被打断时文件永久半截——`config.json` 半截等于令牌和已配对设备全没，`settings.json` 半截等于 Claude Code 起不来。权限也在 rename 之前设好，不留「文件已就位但还是 0644」的窗口。
+
+**杀进程之前先确认身份。** `stop` 和安装流程都会 kill 掉端口上的监听者，而 8765 不是保留端口。判据是 `/healthz` 回的 `service: 'clamicro'`（只对回环返回，局域网上的扫描者拿不到），不是匹配命令行——命令行的形状不稳定。不是我们的进程就拒绝并提示换端口，绝不硬抢。
+
+**风险判定不看工具名。** 判据是「参数里有没有 `command`」。原来写的是 `toolName === 'Bash'`，而 DSH 的工具名是小写 `bash`——精确匹配会让整套高危规则**一条都不跑**，`rm -rf /` 判普通风险、10 秒自动通过。名字差一个字母，安全核心静默失效且不报任何错。
 
 ---
 

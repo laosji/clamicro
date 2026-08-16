@@ -34,7 +34,22 @@ export function allowedHosts({ port, lanIp, localHost, tailscaleIp, tunnelUrl })
 
 export function hostAllowed(req, allowed) {
   const h = req.headers.host
-  if (!h) return true // HTTP/1.0 无 Host，只可能来自本机脚本
+  /**
+   * 没有 Host 头时**只放本机**。
+   *
+   * 原来是无条件 `return true`，理由写的是「HTTP/1.0 无 Host，只可能来自
+   * 本机脚本」。这个理由在实际效果上站得住——DNS rebinding 必须经浏览器，
+   * 而浏览器一定发 Host；而且这层本来也不是鉴权边界（那是 authorized）。
+   * 所以它不是一个可利用的洞。
+   *
+   * 但它和「严格白名单」这个说法对不上：白名单开了一个「不带就放行」的口子。
+   * 而收紧的代价几乎为零——本机脚本本来就在回环上，局域网客户端本来就该
+   * 带 Host。让代码说到做到，比留一句需要解释的例外好。
+   */
+  if (!h) {
+    const a = req.socket?.remoteAddress ?? ''
+    return a === '127.0.0.1' || a === '::1' || a === '::ffff:127.0.0.1'
+  }
   return allowed.has(h.toLowerCase())
 }
 

@@ -4,6 +4,7 @@ import { existsSync, openSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { APP_DIR, appPaths, installedInfo } from './src/paths.mjs'
+import { isOurService } from './src/service-id.mjs'
 import { LOG_FILE } from './src/log.mjs'
 import { isNewer, checkUpdate } from './src/update.mjs'
 
@@ -30,7 +31,7 @@ function usage() {
 
   ${c.b('install')}      安装：接入 hooks、信任网络、启动服务、打印二维码
   ${c.b('uninstall')}    卸载：只摘掉自己加的东西，配置保留
-  ${c.b('qr')}           打印登录二维码（换手机 / 重新登录时用）
+  ${c.b('qr')}           打印登录二维码（换手机 / 重新登录时用）${c.dim('  ← 加 --no-cat 去掉那只猫')}
   ${c.b('status')}       服务、网络、待审批的当前状态
   ${c.b('config')}       摊开当前生效的完整配置${c.dim('  ← 每项标出来自默认值还是你改过')}
   ${c.b('start')}        前台启动服务（调试用；平时由 SessionStart hook 自动拉起）
@@ -88,6 +89,10 @@ function listeners(p) {
   const r = spawnSync('lsof', ['-ti', `tcp:${p}`, '-sTCP:LISTEN'], { encoding: 'utf8' })
   return (r.stdout ?? '').trim().split('\n').filter(Boolean)
 }
+
+// 身份判定在 src/service-id.mjs —— install.mjs 也用同一份。
+// 不各写一份：这个项目已经吃过一次「同一个判据两处实现、只修了一处」的亏
+// （underIgnored 修了、风险模块没跟着改，见 src/risk/assess.mjs 的注释）。
 
 /**
  * 打到**正在跑的那个服务**上。
@@ -220,7 +225,9 @@ switch (cmd) {
   }
 
   case 'qr':
-    runApp(['--qr'])
+    // --no-cat 透传：它是 --qr 的修饰词，不能进 ONE_SHOT_FLAGS——
+    // 进了那里，单独一个 `--no-cat` 就会被当成一次性命令，把常驻启动路径带偏。
+    runApp(['--qr', ...(rest.includes('--no-cat') ? ['--no-cat'] : [])])
     break
   case 'trust':
     runApp(['--trust'])
@@ -276,8 +283,20 @@ switch (cmd) {
   case 'stop': {
     const p = await port()
     const pids = listeners(p)
+    if (!pids.length) {
+      console.log(c.dim('  服务本来就没在跑'))
+      break
+    }
+    // 先确认端口上那个真的是我们的，再动手。见 isOurService
+    if (!(await isOurService(p, pids))) {
+      console.log(`\n  ${c.y('没有停止任何进程')}`)
+      console.log(`  ${p} 端口上有进程在监听（PID ${pids.join('、')}），但它${c.b('不是 clamicro')}。`)
+      console.log(c.dim('  clamicro 可能没在跑，而这个端口被别的程序占了。'))
+      console.log(c.dim(`  想看是谁： lsof -nP -iTCP:${p} -sTCP:LISTEN\n`))
+      break
+    }
     for (const pid of pids) spawnSync('kill', [pid])
-    console.log(pids.length ? c.g(`  ✓ 已停止（${pids.length} 个进程）`) : c.dim('  服务本来就没在跑'))
+    console.log(c.g(`  ✓ 已停止（${pids.length} 个进程）`))
     break
   }
 

@@ -3,6 +3,21 @@ import { safeEq } from '../auth/token.mjs'
 import { requireDeps } from './deps.mjs'
 import { MAX_APPROVAL_TIMEOUT_MS, MIN_APPROVAL_TIMEOUT_MS } from '../config.mjs'
 import { notifyHealth } from '../notify.mjs'
+import { AGENTS, capOf, detectAgents } from '../agents.mjs'
+import { installedInfo } from '../paths.mjs'
+
+/**
+ * 审批结束后，那条深链 `?k=` 还能用多久。
+ *
+ * 只为一件事留：点完批准/拒绝之后，结果页要再拉一次来显示结局。
+ * 两分钟远远够，而且离「24 小时」有数量级的差距——那才是这个常量要修掉的东西。
+ */
+const SETTLED_KEY_GRACE_MS = (() => {
+  // 环境变量只为测试留：等两分钟才能验一条断言，那条断言迟早会被删掉。
+  // 夹在 [0, 10 分钟]：调大也不该让这把钥匙变成长期凭证
+  const want = Number(process.env.CLAMICRO_SETTLED_KEY_GRACE_MS)
+  return Number.isFinite(want) && want >= 0 ? Math.min(want, 600_000) : 120_000
+})()
 
 /**
  * JSON API 路由表。
@@ -77,15 +92,27 @@ export function apiRoutes(ctx) {
         sessions: store.sessions(),
         limits: store.accountLimits(),
         statusLineSeenAt: store.statusLineSeenAt(),
+        // 每个后端最后一次上报的时间。用来区分「这个后端没有会话」和
+        // 「这个后端已经不上报了」——两者在列表上长得一样，处置完全相反
+        agentsSeen: store.agentsSeen(),
+        // 首页分区的排序依据：谁先连上谁在前。见 store.agentsFirstSeen 的注释
+        agentsFirstSeen: store.agentsFirstSeen(),
       }),
     },
     {
       method: 'GET', path: /^\/api\/sessions\/([\w-]+)$/, auth: 'token',
-      handler: ({ res, params: [sid] }) => json(res, 200, {
-        session: store.sessions().find((x) => x.session_id === sid) ?? null,
-        events: store.events(0, sid),
-        queued: inbox.list(sid),
-      }),
+      handler: ({ res, params: [sid] }) => {
+        const session = store.sessions().find((x) => x.session_id === sid) ?? null
+        json(res, 200, {
+          session,
+          // 能力随会话一起给：详情页每次刷新都要它来决定暂停/取消给不给，
+          // 单独再拉一次 /api/config 是白白多一个来回，而且两次响应之间
+          // 还能不一致
+          cap: capOf(session?.agent),
+          events: store.events(0, sid),
+          queued: inbox.list(sid),
+        })
+      },
     },
     {
       method: 'POST', path: /^\/api\/sessions\/([\w-]+)\/(pause|resume|cancel)$/, auth: 'token',
@@ -104,6 +131,15 @@ export function apiRoutes(ctx) {
         const { text } = await readBody(req)
         if (!String(text ?? '').trim()) return json(res, 400, { error: 'empty' })
         const msg = inbox.queue(sid, String(text).trim())
+        // 队列满了要**当场说**。静默丢掉一条用户明确要发的指令，
+        // 比拒绝它糟得多——他会以为发出去了，然后等一个永远不来的回应
+        if (!msg) {
+          return json(res, 409, {
+            error: 'inbox_full',
+            queued: inbox.list(sid).length,
+            hint: '这个会话已经排了很多条还没送达。消息只在它跑完下一轮时才注入——先去终端里让它跑一轮，或者删掉几条。',
+          })
+        }
         json(res, 200, { ok: true, message: msg, queued: inbox.list(sid).length })
       },
     },
@@ -166,6 +202,24 @@ export function apiRoutes(ctx) {
         altUrl: config.altUrl,
         localHost: config.localHost,
         network: network(),
+        // 后端能力矩阵。全是静态布尔，不含凭证。
+        // 由服务端下发而不是让网页硬编码：网页是缓存得最久的那一层，
+        // 能力表跟着服务端版本走，才不会出现「服务端已支持、手机上还是灰的」。
+        /**
+         * 服务端版本。前端拿它判断「我这份页面是不是过期了」。
+         *
+         * 页面靠 SSE 长驻，**自己永远不会重新加载 HTML**——升级之后不手动
+         * 刷新就一直跑旧 JS。服务端发了 no-store，但那只保证「下次真去取
+         * 的时候是新的」，而这个页面可能几天都不去取一次。
+         *
+         * 表现是最难查的那一类：界面看着正常、数据也在更新（那走的是 API），
+         * 只有渲染逻辑是旧的。修好的 bug 在手机上「还在」，而服务端明明是对的。
+         */
+        version: installedInfo()?.version ?? null,
+        agents: AGENTS,
+        // 本机装了哪些后端。是个**数组**——多个后端同时在用是常态，不是边界情况。
+        // 只用来决定空状态的文案；谁在跑以上报为准，见 src/agents.mjs 的注释
+        detectedAgents: detectAgents(),
         // 提醒通道的健康状况。全是计数和错误文本，不含任何凭证。
         // 通道死掉时，高危审批会全部走到超时被拒、普通审批会照常自动放行，
         // 而你收不到任何一条——这个字段是唯一能让那件事浮出来的东西
@@ -318,7 +372,29 @@ export function apiRoutes(ctx) {
       if (r.auth === 'approval') {
         approval = approvals.get(params[0])
         if (!approval) return json(res, 404, { error: 'not_found' }), true
-        if (!safeEq(url.searchParams.get('k'), approval.key) && !authorized(req)) {
+        const byKey = safeEq(url.searchParams.get('k'), approval.key)
+        /**
+         * `?k=` 在审批**结束之后**很快就失效。
+         *
+         * README 承诺的是「a leaked deep link can only decide that one approval,
+         * **and expires with it**」。而实现里这个 key 的有效期实际上跟着
+         * 记录走——记录要到 24 小时后的 sweep 才清掉。也就是说：一条被转发
+         * 出去的深链（它会进聊天记录、进浏览器历史），在那次审批早就结束之后，
+         * 还能读整整一天的**完整命令原文**（publicApproval 里的 detail 和 cwd）。
+         * 决定是决定不了了，但「能读」本身就超出了承诺。
+         *
+         * 留一小段宽限期而不是当场作废：手机上点完批准/拒绝，结果页还要用
+         * 这个 key 再拉一次来显示结局。当场失效的话，用户点完看到的是一个
+         * 错误页——那会让人以为操作没成功。
+         *
+         * 登录令牌不受影响：已配对的设备本来就该能翻历史。这里收紧的只是
+         * 那把**能被转发出去**的单条钥匙。
+         */
+        const settledAgo = approval.decided_at ? Date.now() - approval.decided_at : 0
+        if (byKey && approval.status !== 'pending' && settledAgo > SETTLED_KEY_GRACE_MS) {
+          return json(res, 403, { error: 'expired', reason: '这条审批已经结束，链接失效了' }), true
+        }
+        if (!byKey && !authorized(req)) {
           return json(res, 403, { error: 'forbidden' }), true
         }
       } else if (!authorized(req)) {

@@ -22,6 +22,9 @@ const CONFIG_FILE = join(HOME, '.claude', 'clamicro', 'config.json')
 const PID_FILE = join(HOME, '.claude', 'clamicro', 'tunnel.pid')
 
 const { loadConfig, saveConfig } = await import('../src/config.mjs')
+const { __setCommandOf, commandOf } = await import('../src/service-id.mjs')
+const realCommandOf = commandOf
+test.after(() => __setCommandOf(realCommandOf))
 
 const writeConfig = (o) => writeFileSync(CONFIG_FILE, JSON.stringify({ token: 't'.repeat(43), ...o }, null, 2))
 const silence = () => {
@@ -54,15 +57,65 @@ test('隧道地址以进程存活为准，不以配置为准', async (t) => {
     assert.equal(c.tunnelUrl, null)
   })
 
-  await t.test('pid 指向存活进程 → 采用隧道地址', () => {
-    writeConfig({ publicBaseUrl: DEAD })
-    writeFileSync(PID_FILE, String(process.pid))
-    const un = silence()
-    const c = loadConfig()
-    un()
-    assert.equal(c.tunnelUrl, DEAD)
-    assert.equal(c.baseUrl, DEAD)
-    unlinkSync(PID_FILE)
+  await t.test('pid 指向存活的 cloudflared → 采用隧道地址', () => {
+    // 判据看的是命令行。用 mock 冒充「这个 pid 的命令行是 cloudflared」，
+    // 不 spawn 真进程、不依赖真 ps——ps 在极简容器/沙箱里可能不存在
+    __setCommandOf(() => '/usr/local/bin/cloudflared tunnel --url http://127.0.0.1:8765')
+    try {
+      writeConfig({ publicBaseUrl: DEAD })
+      writeFileSync(PID_FILE, String(process.pid))
+      const un = silence()
+      const c = loadConfig()
+      un()
+      assert.equal(c.tunnelUrl, DEAD)
+      assert.equal(c.baseUrl, DEAD)
+    } finally {
+      try { unlinkSync(PID_FILE) } catch { /* 已经没了 */ }
+    }
+  })
+
+  /**
+   * PID 会被系统回收 —— 「这个号上有进程」不等于「隧道还活着」。
+   *
+   * cloudflared 死掉之后它的号可能已经属于别的进程。只探存在性的话：
+   *   · baseUrl 继续用那个 trycloudflare 地址，而隧道早没了 →
+   *     之后每个二维码、每条深链都指向打不开的域名，且没有任何报错
+   *   · stopTunnel 会 kill 那个号 → 杀掉一个无辜进程
+   *
+   * 这两条都是这个文件上面那句「以进程是否存在为准」当初想解决的问题的
+   * **第二种成因**，只看 kill(pid,0) 挡不住。
+   */
+  await t.test('pid 被别的进程占了（PID 复用）→ 不认，回落', () => {
+    // 「号还在但换了主人」：命令行不是 cloudflared
+    __setCommandOf(() => 'node /opt/clamicro/server.mjs')
+    try {
+      writeConfig({ publicBaseUrl: DEAD })
+      writeFileSync(PID_FILE, String(process.pid))
+      const un = silence()
+      const c = loadConfig()
+      un()
+      assert.equal(c.tunnelUrl, null, '号被别人占着时不该采用隧道地址')
+      assert.ok(!c.baseUrl.includes('trycloudflare'))
+    } finally {
+      try { unlinkSync(PID_FILE) } catch { /* 已经没了 */ }
+    }
+  })
+
+  await t.test('ps 不可用（读不到命令行）→ 不认，回落', () => {
+    // 模拟 ps 失败：commandOf 返回空串。tunnelAlive 必须 fail-closed——拿不准
+    // 就不信任 PID，绝不能因为读不到命令行就反过来当成「是自己的隧道」
+    __setCommandOf(() => '')
+    try {
+      writeConfig({ publicBaseUrl: DEAD })
+      writeFileSync(PID_FILE, String(process.pid))
+      const un = silence()
+      const c = loadConfig()
+      un()
+      assert.equal(c.tunnelUrl, null, '读不到命令行时不该采用隧道地址')
+      assert.ok(!c.baseUrl.includes('trycloudflare'))
+    } finally {
+      try { unlinkSync(PID_FILE) } catch { /* 已经没了 */ }
+    }
   })
 
   await t.test('回落不修改盘上的 publicBaseUrl（读取不该有写副作用）', () => {

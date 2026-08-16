@@ -11,12 +11,16 @@
   :root{
     --bg:#f7f8fa; --card:#fff; --fg:#12151a; --dim:#6b7280; --line:#e4e7ec; --monobg:#f0f2f5;
     --ok:#0a7d34; --no:#b42318; --warn:#b54708; --run:#0a7d34;
+    /* 断线卡的重连按钮和备用地址链接用它。取值和 pair.html / onboarding.html
+       保持一致——这三个页面的「主动作」应该是同一个蓝。 */
+    --accent:#1570ef;
     --tabbg:rgba(255,255,255,.82);
   }
   @media (prefers-color-scheme:dark){
     :root{
       --bg:#0b0d10; --card:#14181d; --fg:#e8eaed; --dim:#8b93a1; --line:#242a32; --monobg:#0f1318;
       --ok:#4ade80; --no:#f87171; --warn:#fbbf24; --run:#39ff8a;
+      --accent:#60a5fa;
       --tabbg:rgba(14,18,23,.82);
     }
   }
@@ -200,7 +204,6 @@
   @media (prefers-reduced-motion: reduce){
     .console.is-run .cdot::before, .console.is-run .cdot::after{display:none}
     .glow::before{animation:none; opacity:.28}
-    .ctick.roll .tk{animation:none}
   }
   .console.is-wait{border-color:color-mix(in srgb,var(--warn) 45%,transparent);
     box-shadow:0 0 26px -12px color-mix(in srgb,var(--warn) 70%,transparent)}
@@ -255,7 +258,29 @@
   .cdone .ct{font-size:13.5px; color:var(--dim); line-height:1.5}
   .cdone .ct b{color:var(--fg); font-weight:600}
 
-  .coff .om{font-size:13px; color:var(--dim); line-height:1.55; margin-bottom:8px}
+  /* 断线态的动作区。「重新连接」是这一屏唯一的主动作，所以给实心按钮——
+     旁边的自动重试倒计时是说明，不是第二个按钮，用弱化的文字 */
+  .coff .oact{display:flex; align-items:center; gap:12px; margin:12px 0 4px}
+  .coff .oretry{
+    appearance:none; border:0; border-radius:10px; padding:11px 18px;
+    background:var(--accent); color:#000; font:600 15px -apple-system,"PingFang SC",sans-serif;
+    min-height:44px; cursor:pointer;
+  }
+  .coff .oretry:disabled{opacity:.5}
+  .coff .oauto{font-size:12.5px; color:var(--dim); font-variant-numeric:tabular-nums}
+  .coff .oalt{font-size:12.5px; color:var(--dim); line-height:1.6; margin-top:6px}
+  .coff .oalt a{color:var(--accent); text-decoration:none}
+  /* 排查清单收进折叠：它服务的是「按了还是不行」的少数人，
+     默认展开会把唯一的动作挤到屏幕下方 */
+  .coff .ohd{margin-top:10px}
+  .coff .ohd summary{font-size:12.5px; color:var(--dim); cursor:pointer; list-style:none}
+  .coff .ohd summary::-webkit-details-marker{display:none}
+  .coff .ohd summary::before{content:'▸ '}
+  .coff .ohd[open] summary::before{content:'▾ '}
+  .coff .om{font-size:13px; color:var(--dim); line-height:1.55; margin-bottom:4px}
+  .coff .om b{color:var(--fg); margin-right:5px}
+  /* 秒数和「旧状态」提示降一级：它们是佐证，病因才是要先读到的那句 */
+  .coff .om2{font-size:12px; color:var(--dim); opacity:.75; line-height:1.5}
   .coff .oh{font-size:11.5px; color:var(--dim); border-top:1px solid var(--line);
     padding-top:9px; line-height:1.7; opacity:.85}
 
@@ -273,15 +298,28 @@
   .autodeny .am{font-size:11px; color:var(--dim); overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
   .autodeny .ax{font-size:15px; color:var(--dim); background:none; border:0; padding:2px 4px; cursor:pointer}
 
-  /* 队列：底下垫两张卡，一眼看出「后面还有」 */
+  /* 队列：底下垫两张卡，一眼看出「后面还有」。
+   *
+   * 用外投影画，**不能**用 ::before/::after。.console 是 overflow:hidden
+   * （滑动的 tint/stamp 要被圆角裁住），而这两层定位在 bottom:-7px/-14px
+   * ——正好在盒子外面，会被整个裁掉。当时屏幕上剩下的是落在卡片**内部**
+   * 的那条上边缘：待审批卡底部凭空多一条圆角线，看着像渲染坏了，而不是
+   * 「后面还有一张卡」。
+   *
+   * 外投影不受元素自身 overflow 影响，圆角也自动跟着 border-radius 走。
+   * 每层两道：负 spread 的那道是卡片体，大一圈的那道露出 1px 当描边。
+   * 写在 .is-wait.queued 上是因为 box-shadow 不能叠加声明——必须把
+   * is-wait 的光晕一起带上，否则队列态会把光晕顶掉。
+   */
   .console.queued{margin-bottom:26px}
-  .console.queued::before, .console.queued::after{
-    content:""; position:absolute; left:50%; transform:translateX(-50%);
-    border:1px solid color-mix(in srgb,var(--warn) 22%,transparent);
-    border-radius:16px; background:var(--card); z-index:-1;
+  .console.is-wait.queued{
+    box-shadow:
+      0 0 26px -12px color-mix(in srgb,var(--warn) 70%,transparent),
+      0 7px 0 -1px var(--card),
+      0 7px 0 0 color-mix(in srgb,var(--warn) 22%,transparent),
+      0 15px 0 -4px var(--card),
+      0 15px 0 -3px color-mix(in srgb,var(--warn) 14%,transparent);
   }
-  .console.queued::before{width:calc(100% - 14px); bottom:-7px; height:22px; opacity:.75}
-  .console.queued::after{width:calc(100% - 30px); bottom:-14px; height:22px; opacity:.45}
   .qdots{display:flex; gap:5px; justify-content:center; margin-top:11px}
   .qdots i{width:5px; height:5px; border-radius:50%; background:var(--line)}
   .qdots i.on{background:var(--warn)}
@@ -293,14 +331,27 @@
      履历能看出它是在推进还是在原地打转。
      只在运行态出现，且**只有放不下时才滚动**——手机上一个持续移动的东西
      是很强的注意力磁铁，没必要时让它静止。 */
-  .ctick{margin-top:9px; height:17px; overflow:hidden; position:relative;
-    -webkit-mask-image:linear-gradient(90deg,#000 82%,transparent);
-    mask-image:linear-gradient(90deg,#000 82%,transparent)}
-  .ctick .tk{position:absolute; white-space:nowrap; font-size:11.5px; color:var(--dim); line-height:17px}
-  .ctick .tk .now{color:var(--run)}
-  .ctick .tk .sp{opacity:.45; margin:0 7px}
-  .ctick.roll .tk{animation:tick-roll 16s linear infinite}
-  @keyframes tick-roll{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+  /* 竖排：一行一条，卡片自己长高。不再横向滚动——见 activityTicker 的注释 */
+  .ctick{margin-top:9px; display:flex; flex-direction:column; gap:3px}
+  .ctick .tr{
+    font-size:11.5px; color:var(--dim); line-height:1.45;
+    /* 单条太长时省略尾部而不是撑破卡片。路径靠尾部区分，所以用 direction
+       翻转让省略号出现在**开头**，保留更有辨识度的那一头 */
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+    direction:rtl; text-align:left;
+  }
+  /* direction:rtl 会把行尾的标点甩到前面，用 bdi 隔离方向 */
+  .ctick .tr>bdi{direction:ltr}
+  .ctick .tr.now{color:var(--run)}
+  /* 新的一条滑进来。只给最上面那条，且只在它真的变了的时候——
+     整列都动会让人以为四条全是新的，而「在动」在这个界面里是有含义的 */
+  .ctick .tr.fresh{animation:tick-in .34s cubic-bezier(.2,.9,.3,1) both}
+  @keyframes tick-in{
+    from{opacity:0; transform:translateY(-7px)}
+    to{opacity:1; transform:translateY(0)}
+  }
+  /* 关掉动效偏好时不动 —— 它是提示，不是必需信息，信息本身在文字里 */
+  @media (prefers-reduced-motion: reduce){ .ctick .tr.fresh{animation:none} }
 
   /* 非空闲时的用量条：安静、贴着 header、不抢注意力 */
   /* ── 终端路径行 ── */
@@ -492,6 +543,33 @@
   .path{font:12px/1.4 ui-monospace,Menlo,monospace; color:var(--dim); overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
   .chips{display:flex; gap:6px; flex-wrap:wrap; margin-top:9px}
   .chip{font-size:11.5px; padding:3px 8px; border-radius:20px; background:var(--monobg); color:var(--dim)}
+  /* 后端标签。描边而不是填色——它是会话的**出身**，不是状态，
+     不该跟右上角那个状态胶囊抢注意力 */
+  .chip.agent{background:transparent; box-shadow:inset 0 0 0 1px var(--line)}
+
+  /* 按模型分区：标题 + 它自己的状态卡。只在多后端时出现，见 renderHome */
+  .agroup{margin-top:16px}
+  .agroup:first-of-type{margin-top:12px}
+  .ahead{display:flex; align-items:baseline; gap:10px; margin:0 4px 7px}
+  .ahead .an{font-weight:600; font-size:13.5px}
+  /* 用量跟在模型名后面：它是这个模型的属性，不该跑到别处去 */
+  .ahead .au{margin-left:auto; font-size:11.5px; color:var(--dim);
+    font-variant-numeric:tabular-nums}
+  /* 过期的数字要看得出来是过期的 —— 人先看数字，光在旁边写小字不够 */
+  .ahead .au.stale{opacity:.55; text-decoration:line-through dotted}
+
+  /* 会话列表的后端筛选片。触摸目标 40px 起，手机上再小就开始误点 */
+  .afilter{display:flex; gap:8px; flex-wrap:wrap; margin-bottom:2px}
+  .afilter button{
+    appearance:none; border:0; border-radius:20px; padding:9px 14px; min-height:40px;
+    background:var(--monobg); color:var(--dim);
+    font:500 13px -apple-system,"PingFang SC",sans-serif; cursor:pointer;
+  }
+  .afilter button.on{background:var(--run); color:#000}
+  /* 被筛掉多少必须说出来，否则收窄过的列表和「就这么多」长得一样 */
+  .ahidden{margin-top:14px; font-size:12.5px; color:var(--dim); text-align:center}
+  /* 发消息失败的说明。用警告色而不是灰色：它要解释「你的字还在，但没发出去」 */
+  .sayerr{margin-top:10px; font-size:12.5px; line-height:1.55; color:var(--warn)}
   .chip.warn{color:var(--warn)}
   .chip.danger{color:var(--no); font-weight:600; background:color-mix(in srgb,var(--no) 14%,transparent)}
   .head{font-size:15px; margin-top:9px; line-height:1.45; overflow-wrap:anywhere}
@@ -687,9 +765,41 @@
 <script>
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+/* 各后端官方 logo（内联 SVG）。跟在名称前面，用各自品牌色，尺寸对齐文字 */
+const AGENT_LOGOS = {
+  'claude-code': '<svg viewBox="0 0 100 100" width="15" height="15" aria-hidden="true" style="vertical-align:-2px;margin-right:5px"><path fill="#D97757" d="m19.6 66.5 19.7-11 .3-1-.3-.5h-1l-3.3-.2-11.2-.3L14 53l-9.5-.5-2.4-.5L0 49l.2-1.5 2-1.3 2.9.2 6.3.5 9.5.6 6.9.4L38 49.1h1.6l.2-.7-.5-.4-.4-.4L29 41l-10.6-7-5.6-4.1-3-2-1.5-2-.6-4.2 2.7-3 3.7.3.9.2 3.7 2.9 8 6.1L37 36l1.5 1.2.6-.4.1-.3-.7-1.1L33 25l-6-10.4-2.7-4.3-.7-2.6c-.3-1-.4-2-.4-3l3-4.2L28 0l4.2.6L33.8 2l2.6 6 4.1 9.3L47 29.9l2 3.8 1 3.4.3 1h.7v-.5l.5-7.2 1-8.7 1-11.2.3-3.2 1.6-3.8 3-2L61 2.6l2 2.9-.3 1.8-1.1 7.7L59 27.1l-1.5 8.2h.9l1-1.1 4.1-5.4 6.9-8.6 3-3.5L77 13l2.3-1.8h4.3l3.1 4.7-1.4 4.9-4.4 5.6-3.7 4.7-5.3 7.1-3.2 5.7.3.4h.7l12-2.6 6.4-1.1 7.6-1.3 3.5 1.6.4 1.6-1.4 3.4-8.2 2-9.6 2-14.3 3.3-.2.1.2.3 6.4.6 2.8.2h6.8l12.6 1 3.3 2 1.9 2.7-.3 2-5.1 2.6-6.8-1.6-16-3.8-5.4-1.3h-.8v.4l4.6 4.5 8.3 7.5L89 80.1l.5 2.4-1.3 2-1.4-.2-9.2-7-3.6-3-8-6.8h-.5v.7l1.8 2.7 9.8 14.7.5 4.5-.7 1.4-2.6 1-2.7-.6-5.8-8-6-9-4.7-8.2-.5.4-2.9 30.2-1.3 1.5-3 1.2-2.5-2-1.4-3 1.4-6.2 1.6-8 1.3-6.4 1.2-7.9.7-2.6v-.2H49L43 72l-9 12.3-7.2 7.6-1.7.7-3-1.5.3-2.8L24 86l10-12.8 6-7.9 4-4.6-.1-.5h-.3L17.2 77.4l-4.7.6-2-2 .2-3 1-1 8-5.5Z"/></svg>',
+  'dsh': '<svg viewBox="0 0 50 50" width="16" height="16" aria-hidden="true" style="vertical-align:-3px;margin-right:5px"><path fill="#4D6BFE" d="M48.8354 10.0479C48.3232 9.79199 48.1025 10.2798 47.8032 10.5278C47.7007 10.6079 47.6143 10.7119 47.5273 10.8076C46.7793 11.624 45.9048 12.1597 44.7622 12.0957C43.0923 12 41.666 12.5356 40.4058 13.8398C40.1377 12.2319 39.2476 11.272 37.8926 10.6558C37.1836 10.3359 36.4668 10.0156 35.9702 9.31982C35.6235 8.82373 35.5293 8.27197 35.356 7.72754C35.2456 7.3999 35.1353 7.06396 34.7651 7.00781C34.3633 6.94385 34.2056 7.2876 34.0479 7.57568C33.418 8.75195 33.1733 10.0479 33.1973 11.3599C33.2524 14.312 34.4736 16.6641 36.8999 18.3359C37.1758 18.5278 37.2466 18.7197 37.1597 19C36.9946 19.5757 36.7974 20.1357 36.624 20.7119C36.5137 21.0801 36.3486 21.1597 35.9624 21C34.6309 20.4321 33.481 19.5918 32.4644 18.5757C30.7393 16.8721 29.1792 14.9917 27.2334 13.52C26.7764 13.1758 26.3193 12.856 25.8467 12.5518C23.8618 10.584 26.1069 8.96777 26.627 8.77588C27.1704 8.57568 26.8159 7.8877 25.0591 7.896C23.3022 7.90381 21.6953 8.50391 19.647 9.30371C19.3477 9.42383 19.0322 9.51172 18.7095 9.58398C16.8501 9.22363 14.9199 9.14355 12.9033 9.37598C9.10596 9.80762 6.07275 11.6396 3.84326 14.7681C1.16455 18.5278 0.53418 22.7998 1.30664 27.2559C2.11768 31.9521 4.46582 35.8398 8.07373 38.8799C11.8159 42.0322 16.1255 43.5762 21.041 43.2803C24.0269 43.104 27.3516 42.6963 31.1016 39.4561C32.0469 39.936 33.0396 40.1279 34.686 40.272C35.9546 40.3921 37.1758 40.208 38.1211 40.0078C39.6021 39.688 39.4995 38.2881 38.9639 38.0322C34.623 35.9678 35.5762 36.8081 34.71 36.1279C36.9155 33.4639 40.2402 30.6958 41.54 21.728C41.6426 21.0161 41.5557 20.5679 41.54 19.9917C41.5322 19.6396 41.6108 19.5039 42.0049 19.4639C43.0923 19.3359 44.1479 19.0317 45.1167 18.4878C47.9292 16.9199 49.064 14.3438 49.3315 11.2559C49.3711 10.7837 49.3237 10.2959 48.8354 10.0479Z"/></svg>',
+};
+function agentLogo(agent) { return AGENT_LOGOS[agent] || ''; }
+/* 状态/子状态的中文显示。状态字符串同时是内部状态机值和 CSS 类名（.state.Running），
+   所以 CSS 类仍用原文，只有**显示文本**走这张表。home.html 和 session.html 各一份，改时同步。 */
+const STATE_LABEL = { Idle: '空闲', Running: '运行中', 'Waiting Approval': '等待批准', Paused: '已暂停', Done: '已完成', Error: '出错' };
+const SUBSTATE_LABEL = { Thinking: '思考中', Working: '工作中', Searching: '搜索中', Editing: '编辑中', Delegating: '委派中', 'Running Test': '跑测试', 'Running Command': '执行命令', 'Calling MCP': '调用 MCP' };
+const stateLabel = (s) => STATE_LABEL[s] ?? s;
+const subStateLabel = (ss) => SUBSTATE_LABEL[ss] ?? ss;
 
 let tab = sessionStorage.getItem('ccm-tab') || 'home';
 let sessions = [], pending = [], cfg = null, quota = null, inbox = {}, slSeen = null, recentlyExpired = [], recentTools = [], doneTimer = null;
+// agent -> 最后一次上报时间。用来区分「这个后端没有会话」和「这个后端不上报了」
+let agentsSeen = {};
+/** agent -> 首次上报时间。首页分区的顺序按它排，见 agentKinds */
+let agentsFirstSeen = {};
+/**
+ * 会话列表的后端筛选。null = 全部。
+ *
+ * **故意不持久化**：一个记住了的筛选就退化成了模式——你下次打开时
+ * 看到的是一个被收窄过的世界，却不记得是自己收窄的。
+ */
+let agentFilter = null;
+// 最近一次拉取状态是不是失败了。见 refresh()：主数据拉不到时要显式说，
+// 不能留白——留白看起来像功能没做完，而不是连不上
+let fetchFailed = false;
+/**
+ * 第一次见到的服务端版本。和后续拉到的对不上 = 服务升级过，而这个页面
+ * 还在跑旧 JS。见 refresh() 里的说明。
+ */
+let seenVersion = null;
+let staleClient = false;
 /**
  * 手动收掉的「已完成」。只在内存里，不落 localStorage——
  * 它标的是「这一条我看过了」，刷新页面之后那件事本来就该重新判断一次。
@@ -725,6 +835,9 @@ function meter(label, pct) {
  * 只取当前会话的、只留最近 4 条、去掉连续重复的。空的时候整块不出现，
  * 不留一条空轨道占位。
  */
+/** sid -> 上一次渲染时最新的那条。用来判断「这次是不是真的有新东西」 */
+const tickerTop = new Map();
+
 function activityTicker(sid) {
   const rows = [];
   for (let i = recentTools.length - 1; i >= 0 && rows.length < 4; i--) {
@@ -734,10 +847,38 @@ function activityTicker(sid) {
     rows.push(e.text);
   }
   if (!rows.length) return '';
-  const line = rows.map((t, i) => `<span class="${i === 0 ? 'now' : ''}">${esc(t)}</span>`)
-    .join('<span class="sp">›</span>');
-  // 内容复制一份是给滚动用的；放得下时不会滚，那一份也不会被看到
-  return `<div class="ctick"><div class="tk">${line}<span class="sp">›</span>${line}</div></div>`;
+  /**
+   * 履历是**竖着一行一条**，不是横着滚。
+   *
+   * 原来是跑马灯：一行装不下就横向循环滚动。三个问题——
+   *   · 想读第三条得等它滚过来，信息的可读时机由动画决定，不由人决定
+   *   · 长路径（`Downloads/clamicro/ui/home.htm…`）被从中间截断，
+   *     而路径恰恰是靠尾部区分的
+   *   · 横向滚动在手机上不是人熟悉的手势，静止截图里还会被误读成排版错位
+   *
+   * 竖排让卡片自己长高。多出来的那点高度远比"省下来但读不到"划算，
+   * 最多 4 条本来就有上限，不会长到失控。
+   */
+  /**
+   * **有新的一条进来时才动**，不做持续滚动。
+   *
+   * 「感觉是静止的」这个观感是真的：两次工具调用之间它确实不动。但解法
+   * 不是让它一直滚——那就退回跑马灯那三个问题（读的时机被动画决定、
+   * 长路径被截断、手机上不熟悉的横向手势）。
+   *
+   * 这个项目对动效的一贯立场是「**有东西在动本身应该是个信号，不是装饰**」
+   * （原来那句注释就写在滚动判定旁边）。所以只在最新一条**变了**的时候，
+   * 给它一个入场动画：动一下 = 刚才真的跑了一个新工具。
+   *
+   * 只认最上面那条：整列都动会让人以为四条全是新的。
+   */
+  const key = sid || '*';
+  const fresh = tickerTop.get(key) !== rows[0];
+  tickerTop.set(key, rows[0]);
+
+  return `<div class="ctick">${rows
+    .map((t, i) => `<div class="tr${i === 0 ? ' now' : ''}${i === 0 && fresh ? ' fresh' : ''}"><bdi>${esc(t)}</bdi></div>`)
+    .join('')}</div>`;
 }
 
 /**
@@ -752,14 +893,26 @@ function activityTicker(sid) {
  */
 function renderTopUsage() {
   const el = $('topusage');
-  const off = offlineSince !== null && Date.now() - offlineSince > 5000;
+  const off = isDisconnected();
   const idle = !off && !pending.length
     && !sessions.some((s) => s.state === 'Error')
-    && !sessions.some((s) => s.state === 'Running' || s.state === 'Waiting Approval')
+    && !sessions.some((s) => s.state === 'Running' || s.state === 'Waiting Approval' || s.state === 'Paused')
     && !sessions.some((s) => s.state === 'Done' && Date.now() - s.updated_at < 60_000);
 
-  // 空闲时主控台里已经有完整的两行用量，这里再来一条就是重复
-  if (!quota || off || idle) { el.hidden = true; return; }
+  /**
+   * 三种情况不显示这条：
+   *
+   *   idle  —— 空闲时主控台里已经有完整的两行用量，这里再来一条就是重复
+   *   多后端 —— 状态条里每个后端各带自己的用量，比这条通栏更准确（这条
+   *            只可能显示 Claude Code 的窗口配额）。两个都画的话，同一份
+   *            数字在一屏里出现两次，而其中一条还归属不明
+   *   刷不出来的旧数据 —— 这个界面不调 statusLine，数字永远停在那儿。
+   *            把一个看起来确定、其实早已不成立的百分比摆在最顶上，
+   *            比不显示更容易误导。主控台那边会整段说清是怎么回事
+   */
+  const multi = agentKinds().size > 1;
+  const unrefreshable = quotaStale() && quotaWhy() === 'hooks-only';
+  if (!quota || off || idle || multi || unrefreshable) { el.hidden = true; return; }
   el.hidden = false;
 
   const row = (label, w, dim) => {
@@ -804,10 +957,104 @@ function autoDenyBanner() {
   </div>`;
 }
 
-function statusConsole() {
-  const off = offlineSince !== null && Date.now() - offlineSince > 5000;
-  const busy = sessions.filter((s) => s.state === 'Running' || s.state === 'Waiting Approval');
-  const err = sessions.find((s) => s.state === 'Error');
+/**
+ * 这条审批是**哪个模型**要跑的。
+ *
+ * 待审批刻意不分区（它有倒计时，藏进某个区块等于一次静默的自动决策），
+ * 代价就是这张卡飘在所有分区之上、不带归属。单后端时那是隐含的；
+ * 两个后端之后，你正要批准一条命令，却不知道是谁想执行它——
+ * 而这恰恰是最需要知道的时刻：同一条 `rm -rf` 从哪个 agent 发出来，
+ * 决定了你要不要放行。
+ *
+ * 只在真的有多个后端时显示，否则每张卡上都挂一个恒定不变的标签。
+ */
+function approvalAgent(a) {
+  if (agentKinds().size < 2) return '';
+  const s = sessions.find((x) => x.session_id === a.session_id);
+  const k = s?.agent || 'claude-code';
+  const label = cfg?.agents?.[k]?.label;
+  if (!label) return '';
+  return `${agentLogo(k)}<span style="margin-right:6px">${esc(label)}</span>·&nbsp;`;
+}
+
+/** 断线判定的**唯一**出处。轮询失败和 SSE 断开是同一件事的两种察觉方式。 */
+function isDisconnected() {
+  return fetchFailed || (offlineSince !== null && Date.now() - offlineSince > 5000);
+}
+
+/**
+ * 断线的**原因**，不只是断线这个事实。
+ *
+ * 「已经 47 秒没收到消息」描述的是症状，而人要做的动作完全取决于病因：
+ * 手机压根没网 → 连回 Wi-Fi 就好，跟 Mac 无关；手机有网但够不着 Mac →
+ * 多半是换了网络，重连一百次也没用，得换地址或回同一个局域网。
+ * 两种情况给同一句话，等于把判断留给用户自己做。
+ *
+ * 判据用 navigator.onLine。它有名的不可靠**只在 true 那一侧**——true
+ * 仅代表「有一个网络接口」，不代表通到公网。但 false 是可信的：浏览器
+ * 说没有接口时就是真没有。所以只信 false，其余一律归到「够不着 Mac」，
+ * 这也正好是那句话本来的意思（我们只知道自己连不上，不知道为什么）。
+ */
+function offlineCause() {
+  if (navigator.onLine === false) {
+    return {
+      title: '这台手机现在没有网络。',
+      hint: '连回 Wi-Fi 或打开蜂窝数据，页面会自己恢复。',
+      steps: '1. 手机是否连着 Wi-Fi 或蜂窝数据<br>' +
+        '2. 是不是开了飞行模式<br>' +
+        '3. 网恢复后这一页会自动重连，不用手动刷新',
+    };
+  }
+  return {
+    title: '手机有网，但连不上 Mac。',
+    hint: 'Clamicro 只在同一个局域网里可达，最常见的原因是手机换了网络。',
+    steps: '1. 手机和 Mac 是否仍在同一个 Wi-Fi —— 切到蜂窝数据、连了访客网络都会断<br>' +
+      '2. Mac 是否还开着、Clamicro 是否还在运行<br>' +
+      '3. Mac 的局域网 IP 变了的话，这个页面连的是旧地址 ——' +
+      '在 Mac 上跑 <code>npx clamicro qr</code> 重新扫码',
+  };
+}
+
+/** 「N 秒后自动重试」。人知道不用管它，才不会一直盯着按钮。 */
+function autoRetryHint() {
+  if (!autoRetryAt) return '正在重试…';
+  const left = Math.max(0, Math.round((autoRetryAt - Date.now()) / 1000));
+  return left ? `${left} 秒后自动重试` : '正在重试…';
+}
+
+/**
+ * 备用地址。
+ *
+ * 换 IP 是断线的头号原因，而这恰恰是**重连按钮救不了**的一种——地址本身
+ * 就错了，再连一百次还是错的。上一次连上时把服务报的几个地址存下来，
+ * 断线时把「和当前不一样的那个」摆出来，一点就过去。
+ *
+ * 这比「去 Mac 上重新扫码」强在：人拿着手机就能做完。
+ */
+function altAddressHtml() {
+  let alts = [];
+  try { alts = JSON.parse(localStorage.getItem('ccm-alt-urls') || '[]'); } catch { /* 存坏了就当没有 */ }
+  const here = location.origin;
+  const other = alts.filter((u) => typeof u === 'string' && u && u !== here);
+  if (!other.length) return '';
+  return `<div class="oalt">换过网络？试试另一个地址：${other
+    .map((u) => `<a href="${esc(u)}/ui">${esc(u.replace(/^https?:\/\//, ''))}</a>`)
+    .join('　')}</div>`;
+}
+
+/**
+ * 主控台。`only` 传后端 key 时只看那个后端的会话（按模型分区时用）。
+ *
+ * **待审批不受 only 影响**：它有倒计时，被分进某个区块就意味着你得先
+ * 找到那个区块才看得见——漏看一条等于一次静默的自动决策。所以审批态
+ * 始终读全局 pending，跟这张卡挂在谁名下无关。
+ */
+function statusConsole(only) {
+  const off = isDisconnected();
+  const mine = only ? sessions.filter((s) => (s.agent || 'claude-code') === only) : sessions;
+  const busy = mine.filter((s) => s.state === 'Running' || s.state === 'Waiting Approval');
+  const paused = mine.find((s) => s.state === 'Paused');
+  const err = mine.find((s) => s.state === 'Error');
   /**
    * 「已完成」是**一闪而过的状态**，不是一个可以停住的状态。
    *
@@ -820,7 +1067,7 @@ function statusConsole() {
    * 过了就该让位给用量。
    */
   const DONE_WINDOW = 60_000;
-  const done = sessions.find((s) =>
+  const done = mine.find((s) =>
     s.state === 'Done'
     && Date.now() - s.updated_at < DONE_WINDOW
     // 手动关掉的那一条不再顶着。键里带 updated_at：**同一个会话下一次跑完
@@ -829,16 +1076,53 @@ function statusConsole() {
 
   let cls = '', dotLabel = '空闲', right = '', body = '', meta = '';
 
-  if (off) {
+  if (!only && off) {
     cls = 'is-off'; dotLabel = '连接已断开';
+    /**
+     * 断线态**只有一张卡**。
+     *
+     * 之前这一屏会同时叠三张：「拉取状态失败」「与服务失去连接」「连接已断开」——
+     * 三段话说同一件事，三次都让你去 Mac 上扫码。重复不会让信息更清楚，
+     * 只会让人以为这页面坏了；而且真正该做的动作（再连一次）一次都没出现。
+     *
+     * 顺序也换了：**先给出路，再给排查**。
+     * 原来第一屏就是三行排查清单，可绝大多数断线是抖一下——切了 Wi-Fi、
+     * 息屏回来、服务刚重启，按一下就好。把最可能奏效、代价最小的动作放最前，
+     * 排查清单收进折叠里，只给那些真的按了还不行的人。
+     */
+    const secs = Math.round((Date.now() - offlineSince) / 1000);
+    const c = offlineCause();
     body = `<div class="coff">
-      <div class="om">已经 ${Math.round((Date.now() - offlineSince) / 1000)} 秒没有收到 Mac 的消息了。
-        <b>下面显示的是断开前的旧状态。</b></div>
-      <div class="oh">1. Mac 是否还开着、Clamicro 是否还在运行<br>
-        2. 手机和 Mac 是否仍在同一网络<br>
-        3. Mac 的局域网 IP 是否变了 —— 在 Mac 上跑 <code>npx clamicro qr</code> 重新扫码</div>
+      <div class="om"><b>${c.title}</b>${c.hint}</div>
+      <div class="om2">已经 ${secs} 秒没收到 Mac 的消息 —— 下面显示的是断开前的旧状态。</div>
+      <div class="oact">
+        <button class="oretry" id="oretry" type="button">重新连接</button>
+        <span class="oauto" id="oauto">${autoRetryHint()}</span>
+      </div>
+      ${altAddressHtml()}
+      <details class="ohd"><summary>按了还是连不上？</summary>
+        <div class="oh">${c.steps}</div>
+      </details>
     </div>`;
-  } else if (pending.length) {
+  } else if (!only && pending.length && undoing.has(pending[0].id)) {
+    /**
+     * 主控台这条**刚被滑批准**，正在 3 秒撤销窗口里。
+     *
+     * 这一档原来整个不存在：撤销条只渲染在下方列表（rest）里，而主控台
+     * 展示的那条恰好被 rest 过滤掉了。于是**只有一条待审批时**——也就是
+     * 最常见的情况——滑一下批准后，卡片还照常显示「等待批准」，
+     * 既没有「已批准」的反馈，也没有撤销按钮，3 秒后静悄悄地提交。
+     *
+     * 撤销窗口的全部意义是「手滑了还能收回」。它在最常见的路径上不出现，
+     * 等于没有。
+     */
+    const a = pending[0];
+    cls = 'is-wait'; dotLabel = '已批准';
+    body = `<div class="undoline" style="margin-top:10px">
+      <span>已批准 · <b id="undo-${a.id}">3</b> 秒后执行</span>
+      <button onclick="cancelUndo('${a.id}')">撤销</button>
+    </div>`;
+  } else if (!only && pending.length) {
     // 有事等你做决定 —— 这是整个产品存在的理由，压过其他一切状态
     const a = pending[0];
     cls = 'is-wait' + (pending.length > 1 ? ' queued' : ''); dotLabel = '等待批准';
@@ -872,7 +1156,7 @@ function statusConsole() {
     right = pending.length > 1 ? `<span class="ctag warn">1 / ${pending.length}</span>` : '';
     body = `<div class="cwtitle">${a.risk.level === 'high' ? '⚠️ ' : '🔒 '}${esc(a.headline || a.summary)}</div>
       ${a.mismatch ? `<div class="cwmis">⚠️ 这句描述与命令不符，点进去看原文</div>` : ''}
-      <div class="cwsub">${esc(a.tool_name)}${impact ? ` · ${esc(impact)}` : ''}${
+      <div class="cwsub">${approvalAgent(a)}${esc(a.tool_name)}${impact ? ` · ${esc(impact)}` : ''}${
         a.risk.level === 'high' ? ' · <b style="color:var(--no)">高风险</b>' : ''}</div>
       <div class="dl cdl" data-exp="${a.expires_at}" data-born="${a.created_at}" data-auto="${a.auto_decision}">
         <span class="dltext">—</span><span class="dlbar"><i></i></span>
@@ -894,6 +1178,12 @@ function statusConsole() {
       <span class="tdots"><i></i><i></i><i></i></span>
     </div>${activityTicker(s0.session_id)}`;
     meta = busy.length > 1 ? `另有 ${busy.length - 1} 个会话在跑` : '';
+  } else if (paused) {
+    cls = 'is-run'; dotLabel = '已暂停';
+    body = `<div class="crun">
+      <span class="cf">${esc(dirOf(paused))}</span>
+    </div>`;
+    meta = '会在下一个工具调用前停住';
   } else if (done) {
     cls = 'is-done'; dotLabel = '已完成';
     /**
@@ -908,9 +1198,25 @@ function statusConsole() {
       <div class="ct"><b>${esc(dirOf(done))}</b> 已完成${done.last_message ? ' · ' + esc(done.last_message.slice(0, 40)) : ''}</div></div>`;
   } else {
     // 空闲：没有更多要处理的事，用量是此刻唯一值得看的信息
-    right = `<span class="ctag">${sessions.length} 个会话</span>`;
-    body = quotaBody();
-    meta = quotaMeta();
+    right = `<span class="ctag">${mine.length} 个会话</span>`;
+    if (only) {
+      /**
+       * 分区模式下**不画全局额度**：那是 Claude Code 账户的窗口配额，
+       * 画进 DSH 的分区里就会出现「该后端不上报用量」和「5h 22%」并存。
+       *
+       * 但也不能留一张空卡。数字已经在分区标题里（agentUsage），这里只补
+       * 一句「为什么没有数字 / 怎么才有」——而且只对**用窗口配额的后端**说，
+       * 因为那句话讲的就是 statusLine，跟按 token 计费的后端无关。
+       */
+      const cap = capOf({ agent: only });
+      body = (cap.quota === 'window' && !quota)
+        ? `<div style="font-size:12px;color:var(--dim);line-height:1.55">${QUOTA_WHY_TEXT[quotaWhy()]}</div>`
+        : '';
+      meta = '';
+    } else {
+      body = quotaBody();
+      meta = quotaMeta();
+    }
   }
 
   // 窗口到点时主动重画一次。不然要等下一个 30 秒轮询，
@@ -925,7 +1231,10 @@ function statusConsole() {
   // 高危给 denyOnly：密集界面里滑一下就批准 rm -rf 太容易了，批准得进详情页。
   // 选择题一律不接手势——滑一下等于「允许」，而允许它只会把问题弹回 Mac 终端
   const askOnly = pending.length && pending[0].choices && pending[0].choices.length;
-  const swipeAttr = cls.startsWith('is-wait') && pending.length && !askOnly
+  // 已经在撤销窗口里的那条不再接手势：它已经被批准了，再滑一次只会
+  // 触发第二轮 startUndo（那条路现在会先拆掉上一轮，但界面语义仍然是乱的）
+  const undoingNow = pending.length && undoing.has(pending[0].id);
+  const swipeAttr = cls.startsWith('is-wait') && pending.length && !askOnly && !undoingNow
     ? ` swipecard" data-ap="${pending[0].id}" data-risk="${esc(pending[0].risk.level)}`
     : '';
   const card = `<div class="console ${cls}${swipeAttr}">
@@ -948,13 +1257,99 @@ function elapsed(from) {
   return h ? `${p(h)}:${p(m)}:${p(ss)}` : `${p(m)}:${p(ss)}`;
 }
 
+/**
+ * 为什么没有新鲜的额度数据。
+ *
+ * 四种情况，**该做的事完全不同**，所以必须分开说：
+ *
+ *   no-cc      当前跑的全是别的后端 —— 5h/7d 是 Claude Code 账户的属性
+ *   hooks-only hooks 在报，statusLine 一次都没到过
+ *   nothing    什么都没收到 —— 服务刚装上，或者 hooks 掉了
+ *   no-field   statusLine 在报，但载荷里没有额度字段
+ *
+ * `hooks-only` 是新加的，也是这次真踩到的：原来这一档跟 `nothing` 合并成
+ * 一句「下次新开会话时这里会出现数字」。可如果这个界面根本不调用 statusLine
+ * （见下），那句话就是在让人反复做一件永远不会成功的事——他会一直新开会话、
+ * 一直等不到，然后以为 Clamicro 坏了。
+ *
+ * 判据是**观察到的事实**，不是猜的界面类型：hooks 送到了（所以有会话），
+ * statusLine 一次都没送到（slSeen 为空）。这两件事同时成立，只可能是
+ * 「这个 Claude Code 不调 statusLine」。
+ */
+function quotaWhy() {
+  const anyWindow = sessions.some((s) => capOf(s).quota === 'window');
+  if (sessions.length && !anyWindow) return 'no-cc';
+  /**
+   * `slSeen` 只要**历史上**收到过一次就永远非空。直接拿它判「statusLine
+   * 在不在报」，会把「12 小时前报过、之后再没动静」判成 `no-field`
+   * （在报，只是这次没带额度字段）——而那两件事该说的话完全相反：
+   * 前者要告诉你「这个界面不会再刷新它」，后者是「等下一次上报就有了」。
+   *
+   * 实测撞到过：服务重启后 slSeen 是 11.7 小时前的值，界面于是把一份
+   * 刷不出来的旧额度当成「马上就会更新」摆在最显眼处。
+   *
+   * 所以要的是「**最近**有没有在报」，判据跟额度自身的陈旧线同源（10 分钟）。
+   */
+  const slFresh = slSeen && Date.now() - slSeen <= 600000;
+  if (!slFresh) return sessions.length ? 'hooks-only' : 'nothing';
+  return 'no-field';
+}
+
+/**
+ * 「为什么这里没有额度」的一句话版本。
+ *
+ * 原来每条都是两三行的完整解释。那是「一屏只有 Claude Code」时代写的——
+ * 那时候空闲卡除了额度没别的内容，长一点无妨。多后端之后每个分区都有
+ * 自己的标题、状态、用量，再塞一段科普就变成了页面上最长的一块，
+ * 而它讲的还是别人的事。
+ *
+ * 现在一律一句话，只回答「**要不要做点什么**」：
+ *   · 不用做 → 说清没数字的原因就够
+ *   · 要做   → 把那条命令给出来，不解释来龙去脉
+ *
+ * 完整的原委留在这些注释里，不占用户的屏幕。
+ */
+const QUOTA_WHY_TEXT = {
+  'no-cc': '5h / 7d 是 Claude Code 账户的额度，当前没有它的会话。',
+  // statusLine 是终端状态栏的东西，桌面版 / IDE 插件不画状态栏也就不会调它
+  'hooks-only': '这个界面不刷新额度，想看就在终端里跑 <code>claude</code>。',
+  // statusLine 只在会话启动时读一次，装 clamicro 之前开着的会话不会上报
+  nothing: '新开一个会话后这里会出现数字。',
+  'no-field': '这次上报没带额度字段。',
+};
+
 /** 空闲态里的用量两行。没数据就说清为什么没有，而不是留一片空白 */
 function quotaBody() {
   if (!quota) {
-    return `<div style="font-size:12.5px;color:var(--dim);line-height:1.55">${slSeen
-      ? '暂无额度数据 —— 已收到上报，但这次没有额度字段'
-      : 'Claude Code 只在会话<b>启动时</b>读取 statusLine，装 Clamicro 之前就开着的会话不会上报。下次新开会话时这里会出现数字。'}</div>`;
+    return `<div style="font-size:12.5px;color:var(--dim);line-height:1.55">${QUOTA_WHY_TEXT[quotaWhy()]}</div>`;
   }
+
+  /**
+   * **刷不出来的旧数据不该当主角。**
+   *
+   * 这个界面（桌面版 / IDE 插件）不调用 statusLine，所以额度一旦过期就
+   * 永远停在那儿。而空闲态的整张卡片以前是两条粗量表 + 一行小字警告——
+   * 人先看到的是两个醒目的百分比，「这是 11 小时前的」得读完才知道。
+   * 一个看起来确定、其实早已不成立的数字，比没有数字更容易误导。
+   *
+   * 所以这一档反过来：先说清它是什么（一行），再把旧数字缩成一行细字
+   * 放在后面。想看还看得到，但不再是这一屏最抢眼的东西。
+   *
+   * 只对**刷不出来**的那种过期这么做。普通过期（有 statusLine、只是暂时
+   * 没有会话在报）保持原样——那种再开一个会话就刷新了，量表仍然有用。
+   */
+  const unrefreshable = quotaStale() && quotaWhy() === 'hooks-only';
+  if (unrefreshable) {
+    const five = Math.round(quota.five_hour?.pct ?? 0);
+    const seven = Math.round(quota.seven_day?.pct ?? 0);
+    // 一行说完：旧值 + 多旧 + 怎么才能看到新的。
+    // 旧值放前面是因为它才是你瞥一眼想知道的东西，理由跟在后面
+    return `<div style="font-size:12.5px;color:var(--dim);line-height:1.6">
+      <span style="opacity:.6">5h ${five}%　·　7d ${seven}%</span>
+      —— ${esc(ago(quota.at))}前，此界面不刷新，想看当前值在终端跑 <code>claude</code>。
+    </div>`;
+  }
+
   return `<div class="cusage${quotaStale() ? ' stale' : ''}">
     <div class="uline"><div class="um">${meter('5h', quota.five_hour?.pct)}</div>
       <span class="ur">${resetCell(quota.five_hour)}</span></div>
@@ -971,10 +1366,22 @@ function quotaBody() {
  */
 function quotaMeta() {
   if (!quota) return '';
-  const stale = Date.now() - quota.at > 600000;
-  return stale
-    ? `⚠️ 这是 ${ago(quota.at)}的旧数据，当前没有会话在上报。新开一个 Claude Code 会话才会刷新。`
-    : '';
+  if (Date.now() - quota.at <= 600000) return '';
+  /**
+   * 「刷不出来」那一档由 quotaBody 自己整段说清了，这里再来一条就是
+   * 同一句话说两遍。一屏里重复的警告不会让人更重视，只会让人开始忽略警告。
+   */
+  if (quotaWhy() === 'hooks-only') return '';
+  // 「怎么才能刷新」的答案跟 quotaBody 是同一套判据。原来这里无条件说
+  // 「新开一个 Claude Code 会话才会刷新」——对一个根本不调 statusLine 的
+  // 界面来说，那是一句让人白忙的话
+  const why = quotaWhy();
+  const how = why === 'hooks-only'
+    ? '这个界面不调用 statusLine，只有终端里的 claude 会刷新它。'
+    : why === 'no-cc'
+      ? '当前没有 Claude Code 会话在跑。'
+      : '新开一个 Claude Code 会话才会刷新。';
+  return `⚠️ 这是 ${ago(quota.at)}的旧数据。${how}`;
 }
 
 /**
@@ -1197,19 +1604,29 @@ window.addEventListener('beforeinstallprompt', (e) => {
 function renderHome() {
   const busy = sessions.filter((s) => s.state === 'Running' || s.state === 'Waiting Approval');
   const off = offlineSince !== null && Date.now() - offlineSince > 5000;
+  const mixed = agentKinds().size > 1;
 
   let h = '';
 
-  // 连不上服务时，页面上的一切都是旧的。这条必须排在最前面，
-  // 否则用户会盯着一个已经结束的待审批以为系统卡死。
-  if (off) {
-    h += `<div class="card alert notice">
-      <div class="top"><span class="name">⚠️ 与服务失去连接</span></div>
-      <div class="path" style="white-space:normal">下面显示的是断开前的旧状态，不是当前情况。<br>
-        常见原因：Mac 换了网络、IP 变了，这个页面连的是旧地址。<br>
-        在 Mac 上跑 <code>npx clamicro qr</code> 重新扫码。</div>
-    </div>`;
-  }
+  /**
+   * 主数据拉不到时，这条排在最前面，而且**先于**下面那条 SSE 断线提示。
+   *
+   * 两者是不同的故障：SSE 断了说明推送不通，轮询可能还活着；这条说明
+   * 连轮询都拿不到东西，页面上一个数字都不可信。
+   *
+   * 一定要有这块，不能靠「反正列表会是空的」——空列表和「拿不到数据」
+   * 在屏幕上长得一模一样，而它们该做的事完全不同。
+   */
+  /**
+   * 断线**不在这里出卡片**。
+   *
+   * 这里原来有两张（「拉取状态失败」和「与服务失去连接」），加上主控台
+   * 自己的「连接已断开」，一屏三张卡说同一件事，三次都让你去 Mac 上扫码。
+   * 重复不会让信息更清楚，只会让人觉得这页面没做完；而真正该做的动作
+   * （再连一次）一次都没出现。
+   *
+   * 现在统一由 statusConsole 的断线态承载，那里带重连按钮和自动重试。
+   */
 
   // Mac 本地通知是**唯一**的提醒通道，关掉就是彻底静默——而这件事你是
   // 看不出来的：界面一切正常，只是再也不会有东西叫你，高风险操作全都
@@ -1229,11 +1646,57 @@ function renderHome() {
     }
   }
 
+  /**
+   * 服务升级了但这个页面还是旧的。给一条能点的提示，而不是自动重载——
+   * 自动重载会在你读命令读到一半时把页面抽走。
+   */
+  if (staleClient) {
+    h += `<div class="card alert notice">
+      <div class="top"><span class="name">↻ 有新版本</span></div>
+      <div class="path" style="white-space:normal">服务已经升级到 ${esc(cfg?.version ?? '')}，
+        而这个页面还是旧的——界面行为可能和实际不一致。
+        <a href="#" id="reloadnow" style="color:var(--run)">点这里刷新</a></div>
+    </div>`;
+  }
+
   h += autoDenyBanner();
 
   // 主控台先于列表：它是「现在什么情况」的答案，列表是「都有哪些」的明细。
   // 明细排在结论前面，人得先读完才知道该不该关心
-  h += statusConsole();
+  /**
+   * 多后端时**按模型分区**：每个模型一个标题，下面是它自己的状态卡。
+   *
+   * ## 为什么比原来的「一张主控台 + 一条状态条」好
+   *
+   * 原来信息被劈成两半：主控台只显示**最忙的那一个**会话（跨后端挑出来的），
+   * 状态条只显示每个后端的**计数**。想知道「DSH 现在在干什么」得在两处拼，
+   * 而且主控台那张卡到底属于谁，脸上并不写。
+   *
+   * 分区之后每个模型的状态是自足的：名字下面就是它的进度、履历、用量。
+   *
+   * 待审批为什么不进分区，见 statusConsole 里的注释。
+   *
+   * 单后端时不分区——那时标题只会把顶栏已经说过的话再说一遍。
+   */
+  const kinds = [...agentKinds()];
+  if (kinds.length > 1) {
+    // 断线 / 待审批是全局态，跟后端无关，只渲染一次——否则会重复进每个后端组
+    if (isDisconnected() || pending.length) h += statusConsole();
+    for (const k of kinds) {
+      const cap = cfg?.agents?.[k] ?? {};
+      const mine = sessions.filter((s) => (s.agent || 'claude-code') === k);
+      const use = agentUsage(k, cap, mine);
+      h += `<div class="agroup">
+        <div class="ahead">
+          <span class="an">${agentLogo(k)}${esc(cap.label || k)}</span>
+          ${use ? `<span class="au${use.stale ? ' stale' : ''}">${use.html}</span>` : ''}
+        </div>
+        ${statusConsole(k)}
+      </div>`;
+    }
+  } else {
+    h += statusConsole();
+  }
 
   /**
    * 列表必须列全。
@@ -1272,7 +1735,7 @@ function renderHome() {
         </div>
         <div class="head">${esc(a.headline || a.summary)}</div>
         ${a.mismatch ? `<div class="mismatch">⚠️ 这句描述与命令不符，点进去看原文</div>` : ''}
-        <div class="chips">${(a.impact||[]).map((i) => `<span class="chip ${i.tone==='danger'?'danger':i.tone==='calm'?'':'warn'}">${esc(i.label)}</span>`).join('')}
+        <div class="chips">${mixed && a.agent_label ? `<span class="chip agent">${agentLogo(a.agent)}${esc(a.agent_label)}</span>` : ''}${(a.impact||[]).map((i) => `<span class="chip ${i.tone==='danger'?'danger':i.tone==='calm'?'':'warn'}">${esc(i.label)}</span>`).join('')}
           <a class="chip" href="/ui/a/${a.id}" style="color:var(--run)">${a.choices && a.choices.length ? '去回答 ›' : a.risk.level === 'high' ? '需详情页批准 ›' : '详情 ›'}</a>
         </div>
         <div class="dl" data-exp="${a.expires_at}" data-born="${a.created_at}" data-auto="${a.auto_decision}">
@@ -1285,14 +1748,8 @@ function renderHome() {
 
   $('view').innerHTML = h;
 
-  // 只有真的放不下才滚动。手机上一个持续移动的东西是很强的注意力磁铁，
-  // 塞得下的时候让它静止——「有东西在动」本身应该是个信号，不是装饰。
-  const tk = $('view').querySelector('.ctick');
-  if (tk) {
-    const inner = tk.querySelector('.tk');
-    // 内容复制过一份，所以单份宽度是一半
-    tk.classList.toggle('roll', inner.scrollWidth / 2 > tk.clientWidth);
-  }
+  // （履历原来是横向跑马灯，这里负责「放不下才滚」的判定。改成竖排后
+  //   不需要测量了——卡片自己长高，见 activityTicker。）
 
   // 关掉的是**这一批**（按最新一条的时间戳记），再有新的还会出现。
   // 一关永久静音就又变成了「悄悄替你决定」。
@@ -1303,27 +1760,176 @@ function renderHome() {
   };
 }
 
+/**
+ * 某个会话所属后端的能力。
+ *
+ * 能力表由服务端下发（/api/config 的 agents），网页不硬编码后端名——
+ * 网页是缓存得最久的一层，硬编码会导致「服务端已经支持了，手机上还是灰的」。
+ *
+ * cfg 还没到、或者后端不认识时落回 claude-code：这是升级期唯一安全的假设，
+ * 老会话不带 agent 字段，落回空能力会让暂停按钮凭空消失一次。
+ */
+function capOf(s) {
+  const table = cfg?.agents;
+  if (!table) return { label: null, approve: true, pause: true, cancel: true, inbox: true, quota: 'window' };
+  return table[s?.agent] ?? table['claude-code'];
+}
+
+/** token 数写全了太长（1234567），手机上一眼读不出量级。折成 k/M */
+function fmtTokens(n) {
+  if (!Number.isFinite(n) || n <= 0) return '';
+  if (n < 1000) return String(n);
+  if (n < 1_000_000) return (n / 1000).toFixed(n < 10_000 ? 1 : 0) + 'k';
+  return (n / 1_000_000).toFixed(1) + 'M';
+}
+
+/** 现在有几种后端在跑。只有一种时不显示后端标签——没有对比就不需要区分 */
+/**
+ * 现在有哪些后端，**按「谁先连上」排好序**。
+ *
+ * 顺序必须稳定。原来是从 sessions 数组推的，而那个数组按 updated_at 倒序
+ * ——谁刚有动静谁就窜到第一个，于是首页的模型分区每来一个事件就换一次位置。
+ * 你想看的那个模型每次都在不同的地方，得重新找。**位置本身是一种记忆**，
+ * 不该被活跃度改写。
+ *
+ * 排序键取服务端的首次上报时间（agentsFirstSeen）。没有记录的排最后，
+ * 同时间的按名字排——保证任何情况下都是确定序，不会出现两次渲染不一样。
+ */
+function agentKinds() {
+  const ks = new Set(sessions.map((s) => s.agent || 'claude-code'));
+  // 会话都结束了但后端还在上报，它仍然该出现在列表里
+  for (const k of Object.keys(agentsSeen || {})) ks.add(k);
+  const first = (k) => agentsFirstSeen?.[k] ?? Number.MAX_SAFE_INTEGER;
+  return new Set([...ks].sort((a, b) => first(a) - first(b) || a.localeCompare(b)));
+}
+
+/** 后端多久没动静了就算「掉线」。跟额度那条 10 分钟同源，判据只能有一处 */
+const AGENT_STALE_MS = 600_000;
+
+/**
+ * 一个后端的用量，放在状态条那一行下面。
+ *
+ * ## 为什么按后端分开而不是并成一个数
+ *
+ * 它们根本不是同一种量：Claude Code 是**滚动窗口配额**（5h / 7d，用完就得等
+ * 窗口滚过去），DSH 是**累计 token**（按 API key 计费，没有窗口概念）。
+ * 硬凑成一个数字要么得编一个汇率，要么得挑一个丢掉另一个——两条都是在骗人。
+ *
+ * 放进状态条还顺带修了一个位置问题：5h/7d 是 **Claude Code 账户**的属性，
+ * 原来摆在通栏的额度块里，看着像是全局的。挂到它自己那一行，归属就清楚了。
+ *
+ * @returns {{html, stale}|null} null = 这个后端没有可说的用量
+ */
+function agentUsage(kind, cap, mine) {
+  if (cap.quota === 'tokens') {
+    // 累计 token。**不换算成金额**——那要一张会悄悄过期的价目表
+    const total = mine.reduce((n, s) => n + (Number(s.tokens) || 0), 0);
+    if (total) return { html: `${esc(fmtTokens(total))} tok`, stale: false };
+
+    /**
+     * 没有数字时，「还没轮完」和「这个适配器压根不报用量」要分开说。
+     *
+     * 都显示成空白的话，用户会一直等一个永远不会出现的数字——这跟额度那边
+     * 「反复新开会话却等不到 statusLine」是同一个坑。usage_reported 是
+     * 桥接侧在 turn/end 显式给的布尔：字段缺席有两种读法，布尔只有一种。
+     */
+    const done = mine.filter((s) => s.usage_reported !== null);
+    if (done.length && done.every((s) => s.usage_reported === false)) {
+      return { html: '该后端不上报用量', stale: false };
+    }
+    return null; // 还没跑完一轮，不知道 —— 那就先什么都不说
+  }
+
+  if (cap.quota !== 'window') return null;
+
+  /**
+   * 窗口配额是**账户级**的，不属于某一个会话，所以取 store 的 accountLimits
+   * 而不是从 mine 里凑。
+   *
+   * 拿不到数字时说清是哪一种「没有」——它们该做的事完全不同：
+   *   · statusLine 从没到过 → 这个界面不调它（桌面版/IDE 不画状态栏）
+   *   · 到过但没带额度字段 → 上报在跑，只是这次没有
+   */
+  if (!quota) {
+    const why = quotaWhy();
+    return {
+      html: why === 'hooks-only' ? '额度只有终端里的 claude 会上报' : '暂无额度数据',
+      stale: true,
+    };
+  }
+  const five = Math.round(quota.five_hour?.pct ?? 0);
+  const seven = Math.round(quota.seven_day?.pct ?? 0);
+  return { html: `5h ${five}%　·　7d ${seven}%`, stale: quotaStale() };
+}
+
+
 function renderSessions() {
   if (!sessions.length) {
-    $('view').innerHTML = '<div class="empty"><b>暂无活跃会话</b>新开一个 Claude Code 会话即可</div>';
+    // 只提示**本机装了的**后端。把没装的也列出来等于教人去开一个开不了的会话
+    const names = (cfg?.detectedAgents ?? []).map((k) => cfg?.agents?.[k]?.label).filter(Boolean);
+    const hint = names.length ? `新开一个 ${names.join(' 或 ')} 会话即可` : '新开一个会话即可';
+    $('view').innerHTML = `<div class="empty"><b>暂无活跃会话</b>${esc(hint)}</div>`;
     return;
   }
-  $('view').innerHTML = sessions.map((s) => {
-    const c = s.context;
+  const kinds = [...agentKinds()];
+  const mixed = kinds.length > 1;
+
+  /**
+   * 筛选是**视图**，不是模式。
+   *
+   * 「切到某个后端」和「临时只看某个后端」听起来差不多，实际差别很大：
+   * 前者是一个你会忘记自己身处其中的状态——另一边有事发生时你不会知道；
+   * 后者始终有个「全部」摆在旁边，而且下面会明说被藏起来了几个。
+   *
+   * 待审批**永远不受它影响**（见 renderHome：审批列表在筛选之前就画完了）。
+   * 审批有倒计时，被筛掉一条等于一次静默的自动决策——这是这个产品
+   * 最不能出的错，所以筛选的作用域严格限制在「会话列表」这一块。
+   *
+   * 不持久化：下次进来一律是「全部」。一个记住了的筛选就退化成了模式。
+   */
+  const filtered = agentFilter ? sessions.filter((s) => (s.agent || 'claude-code') === agentFilter) : sessions;
+  const hiddenCount = sessions.length - filtered.length;
+
+  const chips = mixed
+    ? `<div class="afilter">
+        <button data-af="" class="${agentFilter ? '' : 'on'}">全部 ${sessions.length}</button>
+        ${kinds.map((k) => {
+          const n = sessions.filter((s) => (s.agent || 'claude-code') === k).length;
+          const label = cfg?.agents?.[k]?.label || k;
+          return `<button data-af="${esc(k)}" class="${agentFilter === k ? 'on' : ''}">${agentLogo(k)}${esc(label)} ${n}</button>`;
+        }).join('')}
+      </div>`
+    : '';
+
+  $('view').innerHTML = chips + filtered.map((s) => {
+    const cap = capOf(s);
+    // ctx 量表只对有上下文窗口读数的后端有意义。没有就整条不画，
+    // 而不是画一条 0% —— 0% 是一个读数，「没有读数」不是 0%
+    const c = cap.quota === 'window' ? s.context : null;
     return `<a class="card" href="/ui/s/${s.session_id}" style="margin-top:14px">
       <div class="top">
         <span class="name">${esc(s.session_name || dirOf(s))}</span>
-        <span class="state ${esc(s.state).replace(/\s/g,'-')}">${esc(s.state)}${s.sub_state ? ' · ' + esc(s.sub_state) : ''}</span>
+        <span class="state ${esc(s.state).replace(/\s/g,'-')}">${esc(stateLabel(s.state))}${s.sub_state ? ' · ' + esc(subStateLabel(s.sub_state)) : ''}</span>
       </div>
       <div class="path">${esc(s.cwd || '')}</div>
       ${c ? `<div class="meters">${meter('ctx', c.used_pct)}</div>` : ''}
       <div class="chips">
+        ${mixed && cap.label ? `<span class="chip agent">${agentLogo(s.agent)}${esc(cap.label)}</span>` : ''}
         ${s.model ? `<span class="chip">${esc(s.model)}</span>` : ''}
         ${s.cost_usd != null ? `<span class="chip">$${s.cost_usd.toFixed(4)}</span>` : ''}
+        ${cap.quota === 'tokens' && s.tokens ? `<span class="chip">${fmtTokens(s.tokens)} tok</span>` : ''}
         <span class="chip" style="color:var(--run)">时间线 ›</span>
       </div>
     </a>`;
-  }).join('');
+  }).join('') + (hiddenCount
+    // 被藏起来的必须说出来。一个安静收窄的列表和一个「就这么多」的列表
+    // 长得一模一样——那正是筛选最容易骗到人的地方
+    ? `<div class="ahidden">另有 ${hiddenCount} 个会话被筛选隐藏了</div>`
+    : '');
+
+  for (const b of document.querySelectorAll('.afilter button')) {
+    b.onclick = () => { agentFilter = b.dataset.af || null; render(); };
+  }
 }
 
 /* ── 列表内快捷滑动 ──
@@ -1351,6 +1957,20 @@ function cancelUndo(id) {
 }
 
 function startUndo(id) {
+  /**
+   * 同一条审批再次进入撤销窗口时，**必须先把上一轮拆干净**。
+   *
+   * 原来是直接 `undoing.set(id, {tick, timer})` 覆盖，旧的两个句柄就此失联：
+   *   · 旧 setTimeout 3 秒后照样触发 → 同一条审批 submit 两次 allow
+   *   · 旧 setInterval 永远没人 clear → 每秒空转到页面关闭
+   *
+   * 覆盖 Map 里的值不等于取消定时器。这类「看起来替换了、其实是多了一份」
+   * 的 bug 不会报错，只会在某些时序下多发一次请求——而这里多发的那次
+   * 是一个**批准**。
+   */
+  const prev = undoing.get(id);
+  if (prev) { clearInterval(prev.tick); clearTimeout(prev.timer); }
+
   let n = 3;
   const tick = setInterval(() => {
     n--;
@@ -1368,6 +1988,11 @@ function startUndo(id) {
 
 /** 只刷倒计时。整页重绘会重建 DOM，把滑动手势的绑定一起弄丢。 */
 function tickDeadlines() {
+  // 「N 秒后自动重试」得每秒走一格。不走的话人会以为它卡住了，
+  // 于是去按重连——而那正是我们想让他不必做的事
+  const auto = document.getElementById('oauto');
+  if (auto) auto.textContent = autoRetryHint();
+
   for (const el of document.querySelectorAll('.dl')) {
     const exp = +el.dataset.exp, born = +el.dataset.born;
     const auto = el.dataset.auto === 'allow';
@@ -1401,10 +2026,22 @@ function attachListSwipes() {
 let sayTarget = null, draft = '';
 
 function renderSay() {
-  const live = sessions.filter((s) => s.state !== 'Done');
-  const pool = live.length ? live : sessions;
+  /**
+   * 只列**能收消息**的会话。
+   *
+   * 注入靠的是 Stop hook 返回 decision:block，那是 Claude Code 的特有原语
+   * （见 src/routes/hooks.mjs）。别的后端没有等价物，列出来只会让人打完字
+   * 点了发送、然后永远等不到——发出去的消息比灰掉的按钮更像成功。
+   */
+  const sendable = sessions.filter((s) => capOf(s).inbox);
+  const live = sendable.filter((s) => s.state !== 'Done');
+  const pool = live.length ? live : sendable;
   if (!pool.length) {
-    $('view').innerHTML = '<div class="empty"><b>没有会话可发送</b>先在 Mac 上开一个 Claude Code 会话</div>';
+    // 有会话但都不支持接收，跟一个会话都没有是两回事，得分开说
+    const blocked = sessions.length - sendable.length;
+    $('view').innerHTML = blocked
+      ? `<div class="empty"><b>没有会话可发送</b>当前 ${blocked} 个会话所属的后端不支持从手机注入消息</div>`
+      : '<div class="empty"><b>没有会话可发送</b>先在 Mac 上开一个会话</div>';
     return;
   }
   if (!pool.find((s) => s.session_id === sayTarget)) sayTarget = pool[0].session_id;
@@ -1418,6 +2055,8 @@ function renderSay() {
     </div>
     <textarea id="draft" placeholder="想让它改做什么？&#10;例如：先别动数据库，改成只读一遍现有 schema">${esc(draft)}</textarea>
     <button class="send" id="sendBtn">加入队列</button>
+    <!-- 发送失败时说清原因，且草稿不清空。见 sendBtn 的 onclick -->
+    <div class="sayerr hidden" id="sayerr"></div>
     <div class="note">
       消息不会立刻送达。hooks 是单向的，唯一的注入点是「这一轮结束时」——
       所以它会在 <b>${esc(target.session_name || dirOf(target))}</b> 跑完当前这一轮后进入对话。
@@ -1437,12 +2076,29 @@ function renderSay() {
     const text = $('draft').value.trim();
     if (!text) return;
     $('sendBtn').disabled = true;
-    await fetch(`/api/sessions/${sayTarget}/say`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text }),
-    }).catch(() => {});
-    draft = '';
-    await refresh();
+    /**
+     * **只有真的排上队了才清空草稿。**
+     *
+     * 原来无论成败都 `draft = ''`：网络断了、服务重启了、队列满了——
+     * 用户刚打完的一段话直接消失，界面上没有任何痕迹，他只会以为发出去了，
+     * 然后等一个永远不来的回应。手机上重打一遍的代价还特别高。
+     */
+    let ok = false, hint = '';
+    try {
+      const r = await fetch(`/api/sessions/${sayTarget}/say`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text }),
+      });
+      ok = r.ok;
+      if (!ok) hint = (await r.json().catch(() => ({}))).hint || '没能加入队列，再试一次。';
+    } catch {
+      hint = '发不出去 —— 和 Mac 的连接断了。你打的字还留着。';
+    }
+    $('sendBtn').disabled = false;
+    if (ok) { draft = ''; await refresh(); return; }
+    // 草稿原样留着，把原因说清楚
+    const note = document.getElementById('sayerr');
+    if (note) { note.textContent = hint; note.classList.remove('hidden'); }
   };
   for (const b of document.querySelectorAll('[data-del]')) {
     b.onclick = async () => {
@@ -1472,6 +2128,17 @@ function render() {
     console.error(err);
   }
   if (tab === 'home') { attachListSwipes(); tickDeadlines(); maybeShowA2HS(); }
+
+  // 重连按钮。断线态每次重绘都会重建这个节点，所以必须在这里重新绑
+  const rl = document.getElementById('reloadnow');
+  if (rl) rl.onclick = (e) => { e.preventDefault(); location.reload(); };
+
+  const rb = document.getElementById('oretry');
+  if (rb) rb.onclick = () => {
+    // 立刻给反馈：断线时点一个没反应的按钮，人会以为连按钮也坏了
+    rb.disabled = true; rb.textContent = '连接中…';
+    reconnect(true);
+  };
   for (const b of document.querySelectorAll('.cdismiss')) {
     b.onclick = (e) => {
       e.stopPropagation();
@@ -1497,19 +2164,85 @@ for (const b of document.querySelectorAll('nav button')) {
   };
 }
 
+/**
+ * 拉一条接口。失败**不抛**，返回 null 由调用方决定怎么降级。
+ *
+ * 单独写出来是因为原来四条挤在一个 Promise.all 里：任何一条失败整个
+ * reject，`render()` 那行就永远不执行——页面停在初始的空 HTML 上，
+ * 而且因为是未处理的 promise rejection，手机浏览器上**一个字都不会显示**。
+ * 表现就是：顶栏、路径条、底部导航都在，中间一片全空，看起来像功能没做完。
+ *
+ * render() 自己那个 try/catch 挡不住这种情况——异常发生在它被调用之前。
+ */
+async function fetchJson(url) {
+  try {
+    const r = await fetch(url);
+    if (!r.ok) return null;
+    return await r.json();
+  } catch {
+    return null; // 网络失败、响应不是 JSON（比如换了 IP 打到别的服务上）
+  }
+}
+
 async function refresh() {
   const [s, a, c, i] = await Promise.all([
-    fetch('/api/sessions').then((r) => r.json()),
-    fetch('/api/approvals').then((r) => r.json()),
-    fetch('/api/config').then((r) => r.json()),
-    fetch('/api/inbox').then((r) => r.json()),
+    fetchJson('/api/sessions'),
+    fetchJson('/api/approvals'),
+    fetchJson('/api/config'),
+    fetchJson('/api/inbox'),
   ]);
-  sessions = s.sessions;
-  quota = s.limits;
-  slSeen = s.statusLineSeenAt;
-  pending = a.approvals; recentlyExpired = a.recentlyExpired || [];
-  cfg = c;
-  inbox = i.inbox || {};
+
+  /**
+   * 会话是主数据，它拉不到就等于什么都不知道——这时候**必须显式说出来**，
+   * 不能拿上一轮的旧数据接着画（那是在展示一个已经不成立的世界），
+   * 也不能留白（那看起来像功能缺失，而不是连接问题）。
+   *
+   * 另外三条是补充信息，缺了就按空的走，页面照常能用。
+   */
+  fetchFailed = !s;
+  if (s) {
+    sessions = s.sessions ?? [];
+    quota = s.limits;
+    slSeen = s.statusLineSeenAt;
+    agentsSeen = s.agentsSeen || {};
+    agentsFirstSeen = s.agentsFirstSeen || {};
+  }
+  if (a) { pending = a.approvals ?? []; recentlyExpired = a.recentlyExpired || []; }
+  if (c) {
+    cfg = c;
+    /**
+     * 页面靠 SSE 长驻，**自己永远不会重新加载 HTML**——服务升级之后，
+     * 你不手动刷新就一直跑旧 JS。服务端发了 no-store，但那只保证「下次
+     * 真去取的时候是新的」，而这个页面可能几天都不去取一次。
+     *
+     * 表现是最难查的那一类：界面看着正常、数据也在更新（那走 API），
+     * 只有渲染逻辑是旧的——修好的 bug 在手机上「还在」，而服务端明明是对的。
+     * 这一轮就因此误判过好几次。
+     *
+     * **只提示，不自动刷新**：你可能正在读一条待审批的命令原文，
+     * 页面在那一刻自己重载等于把它从你眼前抽走。
+     */
+    if (c.version) {
+      if (seenVersion === null) seenVersion = c.version;
+      else if (c.version !== seenVersion) staleClient = true;
+    }
+    /**
+     * 趁连得上的时候把服务报的所有地址存下来。
+     *
+     * 断线最常见的原因是 Mac 换了 IP——那种情况**重连按钮救不了**，
+     * 地址本身就错了。存一份，断线时就能直接给出「试试另一个地址」，
+     * 人拿着手机就能点过去，不用走到电脑前重新扫码。
+     * 存不进去（隐私模式）就当没有，altAddressHtml 会自己降级。
+     */
+    try {
+      const urls = [c.baseUrl, c.altUrl, c.localHost, c.lanIp && `http://${c.lanIp}:${location.port || 8765}`]
+        .filter((u) => typeof u === 'string' && /^https?:\/\//.test(u));
+      if (urls.length) localStorage.setItem('ccm-alt-urls', JSON.stringify([...new Set(urls)]));
+    } catch { /* 存不下就算了 */ }
+  }
+  if (i) inbox = i.inbox || {};
+
+  // 无论如何都要画一次。这是这个函数最重要的一条不变式
   render();
 }
 
@@ -1537,10 +2270,60 @@ function scheduleRender() {
   });
 }
 
+/**
+ * 重连状态。
+ *
+ * ## 为什么手机上必须有「重连」这个动作
+ *
+ * 断线时原来给的唯一出路是「去 Mac 上跑 npx clamicro qr」。可断线最常见的
+ * 原因是**抖一下**——Wi-Fi 切换、手机息屏回来、服务刚好在重启。这些情况
+ * 再连一次就好了，却要求用户走到电脑前重新扫码，代价和收益完全不成比例。
+ *
+ * 而且这条建议在手机上是**做不到**的：人正拿着手机看这一屏，Mac 可能在
+ * 另一个房间。给一个此刻执行不了的指令，等于没给出路。
+ *
+ * 所以：自动重试兜底（用户什么都不用做），手动按钮兜顶（不想等的人立刻可以试）。
+ */
+let es = null;
+let autoRetryTimer = null, autoRetryAt = 0, autoRetryDelay = 0;
+const RETRY_MIN = 3000, RETRY_MAX = 30000;
+
+/**
+ * 重新连接。
+ *
+ * manual=true 是用户按的：立刻试，并且把退避重置——人主动按了，说明他
+ * 认为环境变了（刚切回 Wi-Fi、刚重启服务），这时候还按 30 秒的退避等着，
+ * 按钮就成了摆设。
+ */
+function reconnect(manual) {
+  if (manual) autoRetryDelay = 0;
+  clearTimeout(autoRetryTimer);
+  autoRetryTimer = null;
+  autoRetryAt = 0;
+  try { es?.close(); } catch { /* 已经死了 */ }
+  es = null;
+  refresh();   // 轮询和 SSE 是两条独立的路，先用轮询探一次
+  connect();
+  render();
+}
+
+/** 断线期间按指数退避自动重试。用户什么都不用做是默认路径。 */
+function scheduleAutoRetry() {
+  if (autoRetryTimer) return;
+  autoRetryDelay = Math.min(RETRY_MAX, autoRetryDelay ? autoRetryDelay * 2 : RETRY_MIN);
+  autoRetryAt = Date.now() + autoRetryDelay;
+  autoRetryTimer = setTimeout(() => {
+    autoRetryTimer = null;
+    if (isDisconnected()) reconnect(false);
+  }, autoRetryDelay);
+}
+
 function connect() {
-  const es = new EventSource('/api/stream');
+  es = new EventSource('/api/stream');
   es.onopen = () => {
     if (offlineSince !== null) { offlineSince = null; refresh(); }
+    // 连上了就把退避清零：下一次断线该从 3 秒重新数，而不是接着上一次的 30 秒
+    clearTimeout(autoRetryTimer); autoRetryTimer = null; autoRetryAt = 0; autoRetryDelay = 0;
     // 连接状态只由路径行那个光标表示。标题前面原来还有一个小圆点，
     // 说的是同一件事——两个指示灯说同一句话，人要多看一处才能确认，
     // 而且它们的更新时机不同步时反而制造疑问
@@ -1549,7 +2332,7 @@ function connect() {
   es.onerror = () => {
     // EventSource 会自己重连，短暂抖动不该报警——超过几秒才算真断
     if (offlineSince === null) { offlineSince = Date.now(); setTimeout(render, 5000); }
-    else if (Date.now() - offlineSince > 5000) render();
+    else if (Date.now() - offlineSince > 5000) { scheduleAutoRetry(); render(); }
     // 光标要**立刻**转成「重连中」，不等那 5 秒。它是这一屏活着的证据；
     // 断线最初那几秒里它要是还在若无其事地绿着闪，恰恰是最该说实话的时候
     renderPathBar();
@@ -1586,12 +2369,29 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') refresh();
 });
 
+/**
+ * 网络状态变了要**立刻**反应，不能等退避。
+ *
+ * 退避会一路涨到 30 秒。手机从没网恢复的那一刻正是最该马上连的时刻，
+ * 却可能刚好落在一次 30 秒的等待里——人看着手机已经有信号了，页面还
+ * 写着「连接已断开」，那半分钟里这一屏是在说谎。
+ *
+ * offline 只重画（把病因换成「手机没网」），不重连：没网时重连必然失败，
+ * 只会把退避推得更长。
+ */
+window.addEventListener('online', () => { if (isDisconnected()) reconnect(true); else render(); });
+window.addEventListener('offline', () => render());
+
 setInterval(() => { if (tab === 'home') render(); }, 30000); // 让「N 分后重置」自己走
 setInterval(() => { if (tab === 'home') tickDeadlines(); }, 1000);
 
 render();
 refresh().then(connect).catch(() => {
-  $('view').innerHTML = '<div class="empty"><b>连不上服务</b>确认 clamicro 还在 Mac 上运行</div>';
+  // 首屏就没拿到数据。页面本身是服务发的，所以「发得出页面、取不到数据」
+  // 多半是这中间网络变了（息屏、切网、从后台恢复），和断线态是同一件事，
+  // 用同一套病因说明，别再给一句只说症状的话。
+  const c = offlineCause();
+  $('view').innerHTML = `<div class="empty"><b>${c.title}</b>${c.hint}</div>`;
 });
 </script>
 </body>

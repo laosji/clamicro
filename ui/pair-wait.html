@@ -110,6 +110,19 @@ async function poll() {
   }
 
   if (r.state === 'allowed') {
+    /**
+     * 不是这台 Mac 上的第一次配对 → 直接把引导标记成做过。
+     *
+     * 引导的拦截在首页的同步脚本里（localStorage，早于任何 fetch），所以只能
+     * 在这里、跳过去之前先写好。换手机、清了 Safari 数据、Mac 换 IP 导致
+     * origin 变了——这些都会让 localStorage 归零，而人是同一个人，没必要
+     * 再看一遍新手教程。
+     *
+     * 写不进去（隐私模式）就算了：大不了多引导一次，不能因此进不了看板。
+     */
+    if (r.firstEver === false) {
+      try { localStorage.setItem('ccm-onboarded', '1'); } catch { /* 无所谓 */ }
+    }
     // 令牌已经写进 cookie 了，直接进看板
     show('ok', '配对成功', '正在进入…');
     return void (location.href = '/ui');

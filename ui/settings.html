@@ -10,12 +10,12 @@
 <style>
   :root{
     --bg:#f7f8fa; --card:#fff; --fg:#12151a; --dim:#6b7280; --line:#e4e7ec; --monobg:#f0f2f5;
-    --ok:#0a7d34; --warn:#b54708; --accent:#1570ef;
+    --ok:#0a7d34; --no:#b42318; --warn:#b54708; --accent:#1570ef;
   }
   @media (prefers-color-scheme:dark){
     :root{
       --bg:#0b0d10; --card:#14181d; --fg:#e8eaed; --dim:#8b93a1; --line:#242a32; --monobg:#0f1318;
-      --ok:#4ade80; --warn:#fbbf24; --accent:#60a5fa;
+      --ok:#4ade80; --no:#f87171; --warn:#fbbf24; --accent:#60a5fa;
     }
   }
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
@@ -30,7 +30,15 @@
   /* 桌面上限宽居中。用 body 自身限宽，不要逐个限宽子元素 */
   body{max-width:592px; margin-left:auto; margin-right:auto}
   .nav{display:flex; align-items:center; gap:10px; padding:16px 2px 6px}
-  .nav a{color:var(--accent); text-decoration:none; font-size:15px}
+  /* 返回是个图标，不是文字。
+     触摸目标定到 44×44（低于这个尺寸在手机上就开始误触了），
+     但用负 margin 把多出来的部分吃掉，视觉上仍然贴着左边缘对齐标题。 */
+  .nav a.back{
+    display:flex; align-items:center; justify-content:center;
+    width:44px; height:44px; margin:-11px -12px -11px -13px;
+    color:var(--accent); text-decoration:none; flex:0 0 auto;
+  }
+  .nav a.back svg{width:22px; height:22px; display:block}
   h1{font-size:19px; margin:0}
   h2{font-size:13px; color:var(--dim); font-weight:600; margin:24px 2px 8px}
   .card{background:var(--card); border:1px solid var(--line); border-radius:14px; padding:4px 14px; margin-bottom:10px}
@@ -97,7 +105,14 @@
 <meta name="apple-mobile-web-app-title" content="Clamicro">
 </head>
 <body>
-<div class="nav"><a href="/ui">‹ 返回</a><h1>设置</h1></div>
+<div class="nav">
+  <!-- aria-label 不能省：图标按钮对读屏软件来说本来是无名的 -->
+  <a class="back" href="/ui" aria-label="返回">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+         stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
+  </a>
+  <h1>设置</h1>
+</div>
 
 <h2>提醒</h2>
 <p class="hint" style="margin:0 2px 10px">

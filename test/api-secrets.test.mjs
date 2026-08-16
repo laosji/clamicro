@@ -23,6 +23,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { startServer } from './helpers/server.mjs'
+import { makeAuth } from '../src/auth/token.mjs'
 
 let S, secrets
 
@@ -84,4 +85,52 @@ test('/api/config 是白名单，不是把 config 摊开', async (t) => {
 test('未认证连白名单也拿不到', async () => {
   // 这一层挂了的时候，上面那些断言就是最后一道
   assert.equal((await S.get('/api/config', { raw: true })).status, 401)
+})
+
+// ---------------------------------------------------------------------------
+/**
+ * 吊销必须是「立即」，不是「重启后」。
+ *
+ * 2026-08 架构审查查出的一组：`forget <id>`（手机丢了的标准处置）和
+ * `rotate-token`（怀疑泄漏的标准处置）都是独立 CLI 进程，只改磁盘；
+ * 而运行中的服务只在启动时读过一次配置。于是两条命令**都不生效直到重启**，
+ * 可 forget 自己打印的是「这些设备上的登录立即失效」。
+ *
+ * 在安全工具里，「我以为已经吊销了」比「知道自己没吊销」危险得多。
+ *
+ * 修法是 auth 每次现取（token 也传函数），配合 server.mjs 的 watchConfig
+ * 热加载。这里钉住 auth 那一半——它是能不能「立即」的前提。
+ */
+test('令牌与设备簿改动后，鉴权立刻跟着变（吊销即刻生效）', async (t) => {
+  const config = {
+    token: 'old-token-aaaaaaaaaaaaaaaa',
+    devices: [{ id: 'd1', name: '手机', token: 'dev-token-bbbbbbbbbbbb' }],
+  }
+  const auth = makeAuth(() => config.token, () => config.devices ?? [])
+  const bearer = (t) => ({ headers: { authorization: `Bearer ${t}` } })
+
+  await t.test('轮换前两者都认', () => {
+    assert.equal(auth.authorized(bearer('old-token-aaaaaaaaaaaaaaaa')), true)
+    assert.equal(auth.authorized(bearer('dev-token-bbbbbbbbbbbb')), true)
+  })
+
+  // CLI 改盘 → watchConfig 把新值灌进同一个 config 对象
+  config.token = 'new-token-cccccccccccccc'
+  config.devices = []
+
+  await t.test('泄漏的旧主令牌即刻失效', () => {
+    assert.equal(auth.authorized(bearer('old-token-aaaaaaaaaaaaaaaa')), false)
+  })
+  await t.test('被吊销的设备令牌即刻失效', () => {
+    assert.equal(auth.authorized(bearer('dev-token-bbbbbbbbbbbb')), false)
+  })
+  await t.test('新主令牌立刻可用（原来它反而会 401）', () => {
+    assert.equal(auth.authorized(bearer('new-token-cccccccccccccc')), true)
+  })
+})
+
+test('makeAuth 仍兼容传字符串的老写法', () => {
+  const auth = makeAuth('plain-string-token-xxxx', () => [])
+  assert.equal(auth.authorized({ headers: { authorization: 'Bearer plain-string-token-xxxx' } }), true)
+  assert.equal(auth.authorized({ headers: { authorization: 'Bearer nope' } }), false)
 })

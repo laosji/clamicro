@@ -13,7 +13,7 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, rmSync, mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
@@ -104,4 +104,80 @@ test('statusLine 被别的工具占用时如实报告，不当成缺失去抢', 
   j.statusLine = { type: 'command', command: '/opt/other-tool/line.sh' }
   save(j)
   assert.equal(verifyHooks({ port: 8765 }).statusLine, 'other')
+})
+
+// ---------------------------------------------------------------------------
+/**
+ * 2026-08 架构审查：自愈死循环 + 假成功。
+ *
+ * 触发条件：用户把某个 hook 事件手写成了**非数组**（对象、字符串）。
+ * install 对这种只能 skip，于是 verifyHooks 永远报它 missing，
+ * 而自愈是 5 分钟一轮——每轮都 backup + writeFileSync：
+ *
+ *   · 一天 288 个 settings.json.bak-*，无上限
+ *   · 每轮推一条「hooks 已修复」通知，而一个字节都没修好
+ *
+ * 「说自己修好了但其实没修」比「没修」危险：后者你会去查，前者不会。
+ */
+test('修不好的条目不会造成反复写盘', async (t) => {
+  writeFileSync(SETTINGS_FILE, JSON.stringify({ hooks: { PreToolUse: { 手写成了: '对象' } } }, null, 2))
+
+  const first = install({ port: 8765, ...paths })
+  await t.test('第一轮确实要写（其它事件是真的补上了）', () => {
+    assert.notEqual(first.unchanged, true)
+  })
+
+  await t.test('之后每一轮都不再写盘、不再备份', () => {
+    for (let i = 0; i < 3; i++) {
+      const r = install({ port: 8765, ...paths })
+      assert.equal(r.unchanged, true, `第 ${i + 2} 轮仍在写盘 —— 备份会无限堆积`)
+      assert.equal(r.backupPath, null, '没有改动就不该产生备份文件')
+    }
+  })
+
+  await t.test('那一项确实修不好，且 install 如实报 skip', () => {
+    const r = install({ port: 8765, ...paths })
+    const skipped = r.changes.filter((c) => c.kind === 'skip').map((c) => c.event)
+    assert.ok(skipped.includes('PreToolUse'), 'install 必须如实说它没改这一项')
+    // 修不好就是修不好 —— verifyHooks 不能因为跑过 install 就改口
+    assert.ok(verifyHooks({ port: 8765, ...paths }).missing.includes('PreToolUse'))
+  })
+
+  await t.test('用户手工改回数组后，自愈就能补上了', () => {
+    const s = settings()
+    s.hooks.PreToolUse = []
+    save(s)
+    install({ port: 8765, ...paths })
+    assert.equal(verifyHooks({ port: 8765, ...paths }).ok, true)
+  })
+})
+
+// ---------------------------------------------------------------------------
+/**
+ * 卸载在**从没装过**的机器上跑。
+ *
+ * 这是很常见的误用（「我好像装过？先卸一下试试」），而原来这条路会：
+ *   · ~/.claude 不存在时抛 ENOENT 裸栈
+ *   · 目录存在时**凭空写出一个 settings.json**
+ *
+ * 「卸载」的正确下界是「什么都没变」，不是「建一个空的」。
+ */
+test('没有 settings.json 时卸载不创建任何东西', async (t) => {
+  const gone = join(HOME, '.claude', 'settings.json')
+  rmSync(gone, { force: true })
+
+  await t.test('如实报告「本来就没有」', () => {
+    const r = uninstall({ ...paths })
+    assert.equal(r.absent, true)
+    assert.deepEqual(r.removed, [])
+    assert.equal(r.backupPath, null)
+  })
+
+  await t.test('绝不凭空创建 settings.json', () => {
+    uninstall({ ...paths })
+    assert.equal(existsSync(gone), false, '卸载不该产生一个新文件')
+  })
+
+  // 收拾干净，别影响同文件里后面的用例
+  fresh()
 })

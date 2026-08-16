@@ -221,7 +221,25 @@
     }
 
     card.addEventListener('pointerup', release)
-    card.addEventListener('pointercancel', release)
+    /**
+     * pointercancel **绝不提交**，一律弹回。
+     *
+     * 原来它和 pointerup 绑的是同一个 release()，于是照常走判定、照常 fly()。
+     * 可这两个事件的语义是相反的：
+     *   · pointerup   —— 人松手了，这次交互**结束**了
+     *   · pointercancel —— 系统把指针抢走了，这次交互**没有发生**
+     *
+     * iOS 上抢占很常见：左缘返回手势、来电、下拉控制中心、通知横幅。
+     * 只要那一刻横向位移已经过了阈值，一次被系统打断的滑动就会变成
+     * 一次真实的批准——人根本没松手，操作却执行了。
+     *
+     * 在一个「批准 rm -rf」的界面上，宁可让人重滑一次，也不能替他决定。
+     */
+    card.addEventListener('pointercancel', () => {
+      if (done || !tracking) return
+      tracking = false
+      reset()
+    })
 
     return {
       // 提交失败时把卡片放回来，否则用户面对一张飞走的空卡片
@@ -329,7 +347,12 @@
     }
 
     knob.addEventListener('pointerup', release)
-    knob.addEventListener('pointercancel', release)
+    // 同上：系统抢占指针 ≠ 人做出了决定。详见卡片那一处的注释
+    knob.addEventListener('pointercancel', () => {
+      if (done || !tracking) return
+      tracking = false
+      reset()
+    })
 
     return {
       /**

@@ -35,7 +35,20 @@
   footer{justify-content:center}
   footer button{max-width:290px}
   .nav{display:flex; align-items:center; gap:10px; margin-bottom:8px}
-  .nav a{color:var(--run); text-decoration:none; font-size:15px}
+  /* 返回是图标，跟设置页一致。44×44 触摸目标，负 margin 吃掉多出来的部分
+     让它视觉上仍贴着左边缘与标题对齐 */
+  .nav a.back{
+    display:flex; align-items:center; justify-content:center;
+    width:44px; height:44px; margin:-13px -12px -13px -13px;
+    color:var(--run); text-decoration:none; flex:0 0 auto;
+  }
+  .nav a.back svg{width:22px; height:22px; display:block}
+  /* 后端身份行。描边而不是填色——它是出身，不是状态，
+     不该跟右上角那个状态胶囊抢注意力 */
+  .agent{display:flex; align-items:center; gap:8px; margin-top:7px}
+  .agent .abadge{font-size:11.5px; padding:3px 9px; border-radius:20px;
+    box-shadow:inset 0 0 0 1px var(--line); color:var(--dim)}
+  .agent .amodel{font-size:11.5px; color:var(--dim)}
   .nav h1{font-size:18px; margin:0; font-weight:600; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
   .state{font-size:12px; padding:3px 9px; border-radius:20px; background:var(--monobg); color:var(--dim); flex:0 0 auto}
   .state.Running{color:var(--run)} .state.Done{color:var(--ok)}
@@ -105,11 +118,17 @@
 <body>
 <header>
   <div class="nav">
-    <a href="/ui">‹ 返回</a>
+    <!-- aria-label 不能省：图标按钮对读屏软件来说本来是无名的 -->
+    <a class="back" href="/ui" aria-label="返回">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
+    </a>
     <h1 id="name">—</h1>
     <span class="state" id="state">—</span>
   </div>
   <div class="path" id="path"></div>
+  <!-- 后端身份单独一行：它决定这一页哪些操作有效，不该混在状态数字里 -->
+  <div class="agent hidden" id="agent"></div>
   <div class="chips" id="chips"></div>
 </header>
 
@@ -125,6 +144,11 @@
 const SID = location.pathname.split('/').pop();
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+/* 状态/子状态的中文显示。CSS 类仍用原文，只有显示文本走这张表。和 home.html 各一份，改时同步。 */
+const STATE_LABEL = { Idle: '空闲', Running: '运行中', 'Waiting Approval': '等待批准', Paused: '已暂停', Done: '已完成', Error: '出错' };
+const SUBSTATE_LABEL = { Thinking: '思考中', Working: '工作中', Searching: '搜索中', Editing: '编辑中', Delegating: '委派中', 'Running Test': '跑测试', 'Running Command': '执行命令', 'Calling MCP': '调用 MCP' };
+const stateLabel = (s) => STATE_LABEL[s] ?? s;
+const subStateLabel = (ss) => SUBSTATE_LABEL[ss] ?? ss;
 
 const KIND = {
   'session-start': '会话开始', prompt: '提问', tool: '工具', 'tool-error': '工具失败',
@@ -138,10 +162,13 @@ function clock(ts) {
   return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}:${String(d.getSeconds()).padStart(2,'0')}`;
 }
 
-let session = null;
+let session = null, cap = null;
 
 function render(data) {
   session = data.session;
+  // 后端能力随会话一起下发（见 /api/sessions/:id）。拿不到就按全能力走：
+  // 老服务端不带这个字段，按无能力走会让暂停按钮凭空消失一次
+  cap = data.cap ?? { pause: true, cancel: true, quota: 'window', label: null, cancelNote: null };
   const s = session;
   if (!s) {
     $('name').textContent = '会话已结束';
@@ -150,22 +177,58 @@ function render(data) {
     const dir = (s.cwd || '').split('/').filter(Boolean).pop() || s.session_id.slice(0, 8);
     $('name').textContent = s.session_name || dir;
     $('path').textContent = s.cwd || '';
-    $('state').textContent = s.state + (s.sub_state ? ' · ' + s.sub_state : '');
+    $('state').textContent = stateLabel(s.state) + (s.sub_state ? ' · ' + subStateLabel(s.sub_state) : '');
     $('state').className = 'state ' + String(s.state).replace(/\s/g, '-');
+    /**
+     * 后端**不混在 chip 堆里**，单独占一行放在路径下方。
+     *
+     * 原来它是 chips 里的第一个 chip，和 model、ctx、花费排在一起——
+     * 可这几样回答的是完全不同的问题：后端是「这个会话归谁管」，
+     * 决定了这一页上哪些按钮有效、时间线里的工具名是哪一套词汇；
+     * 而 model/ctx/花费是「它跑得怎么样」。
+     *
+     * 前者是**身份**，混在一排状态数字里就看不见了，而恰恰是它决定了
+     * 你在这一页能做什么。
+     */
+    $('agent').innerHTML = cap.label
+      ? `<span class="abadge">${esc(cap.label)}</span>` +
+        (s.model ? `<span class="amodel">${esc(s.model)}</span>` : '')
+      : '';
+    $('agent').classList.toggle('hidden', !cap.label);
+
     $('chips').innerHTML = [
-      s.model && `<span class="chip">${esc(s.model)}</span>`,
-      s.context && `<span class="chip">ctx ${Math.round(s.context.used_pct)}%</span>`,
+      // model 已经跟着后端徽标一起显示了，这里不再重复
+      cap.quota !== 'window' && s.model && `<span class="chip">${esc(s.model)}</span>`,
+      // 没有上下文窗口读数的后端整条不画，而不是画一个 0%
+      cap.quota === 'window' && s.context && `<span class="chip">ctx ${Math.round(s.context.used_pct)}%</span>`,
       s.cost_usd != null && `<span class="chip">$${s.cost_usd.toFixed(4)}</span>`,
+      // 按 API key 计费的后端没有窗口配额，累计 token 是唯一说得出口的用量。
+      // 不换算成金额——那要一张会悄悄过期的价目表
+      cap.quota === 'tokens' && s.tokens > 0 && `<span class="chip">${
+        s.tokens < 1000 ? s.tokens
+          : s.tokens < 1e6 ? (s.tokens / 1000).toFixed(s.tokens < 1e4 ? 1 : 0) + 'k'
+          : (s.tokens / 1e6).toFixed(1) + 'M'} tok</span>`,
     ].filter(Boolean).join('');
+
+    /**
+     * 暂停/取消按能力显示。
+     *
+     * 这两件事建立在「下一个工具调用前把它挂住」这个拦截点上（src/control.mjs），
+     * 是 Claude Code 的特有原语。别的后端没有等价物时按钮直接不给——
+     * 留一个点了没反应的按钮，用户会以为暂停成功然后走开，那比没有按钮危险。
+     */
+    $('btnPause').classList.toggle('hidden', !cap.pause);
+    $('btnCancel').classList.toggle('hidden', !cap.cancel);
 
     const paused = s.state === 'Paused';
     $('btnPause').textContent = paused ? '恢复' : '暂停';
-    $('btnPause').className = paused ? 'go' : '';
+    $('btnPause').className = (paused ? 'go' : '') + (cap.pause ? '' : ' hidden');
     // Claude Code 没有运行时暂停原语，说清楚才不会以为点了没反应
-    $('note').textContent = paused
-      ? '已请求暂停 — 会在下一个工具调用前停住，当前这一步仍会跑完'
-      : '';
-    $('note').classList.toggle('hidden', !paused);
+    let note = '';
+    if (paused && cap.pause) note = '已请求暂停 — 会在下一个工具调用前停住，当前这一步仍会跑完';
+    else if (!cap.pause && !cap.cancel) note = `${cap.label || '这个后端'}不支持从手机暂停或取消，只能审批。`;
+    $('note').textContent = note;
+    $('note').classList.toggle('hidden', !note);
   }
 
   const evs = (data.events || []).slice().reverse();
@@ -197,7 +260,9 @@ async function act(action) {
 
 $('btnPause').onclick = () => act(session?.state === 'Paused' ? 'resume' : 'pause');
 $('btnCancel').onclick = () => {
-  if (confirm('取消当前这一轮？\n\nClaude Code 会在下一个工具调用前终止本轮任务。')) act('cancel');
+  // 「取消」的实际效果各后端不一样，文案跟着能力表走，别写死成 Claude Code 的
+  const note = cap?.cancelNote ? `\n\n${cap.cancelNote}` : '';
+  if (confirm(`取消当前这一轮？${note}`)) act('cancel');
 };
 
 const es = new EventSource('/api/stream');
