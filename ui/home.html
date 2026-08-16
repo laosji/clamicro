@@ -11,12 +11,16 @@
   :root{
     --bg:#f7f8fa; --card:#fff; --fg:#12151a; --dim:#6b7280; --line:#e4e7ec; --monobg:#f0f2f5;
     --ok:#0a7d34; --no:#b42318; --warn:#b54708; --run:#0a7d34;
+    /* 断线卡的重连按钮和备用地址链接用它。取值和 pair.html / onboarding.html
+       保持一致——这三个页面的「主动作」应该是同一个蓝。 */
+    --accent:#1570ef;
     --tabbg:rgba(255,255,255,.82);
   }
   @media (prefers-color-scheme:dark){
     :root{
       --bg:#0b0d10; --card:#14181d; --fg:#e8eaed; --dim:#8b93a1; --line:#242a32; --monobg:#0f1318;
       --ok:#4ade80; --no:#f87171; --warn:#fbbf24; --run:#39ff8a;
+      --accent:#60a5fa;
       --tabbg:rgba(14,18,23,.82);
     }
   }
@@ -273,7 +277,10 @@
   .coff .ohd summary::-webkit-details-marker{display:none}
   .coff .ohd summary::before{content:'▸ '}
   .coff .ohd[open] summary::before{content:'▾ '}
-  .coff .om{font-size:13px; color:var(--dim); line-height:1.55; margin-bottom:8px}
+  .coff .om{font-size:13px; color:var(--dim); line-height:1.55; margin-bottom:4px}
+  .coff .om b{color:var(--fg); margin-right:5px}
+  /* 秒数和「旧状态」提示降一级：它们是佐证，病因才是要先读到的那句 */
+  .coff .om2{font-size:12px; color:var(--dim); opacity:.75; line-height:1.5}
   .coff .oh{font-size:11.5px; color:var(--dim); border-top:1px solid var(--line);
     padding-top:9px; line-height:1.7; opacity:.85}
 
@@ -975,6 +982,39 @@ function isDisconnected() {
   return fetchFailed || (offlineSince !== null && Date.now() - offlineSince > 5000);
 }
 
+/**
+ * 断线的**原因**，不只是断线这个事实。
+ *
+ * 「已经 47 秒没收到消息」描述的是症状，而人要做的动作完全取决于病因：
+ * 手机压根没网 → 连回 Wi-Fi 就好，跟 Mac 无关；手机有网但够不着 Mac →
+ * 多半是换了网络，重连一百次也没用，得换地址或回同一个局域网。
+ * 两种情况给同一句话，等于把判断留给用户自己做。
+ *
+ * 判据用 navigator.onLine。它有名的不可靠**只在 true 那一侧**——true
+ * 仅代表「有一个网络接口」，不代表通到公网。但 false 是可信的：浏览器
+ * 说没有接口时就是真没有。所以只信 false，其余一律归到「够不着 Mac」，
+ * 这也正好是那句话本来的意思（我们只知道自己连不上，不知道为什么）。
+ */
+function offlineCause() {
+  if (navigator.onLine === false) {
+    return {
+      title: '这台手机现在没有网络。',
+      hint: '连回 Wi-Fi 或打开蜂窝数据，页面会自己恢复。',
+      steps: '1. 手机是否连着 Wi-Fi 或蜂窝数据<br>' +
+        '2. 是不是开了飞行模式<br>' +
+        '3. 网恢复后这一页会自动重连，不用手动刷新',
+    };
+  }
+  return {
+    title: '手机有网，但连不上 Mac。',
+    hint: 'Clamicro 只在同一个局域网里可达，最常见的原因是手机换了网络。',
+    steps: '1. 手机和 Mac 是否仍在同一个 Wi-Fi —— 切到蜂窝数据、连了访客网络都会断<br>' +
+      '2. Mac 是否还开着、Clamicro 是否还在运行<br>' +
+      '3. Mac 的局域网 IP 变了的话，这个页面连的是旧地址 ——' +
+      '在 Mac 上跑 <code>npx clamicro qr</code> 重新扫码',
+  };
+}
+
 /** 「N 秒后自动重试」。人知道不用管它，才不会一直盯着按钮。 */
 function autoRetryHint() {
   if (!autoRetryAt) return '正在重试…';
@@ -1051,18 +1091,17 @@ function statusConsole(only) {
      * 排查清单收进折叠里，只给那些真的按了还不行的人。
      */
     const secs = Math.round((Date.now() - offlineSince) / 1000);
+    const c = offlineCause();
     body = `<div class="coff">
-      <div class="om">已经 ${secs} 秒没有收到 Mac 的消息了。<b>下面显示的是断开前的旧状态。</b></div>
+      <div class="om"><b>${c.title}</b>${c.hint}</div>
+      <div class="om2">已经 ${secs} 秒没收到 Mac 的消息 —— 下面显示的是断开前的旧状态。</div>
       <div class="oact">
         <button class="oretry" id="oretry" type="button">重新连接</button>
         <span class="oauto" id="oauto">${autoRetryHint()}</span>
       </div>
       ${altAddressHtml()}
       <details class="ohd"><summary>按了还是连不上？</summary>
-        <div class="oh">1. Mac 是否还开着、Clamicro 是否还在运行<br>
-          2. 手机和 Mac 是否仍在同一网络<br>
-          3. Mac 的局域网 IP 变了的话，这个页面连的是旧地址 ——
-             在 Mac 上跑 <code>npx clamicro qr</code> 重新扫码</div>
+        <div class="oh">${c.steps}</div>
       </details>
     </div>`;
   } else if (!only && pending.length && undoing.has(pending[0].id)) {
@@ -2330,12 +2369,29 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') refresh();
 });
 
+/**
+ * 网络状态变了要**立刻**反应，不能等退避。
+ *
+ * 退避会一路涨到 30 秒。手机从没网恢复的那一刻正是最该马上连的时刻，
+ * 却可能刚好落在一次 30 秒的等待里——人看着手机已经有信号了，页面还
+ * 写着「连接已断开」，那半分钟里这一屏是在说谎。
+ *
+ * offline 只重画（把病因换成「手机没网」），不重连：没网时重连必然失败，
+ * 只会把退避推得更长。
+ */
+window.addEventListener('online', () => { if (isDisconnected()) reconnect(true); else render(); });
+window.addEventListener('offline', () => render());
+
 setInterval(() => { if (tab === 'home') render(); }, 30000); // 让「N 分后重置」自己走
 setInterval(() => { if (tab === 'home') tickDeadlines(); }, 1000);
 
 render();
 refresh().then(connect).catch(() => {
-  $('view').innerHTML = '<div class="empty"><b>连不上服务</b>确认 clamicro 还在 Mac 上运行</div>';
+  // 首屏就没拿到数据。页面本身是服务发的，所以「发得出页面、取不到数据」
+  // 多半是这中间网络变了（息屏、切网、从后台恢复），和断线态是同一件事，
+  // 用同一套病因说明，别再给一句只说症状的话。
+  const c = offlineCause();
+  $('view').innerHTML = `<div class="empty"><b>${c.title}</b>${c.hint}</div>`;
 });
 </script>
 </body>
