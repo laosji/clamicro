@@ -144,6 +144,11 @@
 const SID = location.pathname.split('/').pop();
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+/* 状态/子状态的中文显示。CSS 类仍用原文，只有显示文本走这张表。和 home.html 各一份，改时同步。 */
+const STATE_LABEL = { Idle: '空闲', Running: '运行中', 'Waiting Approval': '等待批准', Paused: '已暂停', Done: '已完成', Error: '出错' };
+const SUBSTATE_LABEL = { Thinking: '思考中', Working: '工作中', Searching: '搜索中', Editing: '编辑中', Delegating: '委派中', 'Running Test': '跑测试', 'Running Command': '执行命令', 'Calling MCP': '调用 MCP' };
+const stateLabel = (s) => STATE_LABEL[s] ?? s;
+const subStateLabel = (ss) => SUBSTATE_LABEL[ss] ?? ss;
 
 const KIND = {
   'session-start': '会话开始', prompt: '提问', tool: '工具', 'tool-error': '工具失败',
@@ -172,7 +177,7 @@ function render(data) {
     const dir = (s.cwd || '').split('/').filter(Boolean).pop() || s.session_id.slice(0, 8);
     $('name').textContent = s.session_name || dir;
     $('path').textContent = s.cwd || '';
-    $('state').textContent = s.state + (s.sub_state ? ' · ' + s.sub_state : '');
+    $('state').textContent = stateLabel(s.state) + (s.sub_state ? ' · ' + subStateLabel(s.sub_state) : '');
     $('state').className = 'state ' + String(s.state).replace(/\s/g, '-');
     /**
      * 后端**不混在 chip 堆里**，单独占一行放在路径下方。

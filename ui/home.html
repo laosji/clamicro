@@ -751,6 +751,12 @@ const AGENT_LOGOS = {
   'dsh': '<svg viewBox="0 0 50 50" width="16" height="16" aria-hidden="true" style="vertical-align:-3px;margin-right:5px"><path fill="#4D6BFE" d="M48.8354 10.0479C48.3232 9.79199 48.1025 10.2798 47.8032 10.5278C47.7007 10.6079 47.6143 10.7119 47.5273 10.8076C46.7793 11.624 45.9048 12.1597 44.7622 12.0957C43.0923 12 41.666 12.5356 40.4058 13.8398C40.1377 12.2319 39.2476 11.272 37.8926 10.6558C37.1836 10.3359 36.4668 10.0156 35.9702 9.31982C35.6235 8.82373 35.5293 8.27197 35.356 7.72754C35.2456 7.3999 35.1353 7.06396 34.7651 7.00781C34.3633 6.94385 34.2056 7.2876 34.0479 7.57568C33.418 8.75195 33.1733 10.0479 33.1973 11.3599C33.2524 14.312 34.4736 16.6641 36.8999 18.3359C37.1758 18.5278 37.2466 18.7197 37.1597 19C36.9946 19.5757 36.7974 20.1357 36.624 20.7119C36.5137 21.0801 36.3486 21.1597 35.9624 21C34.6309 20.4321 33.481 19.5918 32.4644 18.5757C30.7393 16.8721 29.1792 14.9917 27.2334 13.52C26.7764 13.1758 26.3193 12.856 25.8467 12.5518C23.8618 10.584 26.1069 8.96777 26.627 8.77588C27.1704 8.57568 26.8159 7.8877 25.0591 7.896C23.3022 7.90381 21.6953 8.50391 19.647 9.30371C19.3477 9.42383 19.0322 9.51172 18.7095 9.58398C16.8501 9.22363 14.9199 9.14355 12.9033 9.37598C9.10596 9.80762 6.07275 11.6396 3.84326 14.7681C1.16455 18.5278 0.53418 22.7998 1.30664 27.2559C2.11768 31.9521 4.46582 35.8398 8.07373 38.8799C11.8159 42.0322 16.1255 43.5762 21.041 43.2803C24.0269 43.104 27.3516 42.6963 31.1016 39.4561C32.0469 39.936 33.0396 40.1279 34.686 40.272C35.9546 40.3921 37.1758 40.208 38.1211 40.0078C39.6021 39.688 39.4995 38.2881 38.9639 38.0322C34.623 35.9678 35.5762 36.8081 34.71 36.1279C36.9155 33.4639 40.2402 30.6958 41.54 21.728C41.6426 21.0161 41.5557 20.5679 41.54 19.9917C41.5322 19.6396 41.6108 19.5039 42.0049 19.4639C43.0923 19.3359 44.1479 19.0317 45.1167 18.4878C47.9292 16.9199 49.064 14.3438 49.3315 11.2559C49.3711 10.7837 49.3237 10.2959 48.8354 10.0479Z"/></svg>',
 };
 function agentLogo(agent) { return AGENT_LOGOS[agent] || ''; }
+/* 状态/子状态的中文显示。状态字符串同时是内部状态机值和 CSS 类名（.state.Running），
+   所以 CSS 类仍用原文，只有**显示文本**走这张表。home.html 和 session.html 各一份，改时同步。 */
+const STATE_LABEL = { Idle: '空闲', Running: '运行中', 'Waiting Approval': '等待批准', Paused: '已暂停', Done: '已完成', Error: '出错' };
+const SUBSTATE_LABEL = { Thinking: '思考中', Working: '工作中', Searching: '搜索中', Editing: '编辑中', Delegating: '委派中', 'Running Test': '跑测试', 'Running Command': '执行命令', 'Calling MCP': '调用 MCP' };
+const stateLabel = (s) => STATE_LABEL[s] ?? s;
+const subStateLabel = (ss) => SUBSTATE_LABEL[ss] ?? ss;
 
 let tab = sessionStorage.getItem('ccm-tab') || 'home';
 let sessions = [], pending = [], cfg = null, quota = null, inbox = {}, slSeen = null, recentlyExpired = [], recentTools = [], doneTimer = null;
@@ -870,7 +876,7 @@ function renderTopUsage() {
   const off = isDisconnected();
   const idle = !off && !pending.length
     && !sessions.some((s) => s.state === 'Error')
-    && !sessions.some((s) => s.state === 'Running' || s.state === 'Waiting Approval')
+    && !sessions.some((s) => s.state === 'Running' || s.state === 'Waiting Approval' || s.state === 'Paused')
     && !sessions.some((s) => s.state === 'Done' && Date.now() - s.updated_at < 60_000);
 
   /**
@@ -931,6 +937,26 @@ function autoDenyBanner() {
   </div>`;
 }
 
+/**
+ * 这条审批是**哪个模型**要跑的。
+ *
+ * 待审批刻意不分区（它有倒计时，藏进某个区块等于一次静默的自动决策），
+ * 代价就是这张卡飘在所有分区之上、不带归属。单后端时那是隐含的；
+ * 两个后端之后，你正要批准一条命令，却不知道是谁想执行它——
+ * 而这恰恰是最需要知道的时刻：同一条 `rm -rf` 从哪个 agent 发出来，
+ * 决定了你要不要放行。
+ *
+ * 只在真的有多个后端时显示，否则每张卡上都挂一个恒定不变的标签。
+ */
+function approvalAgent(a) {
+  if (agentKinds().size < 2) return '';
+  const s = sessions.find((x) => x.session_id === a.session_id);
+  const k = s?.agent || 'claude-code';
+  const label = cfg?.agents?.[k]?.label;
+  if (!label) return '';
+  return `${agentLogo(k)}<span style="margin-right:6px">${esc(label)}</span>·&nbsp;`;
+}
+
 /** 断线判定的**唯一**出处。轮询失败和 SSE 断开是同一件事的两种察觉方式。 */
 function isDisconnected() {
   return fetchFailed || (offlineSince !== null && Date.now() - offlineSince > 5000);
@@ -974,6 +1000,7 @@ function statusConsole(only) {
   const off = isDisconnected();
   const mine = only ? sessions.filter((s) => (s.agent || 'claude-code') === only) : sessions;
   const busy = mine.filter((s) => s.state === 'Running' || s.state === 'Waiting Approval');
+  const paused = mine.find((s) => s.state === 'Paused');
   const err = mine.find((s) => s.state === 'Error');
   /**
    * 「已完成」是**一闪而过的状态**，不是一个可以停住的状态。
@@ -1077,7 +1104,7 @@ function statusConsole(only) {
     right = pending.length > 1 ? `<span class="ctag warn">1 / ${pending.length}</span>` : '';
     body = `<div class="cwtitle">${a.risk.level === 'high' ? '⚠️ ' : '🔒 '}${esc(a.headline || a.summary)}</div>
       ${a.mismatch ? `<div class="cwmis">⚠️ 这句描述与命令不符，点进去看原文</div>` : ''}
-      <div class="cwsub">${esc(a.tool_name)}${impact ? ` · ${esc(impact)}` : ''}${
+      <div class="cwsub">${approvalAgent(a)}${esc(a.tool_name)}${impact ? ` · ${esc(impact)}` : ''}${
         a.risk.level === 'high' ? ' · <b style="color:var(--no)">高风险</b>' : ''}</div>
       <div class="dl cdl" data-exp="${a.expires_at}" data-born="${a.created_at}" data-auto="${a.auto_decision}">
         <span class="dltext">—</span><span class="dlbar"><i></i></span>
@@ -1099,6 +1126,12 @@ function statusConsole(only) {
       <span class="tdots"><i></i><i></i><i></i></span>
     </div>${activityTicker(s0.session_id)}`;
     meta = busy.length > 1 ? `另有 ${busy.length - 1} 个会话在跑` : '';
+  } else if (paused) {
+    cls = 'is-run'; dotLabel = '已暂停';
+    body = `<div class="crun">
+      <span class="cf">${esc(dirOf(paused))}</span>
+    </div>`;
+    meta = '会在下一个工具调用前停住';
   } else if (done) {
     cls = 'is-done'; dotLabel = '已完成';
     /**
@@ -1824,7 +1857,7 @@ function renderSessions() {
     return `<a class="card" href="/ui/s/${s.session_id}" style="margin-top:14px">
       <div class="top">
         <span class="name">${esc(s.session_name || dirOf(s))}</span>
-        <span class="state ${esc(s.state).replace(/\s/g,'-')}">${esc(s.state)}${s.sub_state ? ' · ' + esc(s.sub_state) : ''}</span>
+        <span class="state ${esc(s.state).replace(/\s/g,'-')}">${esc(stateLabel(s.state))}${s.sub_state ? ' · ' + esc(subStateLabel(s.sub_state)) : ''}</span>
       </div>
       <div class="path">${esc(s.cwd || '')}</div>
       ${c ? `<div class="meters">${meter('ctx', c.used_pct)}</div>` : ''}
