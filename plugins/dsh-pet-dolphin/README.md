@@ -1,18 +1,18 @@
 # dsh-pet-dolphin
 
-A pixel-art **DeepSeek dolphin pet** that floats over the DeepSeek Harness Web GUI.
+A pixel-art **DeepSeek whale** pet that swims around the DeepSeek Harness Web GUI.
 
-It is a DSH **client plugin** (dual-face package): a no-op node half plus a browser half that registers a little animated dolphin into the built-in `shell.overlay` slot — the frame-wide floating layer, so it stays above every column and outside the scroll containers.
+It is a DSH **client plugin** (dual-face package): a no-op node half plus a browser half that registers a little whale into the built-in `shell.overlay` slot — the frame-wide floating layer.
 
-- **Position** — bottom-right corner, above the whole app.
-- **Idle** — gently bobs, wags its tail (two fork frames), occasionally blinks.
+- **Looks** — modelled on the official DeepSeek mark (a whale with a rounded head and an up-flipped tail), DeepSeek blue palette.
+- **Swims** — drifts left↔right across the bottom, flips to face its direction of travel, wags its tail, occasionally blinks.
+- **Splash** — blows bubbles from its blowhole as it cruises.
 - **Click** — opens the [Clamicro](https://github.com/laosji/clamicro) phone dashboard (or press `Enter`/`Space` when focused).
-- Colors are the DeepSeek blue family; it renders crisply with `image-rendering: pixelated` + `shape-rendering: crispEdges`, on both light and dark themes.
 
 ## 点它有什么用
 
 点一下 = 打开 Clamicro 的手机看板。没配对过的话，那一页上就是配对二维码的入口——
-所以「点海豚 → 扫码 → 手机上批准 DSH 的操作」是一条一次点击就走通的路。
+所以「点鲸鱼 → 扫码 → 手机上批准 DSH 的操作」是一条一次点击就走通的路。
 
 clamicro 没在跑时不会甩一个浏览器错误页，而是告诉你在终端执行 `npx clamicro qr`。
 
@@ -24,7 +24,7 @@ Pet 跑在 DSH 的 `127.0.0.1:3080`，Clamicro 在 `8765`，是**跨源**的。�
 
 所以这里走的是**普通导航**（`window.open`），不是 XHR：不涉及跨源，Clamicro 那边
 一个字节都不用改，也没有任何防护被绕过。二维码本来就在 Clamicro 自己的页面上
-（同源），点海豚只是把入口前移了一步。
+（同源），点鲸鱼只是把入口前移了一步。
 
 活性探测用 `fetch(mode:'no-cors')`：响应是 opaque，**读不到任何内容**，只有
 「连得上/连不上」这一个 bit——刚好够决定是开窗还是给提示。
@@ -56,37 +56,19 @@ dsh-pet-dolphin/
 
 ## Tweak the art
 
-1. Edit `dev/art.mjs` (the outline table `OUTLINE`/`HEAD`/`TAIL_A`/`TAIL_B`,
-   the color layers, and the `frames` loop).
-2. Rebuild the browser bundle:
+1. Edit `dev/art.mjs` (outline table `OUTLINE`, color layers, `frames`).
+2. Rebuild: `node dev/build.mjs`
+3. Reload the harness page (the bundle is served `no-cache`).
 
-   ```bash
-   node dev/build.mjs
-   ```
+To see a PNG contact sheet: `node dev/preview.mjs` → `dev/preview.png`.
 
-3. Reload the harness page. (The bundle is served `no-cache`; a plain refresh
-   re-fetches it. The client-plugin HMR receiver only auto-swaps when a
-   `pnpm run dev:web` watcher is rebuilding bundles, which is not set up for
-   this standalone plugin — so use a manual refresh.)
-
-To see a PNG contact sheet of every frame (for eyeballing the art):
-
-```bash
-node dev/preview.mjs   # → dev/preview.png
-```
-
-## How it is installed
+## Install
 
 Two parts, both under `~/.dsh`:
 
-1. A symlink in the shared module fallback (one link per package — the same
-   convention `healProfilesModuleFallback` uses, and it will not delete it):
-
-   ```bash
-   ln -sfn /path/to/dsh-pet-dolphin ~/.dsh/profiles/node_modules/dsh-pet-dolphin
-   ```
-
-2. A client-plugin row in the web profile's user patch layer
+1. The package in the shared module fallback
+   (`~/.dsh/profiles/node_modules/dsh-pet-dolphin`) — a symlink to this source or a copy.
+2. A client-plugin row in the profile patch layer
    (`~/.dsh/profiles/web/cordis.patch.yml`):
 
    ```yaml
@@ -95,16 +77,4 @@ Two parts, both under `~/.dsh`:
          name: dsh-pet-dolphin
    ```
 
-**Restart the harness** (`dsh web`) for the new row to be picked up — the Web
-profile ships with HMR disabled, and the Loader does not watch patch files.
-
-## Uninstall
-
-Remove the `insert:` block from `~/.dsh/profiles/web/cordis.patch.yml` and
-delete the symlink:
-
-```bash
-rm ~/.dsh/profiles/node_modules/dsh-pet-dolphin
-```
-
-Then restart the harness.
+**Restart the harness** (`dsh web`) for a new row; a page refresh re-fetches the bundle.

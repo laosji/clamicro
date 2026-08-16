@@ -3,7 +3,7 @@
  * Usage: node dev/preview.mjs [out.png]
  * Requires sharp from the DSH checkout node_modules.
  */
-import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import { palette, frames, canvas } from "./art.mjs";
 
@@ -34,7 +34,7 @@ function frameSvg(grid) {
 }
 
 async function main() {
-  const out = process.argv[2] ?? new URL("./preview.png", import.meta.url).pathname;
+  const out = process.argv[2] ?? fileURLToPath(new URL("./preview.png", import.meta.url));
   const cols = Math.ceil(Math.sqrt(frames.length));
   const cellW = W * SCALE + GAP;
   const cellH = H * SCALE + GAP;
