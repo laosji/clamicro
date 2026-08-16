@@ -1,6 +1,6 @@
 {
   "name": "dsh-pet-cat",
-  "version": "0.2.0",
+  "version": "2.15.0",
   "description": "Pixel-art cat pet that hops around the DSH web GUI (shell.overlay slot).",
   "type": "module",
   "exports": {

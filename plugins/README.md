@@ -36,6 +36,15 @@ dsh plugin --profile web add <包名>
       name: dsh-pet-cat
 ```
 
+## 版本号
+
+两个插件的 `version` 始终等于 clamicro 自己的版本 —— 它们随 clamicro 一起发布，
+不单独发 npm、也不单独打 tag。各自维护一个号只会制造假信息：包里写着 0.2.0，
+而它其实是 2.15.0 那次发出去的东西，拿这个号去翻变更记录什么也找不到。
+
+发版前跑 `node scripts/sync-plugin-versions.mjs` 对齐，`test/plugin-versions.test.mjs`
+会盯着有没有漂。
+
 ## 为什么分成两个
 
 `dsh-bridge` 是**功能**：它拿得到会话事件、能挂住工具调用等你在手机上批准，
