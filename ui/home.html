@@ -291,15 +291,28 @@
   .autodeny .am{font-size:11px; color:var(--dim); overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
   .autodeny .ax{font-size:15px; color:var(--dim); background:none; border:0; padding:2px 4px; cursor:pointer}
 
-  /* 队列：底下垫两张卡，一眼看出「后面还有」 */
+  /* 队列：底下垫两张卡，一眼看出「后面还有」。
+   *
+   * 用外投影画，**不能**用 ::before/::after。.console 是 overflow:hidden
+   * （滑动的 tint/stamp 要被圆角裁住），而这两层定位在 bottom:-7px/-14px
+   * ——正好在盒子外面，会被整个裁掉。当时屏幕上剩下的是落在卡片**内部**
+   * 的那条上边缘：待审批卡底部凭空多一条圆角线，看着像渲染坏了，而不是
+   * 「后面还有一张卡」。
+   *
+   * 外投影不受元素自身 overflow 影响，圆角也自动跟着 border-radius 走。
+   * 每层两道：负 spread 的那道是卡片体，大一圈的那道露出 1px 当描边。
+   * 写在 .is-wait.queued 上是因为 box-shadow 不能叠加声明——必须把
+   * is-wait 的光晕一起带上，否则队列态会把光晕顶掉。
+   */
   .console.queued{margin-bottom:26px}
-  .console.queued::before, .console.queued::after{
-    content:""; position:absolute; left:50%; transform:translateX(-50%);
-    border:1px solid color-mix(in srgb,var(--warn) 22%,transparent);
-    border-radius:16px; background:var(--card); z-index:-1;
+  .console.is-wait.queued{
+    box-shadow:
+      0 0 26px -12px color-mix(in srgb,var(--warn) 70%,transparent),
+      0 7px 0 -1px var(--card),
+      0 7px 0 0 color-mix(in srgb,var(--warn) 22%,transparent),
+      0 15px 0 -4px var(--card),
+      0 15px 0 -3px color-mix(in srgb,var(--warn) 14%,transparent);
   }
-  .console.queued::before{width:calc(100% - 14px); bottom:-7px; height:22px; opacity:.75}
-  .console.queued::after{width:calc(100% - 30px); bottom:-14px; height:22px; opacity:.45}
   .qdots{display:flex; gap:5px; justify-content:center; margin-top:11px}
   .qdots i{width:5px; height:5px; border-radius:50%; background:var(--line)}
   .qdots i.on{background:var(--warn)}
