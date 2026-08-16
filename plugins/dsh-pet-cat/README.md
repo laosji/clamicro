@@ -4,7 +4,7 @@ A pixel-art **cat** pet that hops in the corner of the DeepSeek Harness Web GUI.
 
 It is a DSH **client plugin** (dual-face package): a no-op node half plus a browser half that registers the cat into the built-in `shell.overlay` slot — the frame-wide floating layer.
 
-- **Looks** — a chunky 16×16 orange-tabby cat face: pointy ears, wide-set eyes with a glint, pink nose, cream muzzle. Drawn pixel-by-pixel in `dev/art.mjs` and rendered as an SVG grid (`image-rendering: pixelated`), so it stays crisp at any zoom.
+- **Looks** — a chunky 16×16 orange-tabby cat face: tall triangular ears with pink insides, eyes with a glint, pink nose, cream muzzle, and a dark outline so it still reads on warm backgrounds. Drawn pixel-by-pixel in `dev/art.mjs` — you author the *fill* only, the outline is generated — and rendered as an SVG grid (`image-rendering: pixelated`), so it stays crisp at any zoom.
 - **Hops** — sits in the bottom-right corner, floats gently and hops on a 2.6s cycle, squashing on landing. Blinks and grins between idles.
 - **Click** — opens the [Clamicro](https://github.com/laosji/clamicro) phone dashboard (or press `Enter`/`Space` when focused), with a squash-and-stretch jump.
 

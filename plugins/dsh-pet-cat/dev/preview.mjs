@@ -8,11 +8,17 @@ import { createRequire } from "node:module";
 import { palette, frames, canvas } from "./art.mjs";
 
 const require = createRequire(import.meta.url);
+/**
+ * sharp 不是这个包的依赖（它只在生成预览图时用得上）。先按正常方式解析，
+ * 解析不到再退回本机的 npx 缓存——原来只有那条写死的绝对路径，里面还带着
+ * 一个 npx 的哈希目录名，换台机器、甚至同一台机器重装一次 npx 就失效。
+ */
 let sharp;
-try {
-  sharp = require("/Users/duanchao/.npm/_npx/1e7f6d9597241db0/node_modules/sharp");
-} catch {
-  console.error("sharp not found — run with the DSH checkout present");
+for (const id of ["sharp", process.env.SHARP_PATH].filter(Boolean)) {
+  try { sharp = require(id); break; } catch { /* 下一个 */ }
+}
+if (!sharp) {
+  console.error("找不到 sharp。装一个（npm i -g sharp）或用 SHARP_PATH=/路径/到/sharp 指过去。");
   process.exit(1);
 }
 
@@ -30,7 +36,9 @@ function frameSvg(grid) {
       rects.push(`<rect x="${x}" y="${y}" width="1" height="1" fill="${palette[ch]}"/>`);
     }
   }
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" shape-rendering="crispEdges">${rects.join("")}</svg>`;
+  // 宽高必须是**放大后**的尺寸：布局按 W*SCALE 排格子，这里若按 W 输出，
+  // 每张图就只占格子左上角的 1/8，整张联系表看着像撒了几粒芝麻。
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${W * SCALE}" height="${H * SCALE}" viewBox="0 0 ${W} ${H}" shape-rendering="crispEdges">${rects.join("")}</svg>`;
 }
 
 async function main() {
