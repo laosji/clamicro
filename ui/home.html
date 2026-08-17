@@ -233,14 +233,26 @@
   .ctag.warn{color:var(--warn); border-color:color-mix(in srgb,var(--warn) 35%,transparent);
     background:color-mix(in srgb,var(--warn) 10%,transparent)}
 
-  /* 空闲态：用量是此刻唯一值得看的信息，所以它折进主控台而不是单独占一屏 */
-  .cusage .uline{display:flex; align-items:center; gap:10px}
-  .cusage .uline + .uline{margin-top:8px}
-  .cusage .um{flex:1; min-width:0}
-  .cusage .ur{font-size:11px; color:var(--dim); white-space:nowrap; font-variant-numeric:tabular-nums}
-  .cusage .u7{opacity:.62}
-  .cusage .u7 .meter{font-size:11px}
-  .cusage .u7 .bar{height:4px}
+  /* 空闲态：用量是此刻唯一值得看的信息，所以它折进主控台而不是单独占一屏。
+     两只环并排、等大——5h 和 7d 是同一个问题的两个窗口，谁更要紧取决于
+     哪个先满，界面事先替你判定一个「主次」只会挡住另一个 */
+  .cusage{display:flex; gap:8px; padding-top:2px}
+  .gauge{flex:1 1 0; min-width:0; display:flex; flex-direction:column; align-items:center; gap:5px}
+  .gring{position:relative; width:78px; height:78px}
+  /* 整只 svg 转 -90°，起点就从 12 点开始。只转 .gfill 也行，但底环是
+     整圆、转不转都一样，转外层少一条 transform-origin */
+  .gring svg{display:block; width:100%; height:100%; transform:rotate(-90deg)}
+  .gtrack{fill:none; stroke:var(--line); stroke-width:4}
+  .gfill{fill:none; stroke:var(--run); stroke-width:4; stroke-linecap:round;
+    transition:stroke-dashoffset .5s ease}
+  .gfill.mid{stroke:var(--warn)} .gfill.hot{stroke:var(--no)}
+  .gpct{position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+    font-size:20px; font-weight:600; font-variant-numeric:tabular-nums; letter-spacing:-.02em}
+  .gpct i{font-style:normal; font-size:11px; font-weight:500; color:var(--dim); margin-left:1px}
+  .glab{font-size:12px; font-weight:600; color:var(--dim); letter-spacing:.04em}
+  .gsub{font-size:11px; line-height:1.35; color:var(--dim); text-align:center; opacity:.85;
+    font-variant-numeric:tabular-nums}
+  .gwhy{margin-top:10px; font-size:12px; line-height:1.55; color:var(--dim); text-align:center}
 
   /* 运行态：显示 Claude 此刻在做什么。数据来自 sub_state，不编造 */
   .crun{display:flex; align-items:center; gap:8px; font-size:13.5px; margin-bottom:2px}
@@ -510,8 +522,11 @@
   /* 过期：把条压灰、整体降透明。它仍然可读（旧数据也是信息），
      但一眼就知道不是当前值 */
   #topusage.stale{opacity:.55}
-  #topusage.stale .tb i, .cusage.stale .bar i{background:var(--dim) !important}
+  #topusage.stale .tb i{background:var(--dim) !important}
+  /* 环也一样：形状留着（旧数据也是信息），颜色抽掉。
+     一只灰环不会被当成「当前值 78%」，而一只绿环会 */
   .cusage.stale{opacity:.6}
+  .cusage.stale .gfill{stroke:var(--dim)}
 
   main{
     flex:1 1 auto; overflow-y:auto; overflow-x:hidden; -webkit-overflow-scrolling:touch;
@@ -810,6 +825,40 @@ function meter(label, pct) {
   const v = Math.min(100, Math.max(0, pct ?? 0));
   const cls = v >= 90 ? 'hot' : v >= 70 ? 'mid' : '';
   return `<div class="meter"><b>${label}</b><div class="bar"><i class="${cls}" style="width:${v}%"></i></div><span class="pct">${Math.round(v)}%</span></div>`;
+}
+
+/** 2πr，r=19。viewBox 是写死的，这个数也就跟着写死，不必每次算 */
+const GAUGE_C = 2 * Math.PI * 19;
+
+/**
+ * 环形表盘：**缺口的大小就是答案。**
+ *
+ * 空闲态那一屏上除了用量没有别的东西，而横条在这里读起来是慢的：条只有 6px 高、
+ * 百分比又在另一端，「78%」得先读数字、再在脑子里换算成「快满了」。环把这两步
+ * 并成一步——填掉的那一圈有多长，一眼就是结论，数字只是复述它。
+ *
+ * 横条留给别处（会话卡的 ctx、顶栏的 topusage）：那些地方用量是**附带信息**，
+ * 挤在一行里的细条正合适，换成环反而会喧宾夺主。
+ *
+ * 用 SVG 而不是 conic-gradient：要圆头端点和一条常驻的底环，conic 两样都做不到，
+ * 而没有底环就只剩一段孤零零的弧，看不出「还剩多少」。
+ */
+function gauge(label, pct, sub) {
+  const v = Math.min(100, Math.max(0, pct ?? 0));
+  const cls = v >= 90 ? 'hot' : v >= 70 ? 'mid' : '';
+  const off = (GAUGE_C * (1 - v / 100)).toFixed(2);
+  return `<div class="gauge">
+    <div class="gring">
+      <svg viewBox="0 0 44 44" aria-hidden="true">
+        <circle class="gtrack" cx="22" cy="22" r="19"/>
+        <circle class="gfill ${cls}" cx="22" cy="22" r="19"
+          stroke-dasharray="${GAUGE_C.toFixed(2)}" stroke-dashoffset="${off}"/>
+      </svg>
+      <span class="gpct">${Math.round(v)}<i>%</i></span>
+    </div>
+    <div class="glab">${label}</div>
+    ${sub ? `<div class="gsub">${sub}</div>` : ''}
+  </div>`;
 }
 
 /**
@@ -1214,8 +1263,9 @@ function statusConsole(only) {
         : '';
       meta = '';
     } else {
+      // 过期提示由 quotaBody 贴在环下面（它得跟着环走），不再单开一条 cmeta
       body = quotaBody();
-      meta = quotaMeta();
+      meta = '';
     }
   }
 
@@ -1324,86 +1374,81 @@ function quotaBody() {
     return `<div style="font-size:12.5px;color:var(--dim);line-height:1.55">${QUOTA_WHY_TEXT[quotaWhy()]}</div>`;
   }
 
+  const gauges = `<div class="cusage${quotaStale() ? ' stale' : ''}">
+    ${gauge('5h', quota.five_hour?.pct, resetCell(quota.five_hour))}
+    ${gauge('7d', quota.seven_day?.pct, resetCell(quota.seven_day))}
+  </div>`;
+
   /**
    * **刷不出来的旧数据不该当主角。**
    *
-   * 这个界面（桌面版 / IDE 插件）不调用 statusLine，所以额度一旦过期就
-   * 永远停在那儿。而空闲态的整张卡片以前是两条粗量表 + 一行小字警告——
-   * 人先看到的是两个醒目的百分比，「这是 11 小时前的」得读完才知道。
-   * 一个看起来确定、其实早已不成立的数字，比没有数字更容易误导。
+   * 这个界面（桌面版 / IDE 插件）不调用 statusLine，所以额度一旦过期就永远
+   * 停在那儿。这一档曾经整个退化成一行纯文字，就是为了不让两个醒目的百分比
+   * 抢在「这是 11 小时前的」前面被读到——一个看起来确定、其实早已不成立的
+   * 数字，比没有数字更容易误导。
    *
-   * 所以这一档反过来：先说清它是什么（一行），再把旧数字缩成一行细字
-   * 放在后面。想看还看得到，但不再是这一屏最抢眼的东西。
+   * 代价是它把**唯一一屏用量**也一起变没了：想知道「快满了吗」，得读一行
+   * 小字、在脑子里把 78% 换算成一个形状。所以现在换个法子达成同一件事——
+   * 图形留着，颜色抽掉（.cusage.stale）：一只灰环没人会当成当前值，而
+   * 「填了多大一圈」这个一眼就懂的信息不必跟着一起牺牲。
    *
-   * 只对**刷不出来**的那种过期这么做。普通过期（有 statusLine、只是暂时
-   * 没有会话在报）保持原样——那种再开一个会话就刷新了，量表仍然有用。
+   * 下面这句话仍然要有，而且要跟在环后面：环回答「有多少」，它回答
+   * 「这数儿还能不能信、怎么才能看到新的」。
    */
-  const unrefreshable = quotaStale() && quotaWhy() === 'hooks-only';
-  if (unrefreshable) {
-    const five = Math.round(quota.five_hour?.pct ?? 0);
-    const seven = Math.round(quota.seven_day?.pct ?? 0);
-    // 一行说完：旧值 + 多旧 + 怎么才能看到新的。
-    // 旧值放前面是因为它才是你瞥一眼想知道的东西，理由跟在后面
-    return `<div style="font-size:12.5px;color:var(--dim);line-height:1.6">
-      <span style="opacity:.6">5h ${five}%　·　7d ${seven}%</span>
-      —— ${esc(ago(quota.at))}前，此界面不刷新，想看当前值在终端跑 <code>claude</code>。
-    </div>`;
-  }
-
-  return `<div class="cusage${quotaStale() ? ' stale' : ''}">
-    <div class="uline"><div class="um">${meter('5h', quota.five_hour?.pct)}</div>
-      <span class="ur">${resetCell(quota.five_hour)}</span></div>
-    <div class="uline u7"><div class="um">${meter('7d', quota.seven_day?.pct)}</div>
-      <span class="ur">${resetCell(quota.seven_day)}</span></div>
-  </div>`;
+  if (quotaStale()) return `${gauges}<div class="gwhy">${staleNote()}</div>`;
+  return gauges;
 }
 
 /**
- * 额度陈旧提示。
+ * 过期时环下面那一行：**多旧 + 怎么才能看到新的。**
  *
- * statusLine 在活跃会话里每次响应都上报，秒级新鲜；超过 10 分钟没动静
- * 就说明没有会话在报——**这时候把旧数字当当前值展示是在骗人**。
+ * 这行字曾经是一条 ⚠️ 开头的独立警告（「⚠️ 这是 19 小时前的旧数据。新开一个
+ * Claude Code 会话才会刷新。」）。放在灰环下面它是**这张卡上最响的东西**——
+ * 一个黄三角，配着两句话，为的是说一件既不紧急、也不需要你此刻做任何事的事。
+ * 而「不是当前值」这件事，两只灰环已经说过了；警告图标只是把同一句话喊了一遍。
+ *
+ * 现在压成一行轻字，句式跟另外几档保持一致：
+ *
+ *     19 小时前的数据 · 新开一个 Claude Code 会话就会刷新
+ *
+ * 前半句回答「还能不能信」，后半句回答「那我怎么办」，中间一个 · 分开——
+ * 两件事各一次，没有第二遍。「就会」而不是「才会」：前者说的是「这么点事
+ * 就够了」，后者听起来像在拦你。
  */
-function quotaMeta() {
-  if (!quota) return '';
-  if (Date.now() - quota.at <= 600000) return '';
-  /**
-   * 「刷不出来」那一档由 quotaBody 自己整段说清了，这里再来一条就是
-   * 同一句话说两遍。一屏里重复的警告不会让人更重视，只会让人开始忽略警告。
-   */
-  if (quotaWhy() === 'hooks-only') return '';
-  // 「怎么才能刷新」的答案跟 quotaBody 是同一套判据。原来这里无条件说
-  // 「新开一个 Claude Code 会话才会刷新」——对一个根本不调 statusLine 的
-  // 界面来说，那是一句让人白忙的话
-  const why = quotaWhy();
-  const how = why === 'hooks-only'
-    ? '这个界面不调用 statusLine，只有终端里的 claude 会刷新它。'
-    : why === 'no-cc'
-      ? '当前没有 Claude Code 会话在跑。'
-      : '新开一个 Claude Code 会话才会刷新。';
-  return `⚠️ 这是 ${ago(quota.at)}的旧数据。${how}`;
+function staleNote() {
+  const how = quotaWhy() === 'hooks-only'
+    // `claude` 放句中不放句末：它是一段不可断行的等宽字，摆在最后会被整个
+    // 甩到第二行独占一行，一句两行的小字于是长得像两句
+    ? '此界面不刷新，在终端跑 <code>claude</code> 才看得到当前值'
+    : '新开一个 Claude Code 会话就会刷新';
+  return `${esc(ago(quota.at))}的数据 · ${how}`;
 }
 
 /**
  * 这份用量是不是已经过期了。
  *
  * statusLine 在活跃会话里每次响应都上报，秒级新鲜；超过 10 分钟没动静就说明
- * 没有会话在报。判据和 quotaMeta 同源，不能各判各的。
+ * 没有会话在报。**这时候把旧数字当当前值展示是在骗人**，所以环压灰、
+ * 底下补一句 staleNote()——判据只有这一处，界面各部分不能各判各的。
  */
 function quotaStale() {
   return !!quota && Date.now() - quota.at > 600_000;
 }
 
 /**
- * 右侧那一格：**新鲜时说「还有多久重置」，过期时说「这是多久以前的数据」。**
+ * 环下面那行小字：**新鲜时说「还有多久重置」，过期时什么都不说。**
  *
- * 不这么分的话会出现一句彻头彻尾的假话：数据是四天前的，resets_at 早就过去了，
+ * 不区分的话会出现一句彻头彻尾的假话：数据是四天前的，resets_at 早就过去了，
  * until() 于是显示「即将重置」——它在说一件马上要发生的事，而真相是那个窗口
  * 几天前就滚过去了，屏幕上那个百分比也早已不是当前值。
  * 拿不准的时候要说「我不知道」，不能说一个听起来确定的错答案。
+ *
+ * 过期时这里曾经改说「N 前的数据」。两只环并排之后那句话会**原样出现两遍**，
+ * 再加上底下的 gwhy / cmeta 就是三遍——同一句警告说三遍不会让人更重视它。
+ * 所以「多旧」只在环外面说一次，环自己只管重置时间这一件事。
  */
 function resetCell(w) {
-  if (quotaStale()) return `${ago(quota.at)}的数据`;
+  if (quotaStale()) return '';
   return until(w?.resets_at);
 }
 
