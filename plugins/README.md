@@ -1,40 +1,47 @@
 # DeepSeek Harness 插件
 
 这两个插件让 Clamicro 和 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 配合工作。
-它们**不随 clamicro 的 npm 包发布**（`npm pack` 里没有 `plugins/`），需要单独装进 DSH 的 profile。
+它们**随 clamicro 的 npm 包一起发布**（`plugins/` 在 `files` 里，`npm pack` 带得上），
+但躺在包里不生效——得拷进 DSH 的 profile 才算装上，见下面「装」。
 
 | 插件 | 作用 | 默认 |
 |---|---|---|
-| [`dsh-bridge`](dsh-bridge/) | 把 DSH 的会话状态和审批请求桥接到手机 | 状态镜像开、审批**关**（要审批得配 `approve: true`） |
+| [`dsh-bridge`](dsh-bridge/) | 把 DSH 的会话状态和审批请求桥接到手机 | 状态镜像开；审批插件里默认关，但 `npx clamicro install` 接 DSH 时会替你写上 `approve: true` |
 | [`dsh-pet-cat`](dsh-pet-cat/) | Web UI 上的像素猫；点一下打开手机看板 / 配对二维码 | 联动开 |
 
 两个可以单独装，装一个也能用。
 
 ## 装
 
-```bash
-dsh plugin --profile web add <包名>
-```
-
-然后在 `~/.dsh/profiles/web/cordis.patch.yml` 里插一条：
-
 > **多数情况下你不用读这一节。** `npx clamicro install` 探测到 `~/.dsh` 会问一句，
-> 同意后这两个插件和下面这段配置都是自动写的，卸载时一并摘除。
+> 同意后插件目录和下面这段配置都是自动写的，卸载时一并摘除。
 > 下面是手动接法，以及 install 认不出你的 `cordis.patch.yml` 格式时要贴的内容。
 
+它们**不在 npm 上单独发包**，所以 `dsh plugin add` 拉不到——手动装就是从 clamicro
+包里把目录拷到 profile 的 `node_modules`，目录名要用插件名（不是源目录名）：
+
+```bash
+cp -R <clamicro>/plugins/dsh-bridge  ~/.dsh/profiles/node_modules/clamicro-dsh-bridge
+cp -R <clamicro>/plugins/dsh-pet-cat ~/.dsh/profiles/node_modules/dsh-pet-cat
+```
+
+然后在 `~/.dsh/profiles/web/cordis.patch.yml` 的 `- insert:` 下面插入这几行
+（缩进就是结构，照抄，别加前缀）：
+
 ```yaml
-- insert:
+    - id: pet-cat
+      name: dsh-pet-cat
     - id: clamicro-bridge
       name: clamicro-dsh-bridge
       config:
-        origin: http://127.0.0.1:8765
-        # 关键：approve 默认 false（只镜像、不审批）。要手机审批必须显式开，
-        # 并指定哪些工具每次调用都问（默认 bash）。
+        origin: 'http://127.0.0.1:8765'
         approve: true
         askTools: ['bash']
-    - id: pet-cat
-      name: dsh-pet-cat
 ```
+
+这几行和 `src/dsh.mjs` 的 `insertRows()` 逐字一致，`test/dsh-wire.test.mjs` 钉着它。
+端口不是 8765 的话改 `origin`。`approve: true` 是「每条 bash 都等手机批」，
+只想要看板不想要审批就写 `false`。
 
 ## 版本号
 

@@ -9,8 +9,8 @@
 | | 状态 |
 |---|---|
 | 状态镜像（`session/event` → 手机看板） | 已实现，默认开，**真实 DSH 跑通** |
-| 手机审批（`approval/request` 答复器） | 已实现，**默认关**（bridge↔clamicro 决定往返契约已验） |
-| 每次 bash 审批（`tools/pre-execute` ask gate，`askTools`） | 已实现，**默认关** |
+| 手机审批（`approval/request` 答复器） | 已实现，插件里**默认关**、装机器时由 install 开（见下）（bridge↔clamicro 决定往返契约已验） |
+| 每次 bash 审批（`tools/pre-execute` ask gate，`askTools`） | 已实现，同上 |
 | 完整闭环：DSH 工具调用 → 手机 → 决定传回 | **真实 DSH 会话跑通** |
 
 事件名和字段名来自 DSH 的 `docs/subsystems/session.md` 与 `approval.md`，
@@ -33,9 +33,14 @@ DSH 的工具名是小写 `bash`、而 clamicro 的判据写死了 `toolName ===
 导致整套高危规则**一条都不跑** → 判 normal → 10 秒自动通过。
 现在判据改成看「参数里有没有 command」，不依赖工具名，这条才拦得住。
 
-**审批仍然默认关**：跑通不等于该默认开。打开它意味着 DSH 的每一条 bash
-都要等手机，这是个影响日常手感的决定，应该由用户显式做，而不是升级后
-突然变成这样。要开就 `approve: true`。
+**插件代码里审批仍然默认关**：`approve` 不写就是 `false`，只镜像状态。跑通不等于
+该默认开——打开它意味着 DSH 的每一条 bash 都要等手机，这是个影响日常手感的决定，
+应该由用户显式做，而不是升级后突然变成这样。
+
+**但 `npx clamicro install` 会替你写上 `approve: true`。** 这两句不矛盾：install
+接 DSH 之前会单独问一句「要现在接上吗」，并且这一问 `--yes` 也跳不过去
+（`wireUp` 里 `optIn=true`），那一次点头就是上面要的那个显式决定。不想要逐条审批、
+只想要手机看板，就把 `cordis.patch.yml` 里的 `approve` 改成 `false`。
 
 ### 审批触发点（重要，先读再开）
 
@@ -59,9 +64,9 @@ responder**：`approve: true` 时，`askTools`（默认 `['bash']`）里的工�
 
 ## 安装
 
-```bash
-dsh plugin add clamicro-dsh-bridge
-```
+跟着 clamicro 的 npm 包走，不在 npm 上单独发包（所以 `dsh plugin add` 拉不到）。
+`npx clamicro install` 探测到 `~/.dsh` 会问一句，同意后自动装；手动接法见
+[../README.md](../README.md#装)。
 
 Clamicro 需要在同一台机器上跑着（上报走回环，端点只认 127.0.0.1）。
 
@@ -72,6 +77,7 @@ Clamicro 需要在同一台机器上跑着（上报走回环，端点只认 127.
   "origin": "http://127.0.0.1:8765",  // Clamicro 服务地址
   "mirror": true,                      // 状态镜像
   "approve": false,                    // 手机审批：沙箱升级 + askTools 每次问
+                                       //（这是插件默认；install 写的补丁层是 true）
   "askTools": ["bash"],                // approve 开启时，这些工具每次调用都问
   "timeoutMs": 600000,                 // 答复器自己的兜底截止时间
   "maxCalls": 200                      // callId 参数表的容量上限

@@ -15,7 +15,8 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { wireUp, PATCH_FILE } from '../src/dsh.mjs'
+import { readFileSync } from 'node:fs'
+import { wireUp, patchProfile, PATCH_FILE } from '../src/dsh.mjs'
 
 /** 收集所有 say() 出来的行；ui 默认恒等函数，所以拿到的是干净字符串 */
 function rig({ dsh = true, answer = true, patch, install } = {}) {
@@ -140,4 +141,33 @@ test('ui 只做装饰，不改内容', async () => {
     ui: { b: (s) => `<b>${s}</b>`, dim: (s) => `<d>${s}</d>`, g: (s) => s, y: (s) => s },
   })
   assert.ok(lines.includes('    - id: pet-cat'), '待粘贴的行被装饰污染了')
+})
+
+/**
+ * plugins/README.md 里那段 YAML 是给人**照抄**的，所以它和 insertRows() 是
+ * 同一份内容的两个副本——副本会漂。
+ *
+ * 上一次漂的结果是整节都错了：README 说这两个插件「不随 npm 包发布」，
+ * 而 package.json 的 files 里早就有 plugins/ 了；同一节里的 YAML 顺序、
+ * origin 的引号也和代码实际写出去的不一样。照着抄的人贴进 cordis.patch.yml
+ * 的是一份代码从没生成过的东西。
+ *
+ * 断言用 includes 而不是逐行 find：块内的**顺序和相邻关系**也是结构的一部分。
+ */
+test('plugins/README.md 的待抄 YAML 和 insertRows() 逐字一致', () => {
+  let written = ''
+  patchProfile(8765, {
+    read: () => '',
+    write: (_p, c) => { written = c },
+    exists: () => false,
+    mkdir: () => {},
+  })
+  // FRESH_PATCH 里带缩进的就是 insertRows() 那几行
+  const block = written.split('\n').filter((l) => l.startsWith('    ')).join('\n')
+
+  const readme = readFileSync(new URL('../plugins/README.md', import.meta.url), 'utf8')
+  assert.ok(
+    readme.includes(block),
+    `plugins/README.md 里的 YAML 和代码生成的对不上，照抄会贴错。\n代码生成的是：\n${block}`,
+  )
 })
