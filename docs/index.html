@@ -1,0 +1,318 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Clamicro — approve what Claude Code runs, from your phone</title>
+<meta name="description" content="Watch Claude Code and DeepSeek Harness from your phone and approve what they want to run. LAN-direct, zero dependencies, nothing leaves your Wi-Fi.">
+
+<meta property="og:title" content="Clamicro">
+<meta property="og:description" content="Approve what Claude Code runs, from your phone. Nothing leaves your Wi-Fi.">
+<meta property="og:type" content="website">
+<meta property="og:image" content="https://raw.githubusercontent.com/laosji/clamicro/main/docs/images/notch.png">
+
+<!--
+  故意不引任何外部资源：没有 CDN、没有 Google Fonts、没有统计脚本。
+
+  这个产品的全部主张是「控制面不出局域网、不联网、不上报」。
+  一个替它做宣传的页面如果自己往三个第三方发请求，那句话就不成立了。
+  字体用系统栈，图片是仓库里的相对路径。
+-->
+<style>
+  :root {
+    --bg: #08090a;
+    --bg-raised: #101214;
+    --line: #1e2225;
+    --text: #e8eaed;
+    --dim: #8b9299;
+    --dimmer: #5f676d;
+    --green: #34d399;
+    --amber: #f5b544;
+    --red: #f87171;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+
+  html { -webkit-text-size-adjust: 100%; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 17px;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap { max-width: 880px; margin: 0 auto; padding: 0 24px; }
+
+  section { padding: 72px 0; border-bottom: 1px solid var(--line); }
+  section:last-of-type { border-bottom: 0; }
+
+  h1, h2, h3 { line-height: 1.25; letter-spacing: -0.02em; margin: 0; }
+  h2 { font-size: 28px; margin-bottom: 12px; }
+  h3 { font-size: 17px; margin-bottom: 6px; }
+  p { margin: 0 0 18px; }
+  p:last-child { margin-bottom: 0; }
+
+  a { color: var(--green); text-decoration: none; border-bottom: 1px solid rgba(52, 211, 153, 0.3); }
+  a:hover { border-bottom-color: var(--green); }
+
+  .lede { color: var(--dim); font-size: 19px; }
+  .note { color: var(--dimmer); font-size: 15px; }
+
+  /* ---------- hero ---------- */
+
+  .hero { padding: 88px 0 72px; border-bottom: 1px solid var(--line); }
+
+  .hero h1 { font-size: clamp(38px, 7vw, 56px); margin-bottom: 20px; }
+
+  .hero .tag {
+    display: inline-block; font-family: var(--mono); font-size: 13px;
+    color: var(--green); border: 1px solid rgba(52, 211, 153, 0.35);
+    border-radius: 999px; padding: 3px 11px; margin-bottom: 26px;
+  }
+
+  .hero .lede { font-size: clamp(19px, 2.6vw, 22px); max-width: 30em; }
+
+  .notch { margin: 40px 0 34px; }
+  .notch img {
+    display: block; width: 100%; max-width: 480px; height: auto;
+    border-radius: 12px;
+  }
+  .notch figcaption { color: var(--dimmer); font-size: 14px; margin-top: 12px; }
+
+  /* ---------- install ---------- */
+
+  .cmd {
+    display: flex; align-items: center; gap: 12px;
+    background: var(--bg-raised); border: 1px solid var(--line);
+    border-radius: 10px; padding: 15px 18px;
+    font-family: var(--mono); font-size: 15px;
+    overflow-x: auto;
+  }
+  .cmd .prompt { color: var(--dimmer); user-select: none; }
+  .cmd code { white-space: nowrap; }
+
+  .reqs { color: var(--dimmer); font-size: 14px; margin-top: 14px; font-family: var(--mono); }
+
+  /* ---------- screenshots ---------- */
+
+  .shots {
+    display: grid; grid-template-columns: repeat(3, 1fr);
+    gap: 22px; margin-top: 36px;
+  }
+  .shots figure { margin: 0; }
+  .shots img {
+    display: block; width: 100%; height: auto;
+    border: 1px solid var(--line); border-radius: 14px;
+  }
+  .shots figcaption { font-size: 14px; color: var(--dim); margin-top: 12px; }
+  .shots strong { color: var(--text); font-weight: 600; display: block; }
+
+  /* ---------- defaults table ---------- */
+
+  table { width: 100%; border-collapse: collapse; margin-top: 28px; font-size: 15px; }
+  th, td { text-align: left; padding: 13px 14px; border-bottom: 1px solid var(--line); }
+  th { color: var(--dimmer); font-weight: 500; font-size: 13px; letter-spacing: 0.04em; text-transform: uppercase; }
+  td:first-child { color: var(--dim); }
+  tbody tr:last-child td { border-bottom: 0; }
+  .ok { color: var(--green); font-weight: 600; }
+  .stop { color: var(--red); font-weight: 600; }
+  .wait { font-family: var(--mono); color: var(--amber); }
+  code.k { font-family: var(--mono); font-size: 0.92em; color: var(--text); }
+
+  /* ---------- story ---------- */
+
+  .story { border-left: 2px solid var(--line); padding-left: 26px; }
+  .story .kicker {
+    font-family: var(--mono); font-size: 13px; color: var(--dimmer);
+    text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 14px;
+  }
+  .story .punch { color: var(--text); font-size: 19px; }
+
+  /* ---------- feedback ---------- */
+
+  .feedback {
+    background: var(--bg-raised); border: 1px solid var(--line);
+    border-radius: 14px; padding: 30px 32px;
+  }
+
+  /* ---------- footer ---------- */
+
+  footer { padding: 44px 0 64px; color: var(--dimmer); font-size: 15px; }
+  footer nav { display: flex; flex-wrap: wrap; gap: 22px; margin-bottom: 22px; }
+  footer a { border-bottom: 0; color: var(--dim); }
+  footer a:hover { color: var(--green); }
+
+  @media (max-width: 720px) {
+    body { font-size: 16px; }
+    section { padding: 56px 0; }
+    .hero { padding: 64px 0 56px; }
+    .shots { grid-template-columns: 1fr; gap: 34px; max-width: 320px; }
+    .story { padding-left: 20px; }
+    .feedback { padding: 24px; }
+  }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <span class="tag">macOS + iPhone</span>
+    <h1>Approve what your agent runs,<br>from your phone.</h1>
+    <p class="lede">
+      Clamicro watches Claude Code and DeepSeek Harness. When one of them wants to run
+      something, your Mac notifies you — open the page on your phone, read the command,
+      swipe to approve or reject. The agent continues immediately.
+    </p>
+
+    <figure class="notch">
+      <img src="./images/notch.png" alt="A notification capsule rendered at the Mac's notch: a green check badge, the project name, and the result line">
+      <figcaption>A screen capture from a Mac. Not a mockup.</figcaption>
+    </figure>
+
+    <div class="cmd">
+      <span class="prompt">$</span><code>npx clamicro install</code>
+    </div>
+    <p class="reqs">Node 18+ · zero runtime dependencies · nothing in node_modules</p>
+  </div>
+</header>
+
+<section>
+  <div class="wrap">
+    <h2>The round trip</h2>
+    <p class="lede">Stop babysitting the terminal.</p>
+
+    <div class="shots">
+      <figure>
+        <img src="./images/home-running.png" alt="Home screen while the agent is working: a breathing status console and a scrolling list of recent tool calls">
+        <figcaption><strong>Running</strong> A breathing console and the tool calls as they happen.</figcaption>
+      </figure>
+      <figure>
+        <img src="./images/home-pending.png" alt="Home screen with a pending approval at the top and a second one listed below">
+        <figcaption><strong>Something needs you</strong> What it wants to do, in one line, with the clock running.</figcaption>
+      </figure>
+      <figure>
+        <img src="./images/approval-detail.png" alt="Approval detail: risk level, impact, the command in full, and a drag-to-decide bar pinned to the bottom">
+        <figcaption><strong>The decision</strong> Risk, impact, the full command, and a bar you drag to decide.</figcaption>
+      </figure>
+    </div>
+
+    <p class="note" style="margin-top:26px">These are the real UI, not mockups.</p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>It doesn't gate everything</h2>
+    <p class="lede">
+      Be clear on the defaults before you assume it stops every command.
+    </p>
+
+    <table>
+      <thead>
+        <tr><th>Operation</th><th>Waits</th><th>Then</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Ordinary</td>
+          <td class="wait" data-pin="autoApprove">10s</td>
+          <td class="ok">auto-approve</td>
+        </tr>
+        <tr>
+          <td>High-risk — <code class="k">rm -rf</code>, force push, anything touching <code class="k">~/.ssh</code></td>
+          <td class="wait" data-pin="highRiskTimeout">3 min</td>
+          <td class="stop">auto-deny</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <p style="margin-top:26px">
+      So out of the box it <em>tells you</em> about routine work and <em>stops</em> dangerous
+      work. Both numbers are adjustable — set the first to 0 and every operation waits for you.
+      Either way your Mac notifies you.
+    </p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>Nothing leaves your Wi-Fi</h2>
+
+    <div class="story">
+      <p class="kicker">Why there is no push notification</p>
+      <p class="punch">
+        Two remote channels were built, and both were deleted.
+      </p>
+      <p>
+        The first was an ntfy relay with action buttons — approve straight from the lock
+        screen. It worked. It also handed the <em>control plane</em> to a third party.
+      </p>
+      <p>
+        The second was Bark: one line saying "there's an approval," with the control plane
+        staying on the LAN. That was about as restrained as it gets, and it still only
+        bought "something can page you while you're away" — in exchange for continuously
+        telling an outside server that an operation is waiting.
+      </p>
+      <p>
+        Lock-screen-capable notifications must go through APNs, which necessarily means
+        someone else's server. So the answer is a macOS local notification, fully offline,
+        and nothing else.
+      </p>
+      <p class="punch" style="margin-top:24px">
+        The cost, stated plainly: once you walk away from the Mac, <em>nothing</em> alerts
+        you. High-risk operations wait out their timeout and get rejected. That is the
+        intended default — nobody should be approving <code class="k">rm -rf</code> from a
+        coffee shop.
+      </p>
+    </div>
+
+    <p class="note" style="margin-top:30px">
+      Command text, approval decisions, timeline and quota all go straight to your Mac over
+      the LAN. Pairing mints its credential only after you press Allow, on the Mac's own
+      screen. Details and threat model:
+      <a href="https://github.com/laosji/clamicro#near-field-means-wi-fi-only">README</a> ·
+      <a href="https://github.com/laosji/clamicro/blob/main/SECURITY.md">SECURITY.md</a>
+    </p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="feedback">
+      <h2>Did it work?</h2>
+      <p>
+        Clamicro has no telemetry and never phones home — which means I have no idea whether
+        it works on any machine but mine. If you installed it, I'd genuinely like to know
+        either way, especially if it broke.
+      </p>
+      <p style="margin-bottom:0">
+        <a href="https://github.com/laosji/clamicro/issues/new">Tell me how it went →</a>
+      </p>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <nav>
+      <a href="https://github.com/laosji/clamicro">GitHub</a>
+      <a href="https://www.npmjs.com/package/clamicro">npm</a>
+      <a href="https://github.com/laosji/clamicro#readme">Docs</a>
+      <a href="https://github.com/laosji/clamicro/blob/main/README.zh-CN.md">中文</a>
+      <a href="https://github.com/laosji/clamicro/blob/main/SECURITY.md">Security</a>
+    </nav>
+    <p style="margin:0">
+      MIT licensed. Requires macOS and an iPhone on the same Wi-Fi —
+      it uses <code class="k">scutil</code>, <code class="k">osascript</code> and Bonjour,
+      and the UI is built for iOS Safari.
+    </p>
+  </div>
+</footer>
+
+</body>
+</html>

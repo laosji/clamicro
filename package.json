@@ -27,6 +27,8 @@
     "bin/",
     "docs/",
     "!docs/images",
+    "!docs/index.html",
+    "!docs/.nojekyll",
     "plugins/",
     "!plugins/*/dev",
     "README.md",
