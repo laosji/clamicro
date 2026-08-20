@@ -19,6 +19,17 @@ export const PLUGIN_PKGS = [
   'plugins/dsh-pet-cat/package.json',
 ]
 
+/**
+ * 官网 Hero 上那个版本徽章。
+ *
+ * 和插件版本号是同一个病：页面上写死一个号，而这个仓库两天发三个版本，
+ * 第二天它就在骗人了——而且骗得很难看，因为访客判断「这项目还活着吗」
+ * 靠的正是这个号。
+ *
+ * 所以不手写，跟着发版脚本走。test/site-numbers.test.mjs 钉着它。
+ */
+export const SITE_PAGE = 'docs/index.html'
+
 export const rootVersion = () =>
   JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version
 
@@ -39,6 +50,26 @@ export function bumpVersionText(raw, version) {
   return next
 }
 
+/**
+ * 换官网上那个徽章的文字。和 bumpVersionText 一样只动一处、不碰别的字符：
+ * 这是一份手写的 HTML，任何「重新格式化」都是在赌。
+ */
+export function bumpBadgeText(raw, version) {
+  const next = raw.replace(
+    /(data-pin="version"[^>]*>)[^<]*(<)/,
+    (_m, head, tail) => `${head}v${version}${tail}`,
+  )
+  if (readBadge(next) !== `v${version}`) throw new Error('官网版本徽章替换失败')
+  return next
+}
+
+/** 读出徽章上现在写的是什么。找不到就是页面结构被改了，要炸而不是当成空。 */
+export function readBadge(raw) {
+  const m = raw.match(/data-pin="version"[^>]*>([^<]*)</)
+  if (!m) throw new Error(`${SITE_PAGE} 里找不到 data-pin="version" 的徽章`)
+  return m[1].trim()
+}
+
 export function sync({ write = true } = {}) {
   const want = rootVersion()
   const changed = []
@@ -51,6 +82,15 @@ export function sync({ write = true } = {}) {
     if (!write) continue
     writeFileSync(path, bumpVersionText(raw, want))
   }
+
+  const sitePath = join(root, SITE_PAGE)
+  const siteRaw = readFileSync(sitePath, 'utf8')
+  const badge = readBadge(siteRaw)
+  if (badge !== `v${want}`) {
+    changed.push({ rel: SITE_PAGE, from: badge, to: `v${want}` })
+    if (write) writeFileSync(sitePath, bumpBadgeText(siteRaw, want))
+  }
+
   return { want, changed }
 }
 

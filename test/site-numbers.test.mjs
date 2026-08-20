@@ -77,6 +77,22 @@ test('官网写的「高危等多久」= config 的 timeoutMs', () => {
   )
 })
 
+/**
+ * 徽章是「这项目还活着吗」的唯一信号，写错比不写更糟：一个停在 2.14 的号
+ * 会让人以为项目荒废了，而实际上那两天发了六个版本。
+ *
+ * 修的办法不是手改页面，是 `node scripts/sync-plugin-versions.mjs`——
+ * 和插件版本号走同一条路。
+ */
+test('官网 Hero 的版本徽章 = package.json 的 version', () => {
+  const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
+  assert.equal(
+    pinned('version'), `v${pkg.version}`,
+    `官网徽章写着 ${pinned('version')}，包是 ${pkg.version}。\n` +
+    '修：node scripts/sync-plugin-versions.mjs',
+  )
+})
+
 test('官网写的 Node 版本 = package.json 的 engines', () => {
   const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
   const floor = pkg.engines.node.replace(/[^\d.]/g, '').split('.')[0]

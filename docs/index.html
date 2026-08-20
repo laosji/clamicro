@@ -70,11 +70,14 @@
 
   .hero h1 { font-size: clamp(38px, 7vw, 56px); margin-bottom: 20px; }
 
-  .hero .tag {
+  .eyebrow { display: flex; align-items: center; gap: 10px; margin: 0 0 26px; }
+
+  .hero .tag, .hero .ver {
     display: inline-block; font-family: var(--mono); font-size: 13px;
-    color: var(--green); border: 1px solid rgba(52, 211, 153, 0.35);
-    border-radius: 999px; padding: 3px 11px; margin-bottom: 26px;
+    border-radius: 999px; padding: 3px 11px;
   }
+  .hero .tag { color: var(--green); border: 1px solid rgba(52, 211, 153, 0.35); }
+  .hero .ver { color: var(--dimmer); border: 1px solid var(--line); }
 
   .hero .lede { font-size: clamp(19px, 2.6vw, 22px); max-width: 30em; }
 
@@ -94,10 +97,22 @@
     font-family: var(--mono); font-size: 15px;
     overflow-x: auto;
   }
-  .cmd .prompt { color: var(--dimmer); user-select: none; }
-  .cmd code { white-space: nowrap; }
+  .cmd .prompt { color: var(--dimmer); user-select: none; margin-right: 0.6ch; }
+  .cmd code { white-space: nowrap; overflow-x: auto; flex: 1; }
 
-  .reqs { color: var(--dimmer); font-size: 14px; margin-top: 14px; font-family: var(--mono); }
+  /* 复制按钮。命令行工具的落地页没有复制按钮，等于让人手动选中一行等宽文本。 */
+  .cmd .copy {
+    flex: none; font: inherit; font-size: 13px; cursor: pointer;
+    color: var(--dim); background: transparent;
+    border: 1px solid var(--line); border-radius: 7px; padding: 4px 12px;
+    transition: color .12s, border-color .12s;
+  }
+  .cmd .copy:hover { color: var(--text); border-color: var(--dim); }
+  .cmd .copy[data-done] { color: var(--green); border-color: rgba(52, 211, 153, 0.4); }
+
+  .reqs { color: var(--dimmer); font-size: 14px; margin-top: 14px; font-family: var(--mono); line-height: 1.9; }
+  .reqs a { color: var(--dim); border-bottom-color: var(--line); }
+  .reqs a:hover { color: var(--green); border-bottom-color: var(--green); }
 
   /* ---------- screenshots ---------- */
 
@@ -162,7 +177,10 @@
 
 <header class="hero">
   <div class="wrap">
-    <span class="tag">macOS + iPhone</span>
+    <p class="eyebrow">
+      <span class="tag">macOS + iPhone</span>
+      <span class="ver" data-pin="version">v2.16.0</span>
+    </p>
     <h1>Approve what your agent runs,<br>from your phone.</h1>
     <p class="lede">
       Clamicro watches Claude Code and DeepSeek Harness. When one of them wants to run
@@ -176,9 +194,13 @@
     </figure>
 
     <div class="cmd">
-      <span class="prompt">$</span><code>npx clamicro install</code>
+      <code><span class="prompt">$</span>npx clamicro install</code>
+      <button class="copy" type="button" data-cmd="npx clamicro install">Copy</button>
     </div>
-    <p class="reqs">Node 18+ · zero runtime dependencies · nothing in node_modules</p>
+    <p class="reqs">
+      Node 18+ · zero runtime dependencies · nothing in node_modules<br>
+      <a href="https://github.com/laosji/clamicro#install">What the installer changes on your machine →</a>
+    </p>
   </div>
 </header>
 
@@ -283,8 +305,24 @@
 
 <section>
   <div class="wrap">
-    <div class="feedback">
-      <h2>Did it work?</h2>
+    <h2>Try it</h2>
+    <p class="lede">One command. It asks before it changes anything.</p>
+
+    <div class="cmd" style="margin-top:26px">
+      <code><span class="prompt">$</span>npx clamicro install</code>
+      <button class="copy" type="button" data-cmd="npx clamicro install">Copy</button>
+    </div>
+    <p class="reqs">macOS + iPhone on the same Wi-Fi · Node 18+</p>
+
+    <p style="margin-top:22px">
+      It shows you exactly what it will write to <code class="k">~/.claude/settings.json</code>,
+      waits for your confirmation, and backs everything up first. Then it walks you through a
+      built-in demo — a fake approval, so you swipe one for real before anything real is at
+      stake. Uninstall removes only what it added, verified byte-for-byte.
+    </p>
+
+    <div class="feedback" style="margin-top:40px">
+      <h3 style="font-size:19px;margin-bottom:10px">Did it work?</h3>
       <p>
         Clamicro has no telemetry and never phones home — which means I have no idea whether
         it works on any machine but mine. If you installed it, I'd genuinely like to know
@@ -313,6 +351,45 @@
     </p>
   </div>
 </footer>
+
+<script>
+  /*
+    复制按钮。内联、无依赖 —— 页面一个外部请求都不发，这条由
+    test/site-numbers.test.mjs 钉着。
+
+    clipboard API 在非安全上下文（比如有人把这个文件用 file:// 打开）里是
+    undefined，所以要有退路：失败就把命令选中，人按 ⌘C 也能走完。
+    静默失败是这个项目最不能接受的形态。
+  */
+  document.querySelectorAll('.cmd .copy').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var cmd = btn.dataset.cmd
+      var done = function () {
+        btn.textContent = 'Copied'
+        btn.setAttribute('data-done', '')
+        setTimeout(function () {
+          btn.textContent = 'Copy'
+          btn.removeAttribute('data-done')
+        }, 1600)
+      }
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(cmd).then(done, select)
+      } else {
+        select()
+      }
+      function select () {
+        var code = btn.parentNode.querySelector('code')
+        var r = document.createRange()
+        r.selectNodeContents(code)
+        var sel = window.getSelection()
+        sel.removeAllRanges()
+        sel.addRange(r)
+        btn.textContent = 'Press ⌘C'
+        setTimeout(function () { btn.textContent = 'Copy' }, 2200)
+      }
+    })
+  })
+</script>
 
 </body>
 </html>
