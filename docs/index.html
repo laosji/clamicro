@@ -35,7 +35,7 @@
 
   * { box-sizing: border-box; }
 
-  html { -webkit-text-size-adjust: 100%; }
+  html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; }
 
   body {
     margin: 0;
@@ -63,6 +63,44 @@
 
   .lede { color: var(--dim); font-size: 19px; }
   .note { color: var(--dimmer); font-size: 15px; }
+
+  /* ---------- topbar ---------- */
+
+  /*
+    粘性顶栏。调研的五个站点里有四个有它，而且四个都把 CTA 挂在上面——
+    顶栏是「CTA 会重复」这条规律的主要载体：页面 4.9 屏，滚到一半想装的人
+    不该被迫滚回顶部。唯一没有顶栏的 Ghostty 只有一屏，不需要。
+
+    backdrop-filter 有退路：不支持的浏览器拿到的是不透明底色，不是透明条。
+  */
+  .topbar {
+    position: sticky; top: 0; z-index: 10;
+    background: rgba(8, 9, 10, 0.86);
+    border-bottom: 1px solid var(--line);
+    backdrop-filter: saturate(160%) blur(12px);
+    -webkit-backdrop-filter: saturate(160%) blur(12px);
+  }
+  .topbar .wrap {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 16px; height: 54px;
+  }
+  .topbar a { border-bottom: 0; }
+  .topbar .brand {
+    font-weight: 650; font-size: 16px; letter-spacing: -0.01em; color: var(--text);
+  }
+  .topbar .links { display: flex; align-items: center; gap: 20px; font-size: 14px; }
+  .topbar .links a { color: var(--dim); }
+  .topbar .links a:hover { color: var(--text); }
+  .topbar .cta {
+    font-family: var(--mono); font-size: 13px;
+    color: var(--green) !important;
+    border: 1px solid rgba(52, 211, 153, 0.35) !important;
+    border-radius: 7px; padding: 5px 13px;
+  }
+  .topbar .cta:hover { background: rgba(52, 211, 153, 0.1); }
+
+  /* 顶栏会盖住锚点目标，留出让位 */
+  [id] { scroll-margin-top: 70px; }
 
   /* ---------- hero ---------- */
 
@@ -158,13 +196,20 @@
 
   /* ---------- footer ---------- */
 
-  footer { padding: 44px 0 64px; color: var(--dimmer); font-size: 15px; }
+  footer {
+    padding: 44px 0 64px; color: var(--dimmer); font-size: 15px;
+    /* section:last-of-type 去掉了下边框，footer 自己得有上边框，
+       否则它和正文之间没有任何分隔，视觉上不读作页脚。 */
+    border-top: 1px solid var(--line);
+  }
   footer nav { display: flex; flex-wrap: wrap; gap: 22px; margin-bottom: 22px; }
   footer a { border-bottom: 0; color: var(--dim); }
   footer a:hover { color: var(--green); }
 
   @media (max-width: 720px) {
     body { font-size: 16px; }
+    .topbar .links { gap: 14px; font-size: 13px; }
+    .topbar .links .docs { display: none; }  /* 窄屏优先保 GitHub 和 Install */
     section { padding: 56px 0; }
     .hero { padding: 64px 0 56px; }
     .shots { grid-template-columns: 1fr; gap: 34px; max-width: 320px; }
@@ -173,7 +218,18 @@
   }
 </style>
 </head>
-<body>
+<body id="top">
+
+<nav class="topbar">
+  <div class="wrap">
+    <a class="brand" href="#top">Clamicro</a>
+    <span class="links">
+      <a href="https://github.com/laosji/clamicro">GitHub</a>
+      <a class="docs" href="https://github.com/laosji/clamicro#readme">Docs</a>
+      <a class="cta" href="#try">Install</a>
+    </span>
+  </div>
+</nav>
 
 <header class="hero">
   <div class="wrap">
@@ -303,7 +359,7 @@
   </div>
 </section>
 
-<section>
+<section id="try">
   <div class="wrap">
     <h2>Try it</h2>
     <p class="lede">One command. It asks before it changes anything.</p>
