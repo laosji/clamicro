@@ -35,7 +35,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "test": "node --test 'test/**/*.test.mjs'",
+    "test": "node --test test/*.test.mjs",
     "postinstall": "node -e \"console.log('\\n  Clamicro 已下载。执行 npx clamicro install 完成安装。\\n')\""
   },
   "repository": {

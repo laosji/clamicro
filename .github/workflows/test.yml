@@ -1,0 +1,40 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    # 只在 macOS 上跑。这个产品用了 scutil / osascript / Bonjour，
+    # 在 Linux 上跑绿是假信号——绿的是一套跑不到真实代码路径的测试。
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # package.json 的 engines 写的是 >=18。声明了就要验，
+        # 否则那行 engines 只是一句没人检查的话。
+        node: ['18', '20', '22', '24']
+    name: node ${{ matrix.node }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      # 零依赖、没有 lockfile，所以没有 npm ci 这一步。
+      # 这是有意的：见 README「Zero dependencies」。
+
+      - name: 确认测试文件真的被发现了
+        # 防的是**跑了 0 个测试也算绿**——这是这个项目一路在消灭的那类失败：
+        # 出了事，界面显示一切正常。glob 一旦失效，node --test 会安静地
+        # 什么都不跑然后退 0，CI 打勾，而实际上一条断言都没执行。
+        run: |
+          n=$(ls test/*.test.mjs | wc -l | tr -d ' ')
+          echo "发现 $n 个测试文件"
+          [ "$n" -ge 40 ] || { echo "::error::只发现 $n 个测试文件，glob 大概坏了"; exit 1; }
+
+      - run: npm test
