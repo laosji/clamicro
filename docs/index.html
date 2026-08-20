@@ -9,6 +9,9 @@
 <meta property="og:title" content="Clamicro">
 <meta property="og:description" content="Approve what Claude Code runs, from your phone. Nothing leaves your Wi-Fi.">
 <meta property="og:type" content="website">
+<link rel="alternate" hreflang="en" href="https://clamicro.showmyapps.cc/">
+<link rel="alternate" hreflang="zh-Hans" href="https://clamicro.showmyapps.cc/zh/">
+<link rel="alternate" hreflang="x-default" href="https://clamicro.showmyapps.cc/">
 <meta property="og:image" content="https://raw.githubusercontent.com/laosji/clamicro/main/docs/images/notch.png">
 
 <!--
@@ -18,205 +21,7 @@
   一个替它做宣传的页面如果自己往三个第三方发请求，那句话就不成立了。
   字体用系统栈，图片是仓库里的相对路径。
 -->
-<style>
-  :root {
-    --bg: #08090a;
-    --bg-raised: #101214;
-    --line: #1e2225;
-    --text: #e8eaed;
-    --dim: #8b9299;
-    --dimmer: #5f676d;
-    --green: #34d399;
-    --amber: #f5b544;
-    --red: #f87171;
-    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
-    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  }
-
-  * { box-sizing: border-box; }
-
-  html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; }
-
-  body {
-    margin: 0;
-    background: var(--bg);
-    color: var(--text);
-    font-family: var(--sans);
-    font-size: 17px;
-    line-height: 1.65;
-    -webkit-font-smoothing: antialiased;
-  }
-
-  .wrap { max-width: 880px; margin: 0 auto; padding: 0 24px; }
-
-  section { padding: 72px 0; border-bottom: 1px solid var(--line); }
-  section:last-of-type { border-bottom: 0; }
-
-  h1, h2, h3 { line-height: 1.25; letter-spacing: -0.02em; margin: 0; }
-  h2 { font-size: 28px; margin-bottom: 12px; }
-  h3 { font-size: 17px; margin-bottom: 6px; }
-  p { margin: 0 0 18px; }
-  p:last-child { margin-bottom: 0; }
-
-  a { color: var(--green); text-decoration: none; border-bottom: 1px solid rgba(52, 211, 153, 0.3); }
-  a:hover { border-bottom-color: var(--green); }
-
-  .lede { color: var(--dim); font-size: 19px; }
-  .note { color: var(--dimmer); font-size: 15px; }
-
-  /* ---------- topbar ---------- */
-
-  /*
-    粘性顶栏。调研的五个站点里有四个有它，而且四个都把 CTA 挂在上面——
-    顶栏是「CTA 会重复」这条规律的主要载体：页面 4.9 屏，滚到一半想装的人
-    不该被迫滚回顶部。唯一没有顶栏的 Ghostty 只有一屏，不需要。
-
-    backdrop-filter 有退路：不支持的浏览器拿到的是不透明底色，不是透明条。
-  */
-  .topbar {
-    position: sticky; top: 0; z-index: 10;
-    background: rgba(8, 9, 10, 0.86);
-    border-bottom: 1px solid var(--line);
-    backdrop-filter: saturate(160%) blur(12px);
-    -webkit-backdrop-filter: saturate(160%) blur(12px);
-  }
-  .topbar .wrap {
-    display: flex; align-items: center; justify-content: space-between;
-    gap: 16px; height: 54px;
-  }
-  .topbar a { border-bottom: 0; }
-  .topbar .brand {
-    font-weight: 650; font-size: 16px; letter-spacing: -0.01em; color: var(--text);
-  }
-  .topbar .links { display: flex; align-items: center; gap: 20px; font-size: 14px; }
-  .topbar .links a { color: var(--dim); }
-  .topbar .links a:hover { color: var(--text); }
-  .topbar .cta {
-    font-family: var(--mono); font-size: 13px;
-    color: var(--green) !important;
-    border: 1px solid rgba(52, 211, 153, 0.35) !important;
-    border-radius: 7px; padding: 5px 13px;
-  }
-  .topbar .cta:hover { background: rgba(52, 211, 153, 0.1); }
-
-  /* 顶栏会盖住锚点目标，留出让位 */
-  [id] { scroll-margin-top: 70px; }
-
-  /* ---------- hero ---------- */
-
-  .hero { padding: 88px 0 72px; border-bottom: 1px solid var(--line); }
-
-  .hero h1 { font-size: clamp(38px, 7vw, 56px); margin-bottom: 20px; }
-
-  .eyebrow { display: flex; align-items: center; gap: 10px; margin: 0 0 26px; }
-
-  .hero .tag, .hero .ver {
-    display: inline-block; font-family: var(--mono); font-size: 13px;
-    border-radius: 999px; padding: 3px 11px;
-  }
-  .hero .tag { color: var(--green); border: 1px solid rgba(52, 211, 153, 0.35); }
-  .hero .ver { color: var(--dimmer); border: 1px solid var(--line); }
-
-  .hero .lede { font-size: clamp(19px, 2.6vw, 22px); max-width: 30em; }
-
-  .notch { margin: 40px 0 34px; }
-  .notch img {
-    display: block; width: 100%; max-width: 480px; height: auto;
-    border-radius: 12px;
-  }
-  .notch figcaption { color: var(--dimmer); font-size: 14px; margin-top: 12px; }
-
-  /* ---------- install ---------- */
-
-  .cmd {
-    display: flex; align-items: center; gap: 12px;
-    background: var(--bg-raised); border: 1px solid var(--line);
-    border-radius: 10px; padding: 15px 18px;
-    font-family: var(--mono); font-size: 15px;
-    overflow-x: auto;
-  }
-  .cmd .prompt { color: var(--dimmer); user-select: none; margin-right: 0.6ch; }
-  .cmd code { white-space: nowrap; overflow-x: auto; flex: 1; }
-
-  /* 复制按钮。命令行工具的落地页没有复制按钮，等于让人手动选中一行等宽文本。 */
-  .cmd .copy {
-    flex: none; font: inherit; font-size: 13px; cursor: pointer;
-    color: var(--dim); background: transparent;
-    border: 1px solid var(--line); border-radius: 7px; padding: 4px 12px;
-    transition: color .12s, border-color .12s;
-  }
-  .cmd .copy:hover { color: var(--text); border-color: var(--dim); }
-  .cmd .copy[data-done] { color: var(--green); border-color: rgba(52, 211, 153, 0.4); }
-
-  .reqs { color: var(--dimmer); font-size: 14px; margin-top: 14px; font-family: var(--mono); line-height: 1.9; }
-  .reqs a { color: var(--dim); border-bottom-color: var(--line); }
-  .reqs a:hover { color: var(--green); border-bottom-color: var(--green); }
-
-  /* ---------- screenshots ---------- */
-
-  .shots {
-    display: grid; grid-template-columns: repeat(3, 1fr);
-    gap: 22px; margin-top: 36px;
-  }
-  .shots figure { margin: 0; }
-  .shots img {
-    display: block; width: 100%; height: auto;
-    border: 1px solid var(--line); border-radius: 14px;
-  }
-  .shots figcaption { font-size: 14px; color: var(--dim); margin-top: 12px; }
-  .shots strong { color: var(--text); font-weight: 600; display: block; }
-
-  /* ---------- defaults table ---------- */
-
-  table { width: 100%; border-collapse: collapse; margin-top: 28px; font-size: 15px; }
-  th, td { text-align: left; padding: 13px 14px; border-bottom: 1px solid var(--line); }
-  th { color: var(--dimmer); font-weight: 500; font-size: 13px; letter-spacing: 0.04em; text-transform: uppercase; }
-  td:first-child { color: var(--dim); }
-  tbody tr:last-child td { border-bottom: 0; }
-  .ok { color: var(--green); font-weight: 600; }
-  .stop { color: var(--red); font-weight: 600; }
-  .wait { font-family: var(--mono); color: var(--amber); }
-  code.k { font-family: var(--mono); font-size: 0.92em; color: var(--text); }
-
-  /* ---------- story ---------- */
-
-  .story { border-left: 2px solid var(--line); padding-left: 26px; }
-  .story .kicker {
-    font-family: var(--mono); font-size: 13px; color: var(--dimmer);
-    text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 14px;
-  }
-  .story .punch { color: var(--text); font-size: 19px; }
-
-  /* ---------- feedback ---------- */
-
-  .feedback {
-    background: var(--bg-raised); border: 1px solid var(--line);
-    border-radius: 14px; padding: 30px 32px;
-  }
-
-  /* ---------- footer ---------- */
-
-  footer {
-    padding: 44px 0 64px; color: var(--dimmer); font-size: 15px;
-    /* section:last-of-type 去掉了下边框，footer 自己得有上边框，
-       否则它和正文之间没有任何分隔，视觉上不读作页脚。 */
-    border-top: 1px solid var(--line);
-  }
-  footer nav { display: flex; flex-wrap: wrap; gap: 22px; margin-bottom: 22px; }
-  footer a { border-bottom: 0; color: var(--dim); }
-  footer a:hover { color: var(--green); }
-
-  @media (max-width: 720px) {
-    body { font-size: 16px; }
-    .topbar .links { gap: 14px; font-size: 13px; }
-    .topbar .links .docs { display: none; }  /* 窄屏优先保 GitHub 和 Install */
-    section { padding: 56px 0; }
-    .hero { padding: 64px 0 56px; }
-    .shots { grid-template-columns: 1fr; gap: 34px; max-width: 320px; }
-    .story { padding-left: 20px; }
-    .feedback { padding: 24px; }
-  }
-</style>
+<link rel="stylesheet" href="./site.css">
 </head>
 <body id="top">
 
@@ -226,6 +31,7 @@
     <span class="links">
       <a href="https://github.com/laosji/clamicro">GitHub</a>
       <a class="docs" href="https://github.com/laosji/clamicro#readme">Docs</a>
+      <a class="lang" href="./zh/" hreflang="zh-Hans" lang="zh-Hans">中文</a>
       <a class="cta" href="#try">Install</a>
     </span>
   </div>
@@ -408,44 +214,7 @@
   </div>
 </footer>
 
-<script>
-  /*
-    复制按钮。内联、无依赖 —— 页面一个外部请求都不发，这条由
-    test/site-numbers.test.mjs 钉着。
-
-    clipboard API 在非安全上下文（比如有人把这个文件用 file:// 打开）里是
-    undefined，所以要有退路：失败就把命令选中，人按 ⌘C 也能走完。
-    静默失败是这个项目最不能接受的形态。
-  */
-  document.querySelectorAll('.cmd .copy').forEach(function (btn) {
-    btn.addEventListener('click', function () {
-      var cmd = btn.dataset.cmd
-      var done = function () {
-        btn.textContent = 'Copied'
-        btn.setAttribute('data-done', '')
-        setTimeout(function () {
-          btn.textContent = 'Copy'
-          btn.removeAttribute('data-done')
-        }, 1600)
-      }
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(cmd).then(done, select)
-      } else {
-        select()
-      }
-      function select () {
-        var code = btn.parentNode.querySelector('code')
-        var r = document.createRange()
-        r.selectNodeContents(code)
-        var sel = window.getSelection()
-        sel.removeAllRanges()
-        sel.addRange(r)
-        btn.textContent = 'Press ⌘C'
-        setTimeout(function () { btn.textContent = 'Copy' }, 2200)
-      }
-    })
-  })
-</script>
+<script src="./site.js" defer></script>
 
 </body>
 </html>

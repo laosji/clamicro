@@ -19,7 +19,7 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync, mkdtempSync, mkdirSync, rmSync } from 'node:fs'
+import { readFileSync, readdirSync, mkdtempSync, mkdirSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
@@ -45,8 +45,17 @@ function defaults() {
   try { return loadConfig() } finally { console.log = log }
 }
 
-const PAGE = new URL('../docs/index.html', import.meta.url)
-const html = readFileSync(PAGE, 'utf8')
+/**
+ * **两版都要查。** 中英双版意味着同一批数字有两份副本，而只钉英文版的话，
+ * 中文版可以安静地漂到天荒地老——那正是这个仓库刚修过一轮的病。
+ *
+ * 加第三版语言时在这里加一行就行；忘了加，下面每条断言都会漏掉它，
+ * 所以这个数组本身也被 `两版都在册` 那条钉住。
+ */
+const PAGES = [
+  ['docs/index.html', readFileSync(new URL('../docs/index.html', import.meta.url), 'utf8')],
+  ['docs/zh/index.html', readFileSync(new URL('../docs/zh/index.html', import.meta.url), 'utf8')],
+]
 
 /** 页面上怎么写这个时长。和 index.html 里的文案一一对应。 */
 function human(ms) {
@@ -54,27 +63,31 @@ function human(ms) {
   return s < 60 ? `${s}s` : `${s / 60} min`
 }
 
-/** 取出 <td data-pin="名字">文字</td> 里的文字 */
-function pinned(name) {
+/** 取出某一版页面里 <td data-pin="名字">文字</td> 的文字 */
+function pinned(html, name, where) {
   const m = html.match(new RegExp(`data-pin="${name}"[^>]*>([^<]+)<`))
-  assert.ok(m, `docs/index.html 里找不到 data-pin="${name}" 的格子——是被删了还是改名了？`)
+  assert.ok(m, `${where} 里找不到 data-pin="${name}" 的格子——是被删了还是改名了？`)
   return m[1].trim()
 }
 
 test('官网写的「普通操作等多久」= config 的 autoApproveMs', () => {
   const want = human(defaults().approval.autoApproveMs)
-  assert.equal(
-    pinned('autoApprove'), want,
-    `官网说普通操作等 ${pinned('autoApprove')}，代码默认是 ${want}。改了默认值要同步改 docs/index.html。`,
-  )
+  for (const [where, html] of PAGES) {
+    assert.equal(
+      pinned(html, 'autoApprove', where), want,
+      `${where} 说普通操作等 ${pinned(html, 'autoApprove', where)}，代码默认是 ${want}。改了默认值两版都要改。`,
+    )
+  }
 })
 
 test('官网写的「高危等多久」= config 的 timeoutMs', () => {
   const want = human(defaults().approval.timeoutMs)
-  assert.equal(
-    pinned('highRiskTimeout'), want,
-    `官网说高危等 ${pinned('highRiskTimeout')}，代码默认是 ${want}。改了默认值要同步改 docs/index.html。`,
-  )
+  for (const [where, html] of PAGES) {
+    assert.equal(
+      pinned(html, 'highRiskTimeout', where), want,
+      `${where} 说高危等 ${pinned(html, 'highRiskTimeout', where)}，代码默认是 ${want}。改了默认值两版都要改。`,
+    )
+  }
 })
 
 /**
@@ -86,20 +99,24 @@ test('官网写的「高危等多久」= config 的 timeoutMs', () => {
  */
 test('官网 Hero 的版本徽章 = package.json 的 version', () => {
   const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
-  assert.equal(
-    pinned('version'), `v${pkg.version}`,
-    `官网徽章写着 ${pinned('version')}，包是 ${pkg.version}。\n` +
-    '修：node scripts/sync-plugin-versions.mjs',
-  )
+  for (const [where, html] of PAGES) {
+    assert.equal(
+      pinned(html, 'version', where), `v${pkg.version}`,
+      `${where} 徽章写着 ${pinned(html, 'version', where)}，包是 ${pkg.version}。\n` +
+      '修：node scripts/sync-plugin-versions.mjs',
+    )
+  }
 })
 
 test('官网写的 Node 版本 = package.json 的 engines', () => {
   const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
   const floor = pkg.engines.node.replace(/[^\d.]/g, '').split('.')[0]
-  assert.ok(
-    html.includes(`Node ${floor}+`),
-    `官网上没有「Node ${floor}+」。package.json 的 engines 是 ${pkg.engines.node}，两边要对上。`,
-  )
+  for (const [where, html] of PAGES) {
+    assert.ok(
+      html.includes(`Node ${floor}+`),
+      `${where} 上没有「Node ${floor}+」。package.json 的 engines 是 ${pkg.engines.node}，两边要对上。`,
+    )
+  }
 })
 
 /**
@@ -112,13 +129,55 @@ test('官网写的 Node 版本 = package.json 的 engines', () => {
  * 例外：README 和 npm 的链接、og:image 指向 GitHub 的图。那些是 <a href> 和
  * 元数据，不是页面加载时发出去的请求。
  */
-test('官网不加载任何第三方资源', () => {
-  const loaders = [...html.matchAll(/<(?:script|link|img)\b[^>]*\b(?:src|href)="([^"]+)"/g)]
-    .map((m) => m[1])
-    .filter((u) => /^(https?:)?\/\//.test(u))
+/**
+ * `<link>` 里只有一部分 rel 会真的发请求。hreflang 的 alternate 和 canonical
+ * 是给爬虫看的元数据，指向本站自己的绝对地址，不构成任何加载。
+ *
+ * 名单是**豁免**而不是**筛选**：写死「哪些不发请求」，其余一律照查。反过来写
+ * （只查 stylesheet/preload/icon…）的话，哪天有人加个没见过的 rel，测试会安静
+ * 地放过去——这个项目对「安静地放过去」有明确态度。
+ */
+const NON_FETCHING_REL = ['alternate', 'canonical']
 
+test('官网不加载任何第三方资源', () => {
+  for (const [where, html] of PAGES) {
+    const loaders = [...html.matchAll(/<(script|link|img)\b([^>]*)\b(?:src|href)="([^"]+)"/g)]
+      .filter(([, tag, attrs]) => {
+        if (tag !== 'link') return true
+        const rel = (attrs.match(/\brel="([^"]*)"/) || [])[1] || ''
+        return !NON_FETCHING_REL.includes(rel.trim().toLowerCase())
+      })
+      .map((m) => m[3])
+      .filter((u) => /^(https?:)?\/\//.test(u))
+
+    assert.deepEqual(
+      loaders, [],
+      `${where} 在加载外部资源：${loaders.join('、')}。零依赖是这个产品的卖点，官网自己要先做到。`,
+    )
+  }
+})
+
+/**
+ * 上面每条断言都在 PAGES 上循环，所以**漏登记一版**是唯一能绕过全部检查的方式：
+ * 新加的语言版本不在册，它想写什么数字都行，测试全绿。
+ *
+ * 所以这里反过来查文件系统：docs/ 下每一个 index.html 都必须在 PAGES 里。
+ */
+test('每一版页面都在 PAGES 里登记了', () => {
+  const docs = new URL('../docs/', import.meta.url)
+  const found = []
+  const walk = (dir, prefix) => {
+    for (const e of readdirSync(new URL(dir, docs), { withFileTypes: true })) {
+      if (e.isDirectory()) walk(`${e.name}/`, `${prefix}${e.name}/`)
+      else if (e.name === 'index.html') found.push(`docs/${prefix}${e.name}`)
+    }
+  }
+  walk('', '')
+
+  const registered = PAGES.map(([where]) => where)
   assert.deepEqual(
-    loaders, [],
-    `页面在加载外部资源：${loaders.join('、')}。零依赖是这个产品的卖点，官网自己要先做到。`,
+    found.sort(), registered.sort(),
+    '有页面没在 PAGES 里登记——没登记的那版不受任何断言约束，数字可以随便漂。\n' +
+    `文件系统里有：${found.join('、')}\nPAGES 里写了：${registered.join('、')}`,
   )
 })

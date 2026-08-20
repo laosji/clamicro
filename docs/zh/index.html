@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Clamicro — 在手机上批准 Claude Code 要跑的命令</title>
+<meta name="description" content="在手机上盯着 Claude Code 和 DeepSeek Harness，批准它们要跑的命令。局域网直连，零依赖，什么都不出你的 Wi-Fi。">
+
+<meta property="og:title" content="Clamicro">
+<meta property="og:description" content="在手机上批准 Claude Code 要跑的命令。什么都不出你的 Wi-Fi。">
+<meta property="og:type" content="website">
+<link rel="alternate" hreflang="en" href="https://clamicro.showmyapps.cc/">
+<link rel="alternate" hreflang="zh-Hans" href="https://clamicro.showmyapps.cc/zh/">
+<link rel="alternate" hreflang="x-default" href="https://clamicro.showmyapps.cc/">
+<meta property="og:image" content="https://raw.githubusercontent.com/laosji/clamicro/main/docs/images/notch.png">
+
+<!--
+  样式和脚本和英文版共用 ../site.css / ../site.js —— 双版意味着文案已经有两份，
+  再把 CSS 也复制一遍就是四份副本。这个仓库刚因为副本漂了修过一轮文档。
+
+  外部资源仍然是零：没有 CDN、没有 Google Fonts、没有统计脚本。产品的全部主张
+  是「控制面不出局域网、不联网、不上报」，替它宣传的页面自己要先做到。
+-->
+<link rel="stylesheet" href="../site.css">
+</head>
+<body id="top">
+
+<nav class="topbar">
+  <div class="wrap">
+    <a class="brand" href="#top">Clamicro</a>
+    <span class="links">
+      <a href="https://github.com/laosji/clamicro">GitHub</a>
+      <a class="docs" href="https://github.com/laosji/clamicro/blob/main/README.zh-CN.md">文档</a>
+      <a class="lang" href="../" hreflang="en" lang="en">EN</a>
+      <a class="cta" href="#try">安装</a>
+    </span>
+  </div>
+</nav>
+
+<header class="hero">
+  <div class="wrap">
+    <p class="eyebrow">
+      <span class="tag">macOS + iPhone</span>
+      <span class="ver" data-pin="version">v2.16.0</span>
+    </p>
+    <h1>你的 agent 要跑什么,<br>在手机上点头。</h1>
+    <p class="lede">
+      Clamicro 盯着 Claude Code 和 DeepSeek Harness。它们想跑点什么的时候,Mac 会提醒你
+      ——手机上打开页面,看清楚那条命令,划一下批准或拒绝。终端那边立刻继续。
+    </p>
+
+    <figure class="notch">
+      <img src="../images/notch.png" alt="Mac 刘海处的通知胶囊:绿色对勾、项目名,以及结果那一行">
+      <figcaption>这是 Mac 上的真实截屏,不是效果图。</figcaption>
+    </figure>
+
+    <div class="cmd">
+      <code><span class="prompt">$</span>npx clamicro install</code>
+      <button class="copy" type="button" data-cmd="npx clamicro install">复制</button>
+    </div>
+    <p class="reqs">
+      Node 18+ · 零运行时依赖 · node_modules 里什么都没有<br>
+      <a href="https://github.com/laosji/clamicro/blob/main/README.zh-CN.md#安装">安装器会动你机器上的什么 →</a>
+    </p>
+  </div>
+</header>
+
+<section>
+  <div class="wrap">
+    <h2>一个来回</h2>
+    <p class="lede">不用再守着终端。</p>
+
+    <div class="shots">
+      <figure>
+        <img src="../images/home-running.png" alt="agent 工作中的首页:呼吸状态的控制台,以及滚动的工具调用列表">
+        <figcaption><strong>运行中</strong> 一个会呼吸的控制台,工具调用实时往下滚。</figcaption>
+      </figure>
+      <figure>
+        <img src="../images/home-pending.png" alt="首页顶部有一条待批准,下面还列着第二条">
+        <figcaption><strong>有事找你</strong> 它想干什么,一行说清,倒计时在跑。</figcaption>
+      </figure>
+      <figure>
+        <img src="../images/approval-detail.png" alt="审批详情:风险等级、影响、完整命令,以及钉在底部的拖动决定条">
+        <figcaption><strong>做决定</strong> 风险、影响、完整命令,和一条拖着做决定的横条。</figcaption>
+      </figure>
+    </div>
+
+    <p class="note" style="margin-top:26px">这就是真实界面,不是效果图。</p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>它不是什么都拦</h2>
+    <p class="lede">
+      在你以为它会拦下每条命令之前,先看清默认值。
+    </p>
+
+    <table>
+      <thead>
+        <tr><th>操作</th><th>等多久</th><th>到点</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>普通</td>
+          <td class="wait" data-pin="autoApprove">10s</td>
+          <td class="ok">自动通过</td>
+        </tr>
+        <tr>
+          <td>高风险 —— <code class="k">rm -rf</code>、force push、动 <code class="k">~/.ssh</code></td>
+          <td class="wait" data-pin="highRiskTimeout">3 min</td>
+          <td class="stop">自动拒绝</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <p style="margin-top:26px">
+      也就是说:日常操作它是<em>告诉你</em>,高危操作它才是<em>拦住你</em>。两个数都能改
+      ——把第一个设成 0,就是每条都等你。无论哪种,Mac 都会提醒你。
+    </p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>什么都不出你的 Wi-Fi</h2>
+
+    <div class="story">
+      <p class="kicker">为什么没有推送</p>
+      <p class="punch">
+        两条远程通道都做出来过,又都删了。
+      </p>
+      <p>
+        第一条是带操作按钮的 ntfy 中转 —— 锁屏上直接批。它能用。它同时把<em>控制面</em>
+        交给了第三方。
+      </p>
+      <p>
+        第二条是 Bark:只发一句「有一条待审批」,控制面留在局域网。这已经是能做到的最克制的
+        版本了,而它换来的仍然只是「人不在时有东西能叫你」—— 代价是持续告诉一台外部服务器
+        「这里有个操作在等着」。
+      </p>
+      <p>
+        能上锁屏的通知必须过 APNs,那就必然是别人的服务器。所以答案是 macOS 本地通知,
+        完全不联网,再没有别的。
+      </p>
+      <p class="punch" style="margin-top:24px">
+        代价要说清楚:一旦你离开这台 Mac,<em>没有任何东西</em>会叫你。高危操作会等到超时
+        然后被拒绝。这是有意的默认 —— 人不该在咖啡馆里批准
+        <code class="k">rm -rf</code>。
+      </p>
+    </div>
+
+    <p class="note" style="margin-top:30px">
+      命令原文、审批决定、时间线和用量,全部走局域网直达你的 Mac。配对只有在你于 Mac
+      自己的屏幕上按下「允许」之后才会签发凭证。细节和威胁模型:
+      <a href="https://github.com/laosji/clamicro/blob/main/README.zh-CN.md">中文 README</a> ·
+      <a href="https://github.com/laosji/clamicro/blob/main/SECURITY.md">SECURITY.md</a>
+    </p>
+  </div>
+</section>
+
+<section id="try">
+  <div class="wrap">
+    <h2>试试</h2>
+    <p class="lede">一条命令。动任何东西之前它都会先问。</p>
+
+    <div class="cmd" style="margin-top:26px">
+      <code><span class="prompt">$</span>npx clamicro install</code>
+      <button class="copy" type="button" data-cmd="npx clamicro install">复制</button>
+    </div>
+    <p class="reqs">macOS + iPhone,同一个 Wi-Fi · Node 18+</p>
+
+    <p style="margin-top:22px">
+      它会把要往 <code class="k">~/.claude/settings.json</code> 里写的内容原样列给你看,
+      等你确认,并且先备份。然后带你走一遍内置演示 —— 一条假的审批,让你在任何真东西
+      有风险之前,先真划一次。卸载只删它自己放进去的,可字节级验证。
+    </p>
+
+    <div class="feedback" style="margin-top:40px">
+      <h3 style="font-size:19px;margin-bottom:10px">能用吗?</h3>
+      <p>
+        Clamicro 没有遥测,也永远不会往外报 —— 这意味着除了我自己这台机器,我不知道它
+        在谁那儿能用。你要是装了,不管成没成我都真的想知道,尤其是没成的时候。
+      </p>
+      <p style="margin-bottom:0">
+        <a href="https://github.com/laosji/clamicro/issues/new">告诉我怎么样 →</a>
+      </p>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <nav>
+      <a href="https://github.com/laosji/clamicro">GitHub</a>
+      <a href="https://www.npmjs.com/package/clamicro">npm</a>
+      <a href="https://github.com/laosji/clamicro/blob/main/README.zh-CN.md">文档</a>
+      <a href="../" hreflang="en" lang="en">English</a>
+      <a href="https://github.com/laosji/clamicro/blob/main/SECURITY.md">安全</a>
+    </nav>
+    <p style="margin:0">
+      MIT 许可。需要 macOS 和一台在同一 Wi-Fi 下的 iPhone ——
+      它用到 <code class="k">scutil</code>、<code class="k">osascript</code> 和 Bonjour,
+      界面是按 iOS Safari 做的。
+    </p>
+  </div>
+</footer>
+
+<script src="../site.js" defer></script>
+
+</body>
+</html>

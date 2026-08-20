@@ -26,9 +26,14 @@ export const PLUGIN_PKGS = [
  * 第二天它就在骗人了——而且骗得很难看，因为访客判断「这项目还活着吗」
  * 靠的正是这个号。
  *
- * 所以不手写，跟着发版脚本走。test/site-numbers.test.mjs 钉着它。
+ * 所以不手写，跟着发版脚本走。test/site-numbers.test.mjs 钉着它——
+ * 那边还有一条断言保证「docs 下每一版 index.html 都在册」，所以这里漏一版
+ * 不会安静地过去。
  */
-export const SITE_PAGE = 'docs/index.html'
+export const SITE_PAGES = [
+  'docs/index.html',
+  'docs/zh/index.html',
+]
 
 export const rootVersion = () =>
   JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version
@@ -64,9 +69,9 @@ export function bumpBadgeText(raw, version) {
 }
 
 /** 读出徽章上现在写的是什么。找不到就是页面结构被改了，要炸而不是当成空。 */
-export function readBadge(raw) {
+export function readBadge(raw, where = '页面') {
   const m = raw.match(/data-pin="version"[^>]*>([^<]*)</)
-  if (!m) throw new Error(`${SITE_PAGE} 里找不到 data-pin="version" 的徽章`)
+  if (!m) throw new Error(`${where} 里找不到 data-pin="version" 的徽章`)
   return m[1].trim()
 }
 
@@ -83,12 +88,13 @@ export function sync({ write = true } = {}) {
     writeFileSync(path, bumpVersionText(raw, want))
   }
 
-  const sitePath = join(root, SITE_PAGE)
-  const siteRaw = readFileSync(sitePath, 'utf8')
-  const badge = readBadge(siteRaw)
-  if (badge !== `v${want}`) {
-    changed.push({ rel: SITE_PAGE, from: badge, to: `v${want}` })
-    if (write) writeFileSync(sitePath, bumpBadgeText(siteRaw, want))
+  for (const rel of SITE_PAGES) {
+    const path = join(root, rel)
+    const raw = readFileSync(path, 'utf8')
+    const badge = readBadge(raw, rel)
+    if (badge === `v${want}`) continue
+    changed.push({ rel, from: badge, to: `v${want}` })
+    if (write) writeFileSync(path, bumpBadgeText(raw, want))
   }
 
   return { want, changed }
