@@ -136,12 +136,15 @@ test('官网写的 Node 版本 = package.json 的 engines', () => {
  * 名单是**豁免**而不是**筛选**：写死「哪些不发请求」，其余一律照查。反过来写
  * （只查 stylesheet/preload/icon…）的话，哪天有人加个没见过的 rel，测试会安静
  * 地放过去——这个项目对「安静地放过去」有明确态度。
+ *
+ * `<source srcset>` 也在册：加 WebP 的 <picture> 之后，一个指向 CDN 的 source
+ * 会绕过只查 img/script/link 的旧写法，而它是实打实要发请求的。
  */
 const NON_FETCHING_REL = ['alternate', 'canonical']
 
 test('官网不加载任何第三方资源', () => {
   for (const [where, html] of PAGES) {
-    const loaders = [...html.matchAll(/<(script|link|img)\b([^>]*)\b(?:src|href)="([^"]+)"/g)]
+    const loaders = [...html.matchAll(/<(script|link|img|source)\b([^>]*)\b(?:src|href|srcset)="([^"]+)"/g)]
       .filter(([, tag, attrs]) => {
         if (tag !== 'link') return true
         const rel = (attrs.match(/\brel="([^"]*)"/) || [])[1] || ''
