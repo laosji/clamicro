@@ -29,6 +29,7 @@
     "!docs/images",
     "!docs/index.html",
     "!docs/.nojekyll",
+    "!docs/CNAME",
     "plugins/",
     "!plugins/*/dev",
     "README.md",
