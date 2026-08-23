@@ -168,7 +168,7 @@ function render(data) {
   session = data.session;
   // 后端能力随会话一起下发（见 /api/sessions/:id）。拿不到就按全能力走：
   // 老服务端不带这个字段，按无能力走会让暂停按钮凭空消失一次
-  cap = data.cap ?? { pause: true, cancel: true, quota: 'window', label: null, cancelNote: null };
+  cap = data.cap ?? { approve: true, pause: true, cancel: true, quota: 'window', label: null, cancelNote: null };
   const s = session;
   if (!s) {
     $('name').textContent = '会话已结束';
@@ -226,7 +226,12 @@ function render(data) {
     // Claude Code 没有运行时暂停原语，说清楚才不会以为点了没反应
     let note = '';
     if (paused && cap.pause) note = '已请求暂停 — 会在下一个工具调用前停住，当前这一步仍会跑完';
-    else if (!cap.pause && !cap.cancel) note = `${cap.label || '这个后端'}不支持从手机暂停或取消，只能审批。`;
+    /* 「只能审批」这句话是有前提的：得先真的能审批。Codex 现在连审批都没开，
+       照说会向用户承诺一个不存在的能力——而这一页的全部作用就是把「能做什么」
+       说准。所以先看 cap.approve。 */
+    else if (!cap.pause && !cap.cancel) note = cap.approve
+      ? `${cap.label || '这个后端'}不支持从手机暂停或取消，只能审批。`
+      : `${cap.label || '这个后端'}目前只把状态镜像到手机，暂停、取消、审批都还不支持。`;
     $('note').textContent = note;
     $('note').classList.toggle('hidden', !note);
   }

@@ -12,6 +12,7 @@ import { fingerprint, isTrusted, trust } from './src/network.mjs'
 import { saveConfig } from './src/config.mjs'
 import { syncApp, appPaths, APP_DIR } from './src/paths.mjs'
 import { wireUp, removePlugins } from './src/dsh.mjs'
+import { wireUp as wireUpCodex, unpatchConfig as unpatchCodex, codexConfig } from './src/codex.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const PLIST_DEST = join(homedir(), 'Library', 'LaunchAgents', 'com.clamicro.plist')
@@ -181,6 +182,22 @@ if (has('--uninstall')) {
   const dsh = removePlugins()
   if (dsh.removed.length) say(`  ${c.g('✓')} 已从 DSH 摘除：${dsh.removed.join('、')}`)
   if (dsh.patch) say(`  ${c.dim(`已清理 ${dsh.patch}`)}`)
+
+  /**
+   * Codex 的 config.toml 同理。
+   *
+   * 这里留下来的后果更隐蔽：hooks 还指着 ~/.claude/clamicro/app 下面一个
+   * 已经删掉的脚本，Codex 每次工具调用都会去执行一个不存在的文件。
+   * 所以摘。只删我们自己那段哨兵块，块外一律不动。
+   */
+  const codex = unpatchCodex()
+  if (codex.removed) {
+    say(`  ${c.g('✓')} 已从 Codex 摘除 ${c.dim(codexConfig())}`)
+    if (codex.backup) say(`  ${c.dim(`备份 ${codex.backup}`)}`)
+    say(`  ${c.dim('下次打开 Codex 它可能再问一次 hooks 信任 —— 那是配置变了，正常。')}`)
+  } else if (codex.partial) {
+    say(`  ${c.y('⚠')} ${codexConfig()} 里那段 clamicro 配置只剩半截，没敢删，请手工清理`)
+  }
 
   // 老版本注册过 LaunchAgent，现在这个功能没了，但别人机器上那个 plist 还在，
   // 不清掉它会继续按老路径拉起服务。**删掉**而不是只 unload：留着下次开机又回来。
@@ -408,6 +425,22 @@ const dsh = await wireUp({
   ui: { b: c.b, dim: c.dim, g: c.g, y: c.y },
 })
 if (dsh.action === 'failed') process.exitCode = 0 // 接 DSH 失败不影响整体安装
+
+/**
+ * Codex 同样是「探测到就问一句」。
+ *
+ * 跟 DSH 一条纪律：那是别人的配置文件（而且这一份通常还挺满——MCP、插件、
+ * 模型设置几十行），装 clamicro 顺手改掉它不合适，所以 optIn=true，
+ * `--yes` 也不替用户答应。
+ */
+const codex = await wireUpCodex({
+  port: config.port ?? 8765,
+  relayPath: appPaths().codexHook,
+  confirm,
+  say,
+  ui: { b: c.b, dim: c.dim, g: c.g, y: c.y },
+})
+if (codex.action === 'manual') process.exitCode = 0 // 同上：不影响整体安装
 
 say('')
 say(`  配对完点「发一条测试审批」，在手机上批一次 ${c.dim('—— 这就是验收')}`)

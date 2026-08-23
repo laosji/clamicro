@@ -1,6 +1,6 @@
 import { readBody, json, text } from '../http/respond.mjs'
 import { matchKey } from '../approvals.mjs'
-import { normalizeAgent } from '../agents.mjs'
+import { normalizeAgent, capOf } from '../agents.mjs'
 import { requireDeps } from './deps.mjs'
 
 /**
@@ -56,8 +56,46 @@ function renderStatusLine(d, approvals) {
   ].join('  ·  ')
 }
 
+/**
+ * 让上报方能用 `?agent=` 说明自己是谁。
+ *
+ * DSH 的桥接是 JS，往 payload 里加一个字段很自然；Codex 那边是一个 shell
+ * 中继脚本，而它拿到的 stdin 是 Codex 生成的 JSON——要往里塞字段就得在
+ * bash 里改 JSON，那要么引入 jq（这个项目零依赖），要么手写字符串拼接
+ * （在一份含模型生成内容的 JSON 上做这种事，迟早会拼坏）。
+ *
+ * 所以走查询参数：脚本一个字节都不用改 payload，原样转发。
+ * body 里已经写了 agent 的以 body 为准——那是更明确的表达。
+ */
+export function adoptAgent(payload, url) {
+  // 判 typeof 而不是判真假：ESM 是严格模式，给一个字符串赋属性会**抛**
+  // TypeError（实测日志：Cannot create property 'agent' on string 'hello'）。
+  // 上报体理应是对象，但这条路径谁都能从回环打进来，不该由它决定服务出不出错。
+  if (!payload || typeof payload !== 'object') return
+  if (!payload.agent) {
+    const q = url?.searchParams?.get('agent')
+    if (q) payload.agent = q
+  }
+  /**
+   * 认得的值就地规范化，**认不得的也规范化**。
+   *
+   * 原来只有 `s.agent` 走 normalizeAgent，而下面挑应答方言时比的是**原始值**。
+   * 于是一个拼错的名字（`?agent=codx`）会走出一条谁也没预料的路：会话按
+   * claude-code 渲染（暂停、取消按钮都在），审批回包却是中性的
+   * { decision, reason }——Claude Code 读不懂，于是那个决定被静默丢弃，
+   * 落回终端询问。手机上你明明批了。
+   *
+   * 「同一个字段在两个地方有两种含义」是这类 bug 的温床，所以在入口处
+   * 就只留一种。没写 agent 的保持没写：那是「老版本上报」，跟「写了个
+   * 不认识的」不是一回事，后者该被纠正，前者不该被凭空补上。
+   */
+  if (payload.agent) payload.agent = normalizeAgent(payload.agent)
+}
+
 // 对账漂移只喊一次：它一旦发生就是每次工具调用都发生，每条都喊等于没喊
 let warnedMatchDrift = false
+// 「这个后端没开审批」每个后端也只喊一次，理由同上
+const warnedNoApprove = new Set()
 
 export function hookRoutes(ctx) {
   requireDeps('hookRoutes', ctx, ['config', 'store', 'approvals', 'control', 'inbox', 'history', 'notify', 'notifyApproval'])
@@ -67,10 +105,37 @@ export function hookRoutes(ctx) {
     // ---- 核心：阻塞式审批 ----
     if (req.method === 'POST' && path === '/hooks/permission-request') {
       const payload = await readBody(req)
+      adoptAgent(payload, url)
 
       // 自排除：开发 clamicro 自身时，别把自己的工具调用卡住 570 秒。
       // 返回空对象 = 本 hook 无意见，走 Claude Code 正常权限流程。
       if (underIgnored(payload.cwd, config.ignoreCwds)) {
+        json(res, 200, {})
+        return true
+      }
+
+      /**
+       * 这个后端的审批还没开。
+       *
+       * `approve` 在能力表里躺了很久却**没有任何代码读它**——于是它写着
+       * false，审批照样跑完整套：建记录、推手机、阻塞等人、回一个决定。
+       * 接 Codex 时这一点变成了真问题：hooks 里接了 PermissionRequest，
+       * 而 Codex 的「拒绝」线格式还没在真机上验过，等于把一条没验证过的
+       * 拒绝路径直接上了生产。能力表说了不算，比没有能力表更糟。
+       *
+       * 回 `{}` = 本 hook 无意见，落回后端自己的权限流程（终端里问人），
+       * 跟上面自排除目录那条走同一条路。**不建审批记录**：建了就会在手机上
+       * 冒出一张卡片，而这个后端根本不该有审批。
+       *
+       * 这样那个布尔值才真的是开关——验收通过后改成 true，别处一行不用动。
+       */
+      if (!capOf(payload.agent).approve) {
+        if (!warnedNoApprove.has(payload.agent ?? '')) {
+          warnedNoApprove.add(payload.agent ?? '')
+          console.warn(
+            `[approval] ${payload.agent ?? '未知后端'} 的审批能力未开启，本会话的授权请求不拦截（落回它自己的权限流程）`,
+          )
+        }
         json(res, 200, {})
         return true
       }
@@ -116,6 +181,34 @@ export function hookRoutes(ctx) {
       store.clearWaitingApproval(payload.session_id)
 
       /**
+       * Codex 说的是 Claude Code 的方言，但不是同一句话。
+       *
+       * 它的 hook 输出同样是 `hookSpecificOutput`，字段却叫 permissionDecision
+       * （Claude Code 那边这个位置是 decision），值是一个带 behavior 的对象，
+       * 取值 allow / deny。这几个名字来自 Codex 二进制里的类型定义
+       * （PermissionRequestDecisionWire / PermissionRequestBehaviorWire），
+       * **还没在真机上对拒绝跑通过**——见 docs/codex-bridge.zh-CN.md §4。
+       *
+       * 所以决定同时写进响应头：中继脚本读它来决定退出码，不必解析 JSON，
+       * 也就多了一条不依赖这个形状是否猜对的通路。万一 JSON 没被读懂，
+       * 退出码 2 仍然能把这条操作挡下来。方向必须是这一侧——漏掉一次拒绝
+       * 就是假审批。
+       */
+      if (payload.agent === 'codex') {
+        json(res, 200, {
+          hookSpecificOutput: {
+            hookEventName: 'PermissionRequest',
+            permissionDecision: {
+              behavior: outcome.decision,
+              ...(outcome.reason ? { message: outcome.reason } : {}),
+            },
+            ...(outcome.reason ? { permissionDecisionReason: outcome.reason } : {}),
+          },
+        }, { 'X-Clamicro-Decision': outcome.decision })
+        return true
+      }
+
+      /**
        * 响应形状按上报方分。
        *
        * `hookSpecificOutput` 是 Claude Code 的 hook 协议，别的后端读不懂；
@@ -149,6 +242,7 @@ export function hookRoutes(ctx) {
       }
 
       const payload = await readBody(req)
+      adoptAgent(payload, url)
 
       // 同一次工具调用开始执行 = 这次授权已在别处放行（终端弹框、权限规则、
       // acceptEdits 模式…），把还挂着的那条审批销掉，别让它在界面上冒充「待处理」。
@@ -207,7 +301,17 @@ export function hookRoutes(ctx) {
 
       // 手机发来的消息在这里注入。Stop 的 decision:block 会阻止 Claude 停下，
       // 并把 reason 当作输入让对话继续——这是 hooks 里唯一能「往里发」的口子。
-      if (event === 'stop' && payload.session_id) {
+      if (event === 'stop' && payload.session_id && capOf(payload.agent).inbox) {
+        /**
+         * `capOf(...).inbox` 这一层是**在伤害发生的那一点**再拦一次。
+         *
+         * 入口（/api/sessions/:id/say）已经按能力挡住了，所以正常情况下
+         * 不支持注入的后端队列永远是空的。但万一有东西进去了（旧版本排的、
+         * 将来某条新路径），走到这里的后果是队列被排空、记一笔「已注入」，
+         * 而 decision:block 那个回包只有 Claude Code 读得懂——文字就没了。
+         *
+         * 拦住的话，消息**留在队列里**，手机上看得见。留着比消失好。
+         */
         const pending = inbox.drain(payload.session_id)
         if (pending) {
           store.noteInbox(payload.session_id, pending)

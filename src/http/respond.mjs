@@ -34,11 +34,12 @@ export function readBody(req, limit = 2 * 1024 * 1024) {
   })
 }
 
-export function json(res, code, obj) {
+export function json(res, code, obj, extra) {
   const body = JSON.stringify(obj)
   res.writeHead(code, {
     'Content-Type': 'application/json; charset=utf-8',
     'Content-Length': Buffer.byteLength(body),
+    ...extra,
   })
   res.end(body)
 }

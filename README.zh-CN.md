@@ -90,8 +90,9 @@ npm 包只是**安装器**。运行时文件会被复制到 `~/.claude/clamicro/
 
 ## 不止 Claude Code
 
-2.14.0 起，同一块看板可以同时盯着多个后端。目前支持 Claude Code 和
-[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）。
+2.14.0 起，同一块看板可以同时盯着多个后端。目前支持 Claude Code、
+[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH），
+以及 [Codex](https://developers.openai.com/codex/cli)（ChatGPT 那个 CLI，**目前只做状态镜像**）。
 
 首页**按模型分区**：每个模型一个标题，下面是它自己的状态、履历和用量。
 顺序按「谁先连上」固定，不会因为谁刚有动静就换位置。
@@ -101,13 +102,14 @@ npm 包只是**安装器**。运行时文件会被复制到 `~/.claude/clamicro/
 
 ### 不同后端能做的事不一样
 
-|  | Claude Code | DeepSeek Harness |
-|---|:--:|:--:|
-| 手机审批 | ✓ | ✓ |
-| 暂停 / 恢复 | ✓ | — |
-| 取消本轮 | ✓ | —（协议支持，尚未接） |
-| 从手机发消息 | ✓ | —（协议支持，尚未接） |
-| 用量 | 5h / 7d 滚动窗口 | 累计 token |
+|  | Claude Code | DeepSeek Harness | Codex |
+|---|:--:|:--:|:--:|
+| 状态镜像 | ✓ | ✓ | ✓ |
+| 手机审批 | ✓ | ✓ | —（口子都在，尚未验收） |
+| 暂停 / 恢复 | ✓ | — | —（同上） |
+| 取消本轮 | ✓ | —（协议支持，尚未接） | —（同上） |
+| 从手机发消息 | ✓ | —（协议支持，尚未接） | —（同上） |
+| 用量 | 5h / 7d 滚动窗口 | 累计 token | 拿不到 |
 
 界面**按能力渲染**：某个后端不支持的操作，入口直接不给。留一个点了没反应的
 按钮比没有按钮更糟——你会以为暂停成功了，然后走开。
@@ -122,6 +124,20 @@ DSH 的用量只报 token、不折算金额：DSH 自己不算钱，折算需要
 
 它写的是**别人家的配置**（`~/.dsh/profiles`），所以一定会先问，`--yes` 也不会
 替你答应。卸载时会一并摘除。手动接法和三条硬约束见 [`plugins/`](./plugins/)。
+
+### 接 Codex
+
+`npx clamicro install` 探测到 `~/.codex/config.toml` 也会问一句。同意后往那份
+配置里追加一段带哨兵注释的 hooks，卸载时按哨兵摘干净，块外的字节一个不动。
+
+**装完还差一步**：打开一次 Codex，同意它问的「是否信任这份 hooks 配置」。
+没点之前 Codex 会把 hooks **静默跳过**——不报错、不提示，clamicro 一条事件
+都收不到，而所有地方都显示已安装。`npx clamicro status` 会把这个状态单独报出来。
+
+Codex 现在只做状态镜像：审批的口子（PermissionRequest）和回包形状都已经接好，
+但「拒绝」这一路还没在真机上跑通过，所以按能力矩阵的规矩当作没有。
+猜错的代价不是按钮没反应，是手机上写着「已拒绝」而命令照样跑完。
+验收方法和打开开关的位置见 [`docs/codex-bridge.zh-CN.md`](./docs/codex-bridge.zh-CN.md)。
 
 ### 手势
 

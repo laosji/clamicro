@@ -1885,6 +1885,16 @@ function agentUsage(kind, cap, mine) {
     return null; // 还没跑完一轮，不知道 —— 那就先什么都不说
   }
 
+  /**
+   * 明确「这条链路不上报用量」（Codex：hook payload 里既没有窗口也没有 token）。
+   *
+   * 不能返回 null 让它空着：分区标题空、空闲卡片正文也空（那段代码的注释
+   * 写着「数字已经在分区标题里」，对这种后端并不成立），用户看到的是一片
+   * 什么都没有的区域，分不清是没数据还是还没加载。跟 DSH 那条
+   * 「该后端不上报用量」是同一个理由。
+   */
+  if (cap.quota === 'none') return { html: '不上报用量', stale: false };
+
   if (cap.quota !== 'window') return null;
 
   /**

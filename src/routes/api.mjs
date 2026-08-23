@@ -117,6 +117,32 @@ export function apiRoutes(ctx) {
     {
       method: 'POST', path: /^\/api\/sessions\/([\w-]+)\/(pause|resume|cancel)$/, auth: 'token',
       handler: ({ res, params: [sid, action] }) => {
+        /**
+         * 能力矩阵在**服务端**也得算数。
+         *
+         * 原来只有界面按能力渲染，端点谁都收。而 capOf 在 cfg 还没到手时
+         * 回退成「全都支持」——手机上缓存着升级前的页面就是这个状态，而那
+         * 恰恰是升级后的第一分钟。于是：对一个 DSH 会话点「暂停」，端点
+         * 照收，界面显示「已暂停」，DSH 那边照跑。实测过，返回的是
+         * {"ok":true,"state":"paused"}。
+         *
+         * 「按钮在那儿点了没反应」是能力矩阵要消灭的东西；这里是它的更坏
+         * 版本——按钮点了**看起来生效了**。
+         *
+         * resume 例外，永远放行：它是解除方向，不会制造假状态，而挡住它
+         * 有可能把一个已经挂起的会话永远留在暂停里（能力表改动之前挂上的）。
+         */
+        if (action !== 'resume') {
+          const cap = capOf(store.sessions().find((x) => x.session_id === sid)?.agent)
+          const allowed = action === 'cancel' ? cap.cancel : cap.pause
+          if (!allowed) {
+            return json(res, 409, {
+              error: 'unsupported',
+              agent: cap.label,
+              hint: `${cap.label ?? '这个后端'}不支持从手机${action === 'cancel' ? '取消' : '暂停'}。`,
+            })
+          }
+        }
         const out = control[action](sid)
         store.noteControl(sid, action)
         console.log(`[control] 会话 ${sid.slice(0, 8)} → ${action}`)
@@ -130,6 +156,27 @@ export function apiRoutes(ctx) {
       handler: async ({ req, res, params: [sid] }) => {
         const { text } = await readBody(req)
         if (!String(text ?? '').trim()) return json(res, 400, { error: 'empty' })
+
+        /**
+         * 同上，而这一条的后果更实在：**消息会被静默吃掉**。
+         *
+         * 注入靠的是 Stop hook 回一个 {decision:'block'}，那是 Claude Code
+         * 特有的口子。DSH 的桥接用的是 fire-and-forget 的 send()，压根不看
+         * 回包——于是 DSH 下一次报 stop 时，队列被排空、`noteInbox` 记一笔
+         * 「已注入」，而那段文字哪儿也没去。实测复现过：排进去一条，报一次
+         * stop，队列就空了。
+         *
+         * 用户看到的是「已送达」。这比拒绝他糟得多。
+         */
+        const cap = capOf(store.sessions().find((x) => x.session_id === sid)?.agent)
+        if (!cap.inbox) {
+          return json(res, 409, {
+            error: 'unsupported',
+            agent: cap.label,
+            hint: `${cap.label ?? '这个后端'}还不支持从手机发消息 —— 发了也送不到，所以这里不收。`,
+          })
+        }
+
         const msg = inbox.queue(sid, String(text).trim())
         // 队列满了要**当场说**。静默丢掉一条用户明确要发的指令，
         // 比拒绝它糟得多——他会以为发出去了，然后等一个永远不来的回应

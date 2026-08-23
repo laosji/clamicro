@@ -20,6 +20,14 @@ import { join, delimiter } from 'node:path'
  *
  * 所以能力在这里声明，UI 按能力渲染，缺失的入口直接不给。
  *
+ * **服务端也按这张表拦。** 只靠 UI 是不够的：capOf 在配置还没到手时回退成
+ * 「全都支持」，而手机上缓存着升级前的页面正是这个状态。原来端点谁都收，
+ * 于是对一个 DSH 会话点暂停会返回 ok、界面显示「已暂停」、DSH 照跑；
+ * 发一条消息会被下一次 stop 上报排空、记成「已注入」，而它哪儿也没去。
+ * 「按钮点了没反应」已经够糟，「按钮点了看起来生效了」更糟。
+ * 拦的位置：src/routes/api.mjs 的 control / say，src/routes/hooks.mjs 的
+ * permission-request。见 test/agent-caps.test.mjs。
+ *
  * ## 加新后端时
  *
  * 默认值一律取**保守**的那一侧（能力为 false）。没验证过的原语按不存在处理——
@@ -33,6 +41,15 @@ export const QUOTA = {
   WINDOW: 'window',
   /** 只有累计消耗，没有窗口概念（DSH：按 API key 计费，只能统计 token/花费） */
   TOKENS: 'tokens',
+  /**
+   * 什么都拿不到。
+   *
+   * Codex 走的是纯 hook 通道，而它的 hook payload 里既没有窗口用量也没有
+   * token 数——那些只出现在 app-server 的 TokenCount 事件里，hook 看不见。
+   * 不写成 TOKENS：那会让界面摆出一个「累计 0 token」的位子，而 0 是假的，
+   * 真实情况是「这条链路根本不上报」。
+   */
+  NONE: 'none',
 }
 
 export const AGENTS = {
@@ -71,6 +88,45 @@ export const AGENTS = {
     cancel: false,
     inbox: false,
     quota: QUOTA.TOKENS,
+    cancelNote: null,
+  },
+
+  /**
+   * OpenAI Codex —— ChatGPT 那个 CLI。见 docs/codex-bridge.zh-CN.md。
+   *
+   * 接它比接 DSH 便宜得多：这一版（0.147）的 hook 系统跟 Claude Code 几乎
+   * 同构——事件名一字不差（PreToolUse / PermissionRequest / Stop / …），
+   * payload 字段一样（session_id / cwd / tool_name / tool_input / …），
+   * 输出也是同一套 hookSpecificOutput。所以桥接只是一层 curl 中继，
+   * 没有第二个进程、没有插件宿主。
+   *
+   * ## approve 为什么是 false
+   *
+   * 不是缺口子：PermissionRequest 在，PreToolUse 也在，中继脚本和服务端的
+   * 应答形状都已经写好了。填 false 是因为**「拒绝」这一路没在真机上跑通过**。
+   * 两件事撞在一起挡住了验收：本机 Codex 的额度用尽，而 Codex 的 hook 要先
+   * 被「信任」才会执行（见文档 §3，未信任是**静默跳过**）。deny 的线格式
+   * 目前只对着二进制里的类型名核过，没让 Codex 真的因此挡下过一条命令。
+   *
+   * 而这一条恰恰最不能猜。猜错的表现不是「按钮点了没反应」，是手机上写着
+   * 「已拒绝」、命令照样跑完——一个假审批。宁可先只做镜像。
+   * 跑通 docs/codex-bridge.zh-CN.md §4 的验收之后把这里改成 true，别处不用动。
+   *
+   * 这个 false 是**真的生效的**：permission-request 端点据它直接回
+   * 「无意见」，不建审批记录、不推手机，落回 Codex 自己的权限流程。
+   * （它一度只是纸面声明——那时 hooks 里接着 PermissionRequest，审批照样
+   * 跑完整套，等于把这条还没验证过的拒绝路径直接上了生产。）
+   *
+   * pause / cancel / inbox 同理：拦截点都在（PreToolUse 认 continue、
+   * Stop 认 decision:block），没验证就按不存在算。
+   */
+  codex: {
+    label: 'Codex',
+    approve: false,
+    pause: false,
+    cancel: false,
+    inbox: false,
+    quota: QUOTA.NONE,
     cancelNote: null,
   },
 }
@@ -129,6 +185,15 @@ export function detectAgents() {
   const found = []
   if (existsSync(join(homedir(), '.claude', 'settings.json'))) found.push('claude-code')
   if (onPath('dsh')) found.push('dsh')
+  /**
+   * Codex 不能按 PATH 探。
+   *
+   * 它多半是 ChatGPT.app 里带的那份可执行文件
+   * （/Applications/ChatGPT.app/Contents/Resources/codex），PATH 上通常没有
+   * `codex` 这个名字——按 onPath 探等于永远探不到，而这台机器上明明装着。
+   * 所以看它的配置目录：config.toml 存在就说明这东西被真正跑起来过。
+   */
+  if (existsSync(join(homedir(), '.codex', 'config.toml'))) found.push('codex')
   // 一个都没探到时不要返回空数组：那会让空状态变成「新开一个  会话即可」。
   // 探不到多半是探测本身的问题，不是真的什么都没装
   cached = found.length ? found : [DEFAULT_AGENT]

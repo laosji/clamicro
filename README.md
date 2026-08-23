@@ -102,7 +102,8 @@ To upgrade, run `npx clamicro install` again.
 ## More than Claude Code
 
 Since 2.14.0 one dashboard can watch several backends at once. Today that means
-Claude Code and [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH).
+Claude Code, [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH),
+and [Codex](https://developers.openai.com/codex/cli) — the ChatGPT CLI, **status mirroring only** for now.
 
 The home screen **groups by model**: each model gets a heading with its own status,
 recent activity and usage. The order is fixed by which backend connected first, so
@@ -114,13 +115,14 @@ section before you can see it, and a missed approval is a silent automatic decis
 
 ### Backends differ in what they can do
 
-|  | Claude Code | DeepSeek Harness |
-|---|:--:|:--:|
-| Approve from phone | ✓ | ✓ |
-| Pause / Resume | ✓ | — |
-| Cancel the turn | ✓ | — (protocol supports it, not wired yet) |
-| Send a message from the phone | ✓ | — (protocol supports it, not wired yet) |
-| Usage | 5h / 7d rolling window | cumulative tokens |
+|  | Claude Code | DeepSeek Harness | Codex |
+|---|:--:|:--:|:--:|
+| Mirror status | ✓ | ✓ | ✓ |
+| Approve from phone | ✓ | ✓ | — (wired, not yet verified) |
+| Pause / Resume | ✓ | — | — |
+| Cancel the turn | ✓ | — (protocol supports it, not wired yet) | — |
+| Send a message from the phone | ✓ | — (protocol supports it, not wired yet) | — |
+| Usage | 5h / 7d rolling window | cumulative tokens | not available |
 
 The UI **renders by capability**: an action a backend can't do gets no entry point at
 all. A button that does nothing when tapped is worse than no button — you assume the
@@ -139,6 +141,24 @@ dashboard, or the pairing QR if you haven't paired yet).
 It writes into **someone else's config** (`~/.dsh/profiles`), so it always asks first and
 `--yes` will not answer for you. Uninstall removes it again. For the manual route and the
 bridge's three hard constraints, see [`plugins/`](./plugins/).
+
+### Attaching Codex
+
+`npx clamicro install` also detects `~/.codex/config.toml` and asks. It appends a
+sentinel-delimited block of hooks to that file; uninstall removes exactly that block
+and touches nothing outside it.
+
+**One manual step remains**: open Codex once and accept its "trust these hooks?"
+prompt. Until you do, Codex **skips the hooks silently** — no error, no warning,
+not a single event reaching clamicro while everything reports as installed.
+`npx clamicro status` calls that state out on its own line.
+
+Codex is status mirroring only for now. The approval hook (PermissionRequest) and the
+response shape are already wired, but the *deny* path has never been proven against a
+real Codex, so the capability matrix treats it as absent. Getting this wrong doesn't
+produce a dead button — it produces a phone that says "denied" while the command runs
+anyway. See [`docs/codex-bridge.zh-CN.md`](./docs/codex-bridge.zh-CN.md) for the
+acceptance probe and the one flag to flip.
 
 ### Gestures
 

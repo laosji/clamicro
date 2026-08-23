@@ -411,6 +411,38 @@ switch (cmd) {
       /* 读不到 settings.json 的话，install 那步本来就会报 */
     }
 
+    /**
+     * Codex 那条链路单独看一眼。
+     *
+     * 它比 Claude Code 多一道闸：hooks 写进 config.toml 之后还要被**信任**
+     * 才会执行，而没被信任时 Codex 是**静默跳过**——不报错、不提示。
+     * 那时候的现场是：配置在、服务在跑、Codex 正常干活、事件一条不来，
+     * 而其他每一项检查都显示正常。这一行就是为了让那个状态有地方被看见。
+     */
+    try {
+      const { verifyConfig, hasCodex } = await appImport('codex.mjs')
+      if (hasCodex()) {
+        const v = verifyConfig(p)
+        if (!v.present) {
+          console.log(c.dim('  codex     检测到 Codex，未接入 · 接上： npx clamicro install'))
+        } else if (v.missing.length || !v.portOk) {
+          console.log(c.r(`  ⚠️ codex    配置不完整${v.missing.length ? `：缺 ${v.missing.join('、')}` : '（端口对不上）'}`))
+          console.log(c.dim('            修复： npx clamicro install'))
+        } else if (!v.trustSeen) {
+          // 说「没看到」而不是「没信任」：Codex 写入信任之后长什么样我们没见过，
+          // 判不到有可能是它记在了别处。把猜测说成结论，就会变成一条永远消不掉
+          // 的告警 —— 而永远亮着的告警等于没有告警
+          console.log(c.y('  ⚠️ codex    hooks 已写入，但配置里没看到信任记录'))
+          console.log(c.dim('            没确认过就去打开一次 Codex 并同意 —— 没确认时它会静默跳过 hooks'))
+          console.log(c.dim('            已经确认过还显示这行：说明 Codex 把信任记在了别处，忽略即可'))
+        } else {
+          console.log(`  codex     ${c.g('已接入')}`)
+        }
+      }
+    } catch {
+      /* 没装过 / 读不到就不显示这一行 */
+    }
+
     // ignoreCwds 是**完全旁路**：列在里面的目录一条审批都不会拦。
     // 它本来只给「开发 clamicro 自身」用（否则每跑一条命令都在等自己审批），
     // 但填了之后没有任何地方显示——整个产品在那些目录下静默失效，

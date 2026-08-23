@@ -55,4 +55,7 @@ export const appPaths = () => ({
   server: join(APP_DIR, 'server.mjs'),
   statusLine: join(APP_DIR, 'bin', 'statusline.sh'),
   sessionStart: join(APP_DIR, 'bin', 'session-start.sh'),
+  // Codex 的 config.toml 里写的也是绝对路径，同样必须指向这个稳定位置，
+  // 不能指向 npx 缓存目录——理由见文件顶上那段
+  codexHook: join(APP_DIR, 'bin', 'codex-hook.sh'),
 })

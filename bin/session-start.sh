@@ -14,6 +14,10 @@
 set -euo pipefail
 input=$(cat)
 
+# 可选的第一个参数是后端名（Codex 的中继会传 codex 进来）。不传就是 Claude Code，
+# 也就是这个脚本原来的唯一用法——服务端对没写 agent 的上报落回 claude-code。
+AGENT="${1:-}"
+
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PORT="${CLAMICRO_PORT:-8765}"
 BASE="http://127.0.0.1:${PORT}"
@@ -46,7 +50,10 @@ elif health | grep -q '"stale":true'; then
   start
 fi
 
+URL="${BASE}/hooks/session-start"
+[ -n "$AGENT" ] && URL="${URL}?agent=${AGENT}"
+
 curl -s -m 2 -X POST -H 'Content-Type: application/json' \
-  --data-binary "$input" "${BASE}/hooks/session-start" >/dev/null 2>&1 || true
+  --data-binary "$input" "$URL" >/dev/null 2>&1 || true
 
 exit 0
