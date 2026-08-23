@@ -56,14 +56,32 @@ export function fingerprint(lanIp) {
   if (!raw) return { id: null, label: '未联网', gateway, mac, ssid, subnet, weak: true }
 
   /**
-   * 指纹辨识度低的标志：网关 MAC 是 VRRP 虚拟地址，而且既没有 SSID
-   * 也没有搜索域。这时候剩下的全是「同网段就一样」的东西。
+   * 指纹辨识度低的标志。
    *
-   * 不用它来阻止信任——那会让一部分正常用户永远连不上。它只是**说实话**，
-   * 让确认那一步能告诉用户「这个网络不好认，换了地方我可能认错」。
+   * ## 判据是「有没有可辨识的信号」，不是「是不是 VRRP」
+   *
+   * 原来写的是 `vrrp && !ssid && !domain`——只认企业网那一种形态。
+   * 它漏掉了一种在真机上更常见的：**全隧道 VPN 接管默认路由**。
+   *
+   * 这时 `route -n get default` 给出的是 utun 接口，点对点、**没有网关行**，
+   * 于是连锁反应：网关拿不到 → ARP 查不到 MAC → 隧道不是 Wi-Fi 接口所以
+   * 没有 SSID → 隧道上没有 DHCP，服务器/搜索域/DNS 全空。七项里六项为空，
+   * 指纹**只剩网段**。
+   *
+   * 而 mac 是 null，`vrrp` 判不成立，于是 weak 为假——恰恰在指纹最弱的时候
+   * 说它不弱。实测在本机复现：id 由 `192.168.0` 一个字符串算出来，
+   * 也就是「任何一个发 192.168.0.x 的网络」都会被认成同一个。
+   * 那是全世界最常见的家用网段之一。
+   *
+   * 所以判据换成：**一个有辨识度的信号都没有**。有辨识度的只有三样——
+   * 真实的网关 MAC（VRRP 虚拟地址不算，企业网里并不唯一）、SSID、搜索域。
+   * 网关 IP、网段、DNS 这些「同网段就一样」的东西不算数。
+   *
+   * 仍然不用它去**阻止**信任——那会让一部分正常用户永远连不上。它的作用是
+   * 说实话，让确认那一步能告诉用户「这个网络不好认，换了地方我可能认错」。
    */
   const vrrp = /^00:00:5e:00:01:/i.test(mac ?? '')
-  const weak = vrrp && !ssid && !domain
+  const weak = ![mac && !vrrp, ssid, domain].some(Boolean)
 
   return {
     id: createHash('sha256').update(raw).digest('hex').slice(0, 16),
@@ -85,6 +103,21 @@ export function fingerprint(lanIp) {
     subnet,
     weak,
   }
+}
+
+/**
+ * 指纹辨识度低时该对用户说的那句话。辨识度够就返回 null。
+ *
+ * 单独抽出来是因为**说这句话的地方不止一处**：安装时的确认、`trust`
+ * 命令、`networks` 列表。而在这之前 `weak` 这个字段算出来之后
+ * **全仓库没有任何地方读它**——注释里承诺的「说实话」一次都没发生过。
+ * 一个只写不读的安全提示等于没有这个提示。
+ */
+export function weakNote(fp) {
+  if (!fp?.weak || !fp.id) return null
+  const what = fp.subnet ? `网段 ${fp.subnet}.` : '很少的信息'
+  return `这个网络认不太出来：除了${what}之外没有可辨识的特征（没有网关 MAC / SSID / 搜索域）。`
+    + `换个地方只要网段相同，也会被当成这一个网络。`
 }
 
 /**

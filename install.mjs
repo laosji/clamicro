@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url'
 import { loadConfig, CONFIG_FILE } from './src/config.mjs'
 import { install, uninstall, SETTINGS_FILE } from './src/settings.mjs'
 import { isOurService } from './src/service-id.mjs'
-import { fingerprint, isTrusted, trust } from './src/network.mjs'
+import { fingerprint, isTrusted, trust, weakNote } from './src/network.mjs'
 import { saveConfig } from './src/config.mjs'
 import { syncApp, appPaths, APP_DIR } from './src/paths.mjs'
 import { wireUp, removePlugins } from './src/dsh.mjs'
@@ -293,6 +293,17 @@ if (config.lanIp && net.id && !isTrusted(config, net)) {
   say(c.dim('    手机要连上服务，需要把服务暴露到这个局域网。'))
   say(c.dim('    局域网内是明文传输，所以只在你信任的网络（家里、自己的热点）上开。'))
   say(c.dim('    陌生网络下服务会自动只绑本机，等你再次确认。'))
+  /**
+   * 辨识度低要**在按下同意之前**说。
+   *
+   * 「陌生网络会自动只绑本机」这句话的前提是认得出陌生网络。指纹弱的时候
+   * 这个前提不成立——而用户正是读着那句话点的同意。
+   */
+  const note = weakNote(net)
+  if (note) {
+    say(`  ${c.y('⚠')} ${note}`)
+    say(c.dim('    多半是 VPN 接管了默认路由，或者走的是企业网。断开 VPN 再装一次，认得会准得多。'))
+  }
   if (await confirm('\n  信任当前网络？')) {
     trust(config, net)
     saveConfig(config)

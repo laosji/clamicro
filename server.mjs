@@ -10,7 +10,7 @@ import { makeNotifier } from './src/notify.mjs'
 import { ApprovalStore } from './src/approvals.mjs'
 import { History } from './src/history.mjs'
 import { ControlStore, CONTROL } from './src/control.mjs'
-import { fingerprint, isTrusted, trust } from './src/network.mjs'
+import { fingerprint, isTrusted, trust, weakNote } from './src/network.mjs'
 import { Inbox } from './src/inbox.mjs'
 import { watchNetwork } from './src/netwatch.mjs'
 import { json } from './src/http/respond.mjs'
@@ -301,8 +301,16 @@ if (process.argv.includes('--trust')) {
   }
   const entry = trust(config, fp)
   saveConfig(config)
-  console.log(`\n  ✓ 已信任「${entry.label}」（网关 ${fp.gateway}）`)
-  console.log(`  服务将在这个网络下暴露到局域网。重启服务生效。\n`)
+  console.log(`\n  ✓ 已信任「${entry.label}」（网关 ${fp.gateway ?? '—'}）`)
+  console.log(`  服务将在这个网络下暴露到局域网。重启服务生效。`)
+  // 这条命令是非交互的，没有「确认」那一步可以插话，所以在结果里说
+  const note = weakNote(fp)
+  if (note) {
+    console.log(`\n  ⚠ ${note}`)
+    console.log(`  多半是 VPN 接管了默认路由。断开 VPN 后重新 trust 一次，认得会准得多；`)
+    console.log(`  撤销用 clamicro untrust ${fp.id.slice(0, 8)}`)
+  }
+  console.log()
   process.exit(0)
 }
 
@@ -480,6 +488,10 @@ if (process.argv.includes('--networks')) {
     n.label === `网关 ${n.gateway}` ? n.label : `${n.label}  网关 ${n.gateway ?? '—'}`
   const fp = fingerprint(config.lanIp)
   console.log(`\n  当前：${describe(fp)}  ${isTrusted(config, fp) ? '✓ 已信任' : '✗ 未信任'}`)
+  // 「当前网络已信任」这行字在指纹很弱的时候会给人过强的安全感，
+  // 而这个命令正是用户怀疑网络有问题时会来看的地方
+  const note = weakNote(fp)
+  if (note) console.log(`  ⚠ ${note}`)
   console.log('\n  已信任的网络：')
   for (const [id, n] of Object.entries(config.trustedNetworks ?? {})) {
     console.log(`    ${describe(n)}  ${id.slice(0, 8)}`)
@@ -766,6 +778,18 @@ const trusted = isTrusted(config, net)
 const bindHosts = trusted
   ? config.bind
   : config.bind.filter((h) => h === '127.0.0.1' || h === config.tailscaleIp)
+
+/**
+ * 已经信任、但指纹认不太出来 —— 这一刻最该说话。
+ *
+ * 服务此刻正要把自己暴露到局域网，而「这是我信任过的网络」这个结论是靠
+ * 一个只剩网段的指纹得出来的。启动日志是唯一每次都会走到的地方，
+ * 别让这条信息只出现在用户主动去查 networks 的时候。
+ */
+if (trusted && config.lanIp) {
+  const note = weakNote(net)
+  if (note) console.warn(`[security] ⚠ ${note}`)
+}
 
 if (!trusted && config.lanIp) {
   console.warn(`[security] 当前网络「${net.label}」未被信任，只绑回环，手机暂时连不上`)

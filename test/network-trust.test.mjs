@@ -27,7 +27,7 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { isTrusted, trust } from '../src/network.mjs'
+import { isTrusted, trust, weakNote } from '../src/network.mjs'
 
 /** 造一个指纹对象。真的 fingerprint() 要读系统，这里只测判定逻辑 */
 const fp = (id, legacyId = null, extra = {}) => ({
@@ -84,4 +84,42 @@ test('trust() 写入的条目能被 isTrusted 认出来', () => {
   trust(cfg, f)
   assert.equal(isTrusted(cfg, f), true)
   assert.equal(cfg.trustedNetworks.xyz.label, '家里')
+})
+
+/**
+ * 指纹辨识度低时必须说出来。
+ *
+ * 这一组是补一个真 bug 留下的。`weak` 原来的判据是 `vrrp && !ssid && !domain`，
+ * 只认企业网那一种形态；而真机上更常见的是**全隧道 VPN 接管默认路由**：
+ * route 给出的是 utun 点对点接口、没有网关行，于是网关/MAC/SSID/DHCP 全空，
+ * 指纹只剩网段——恰恰在最弱的时候，因为 mac 是 null 而 vrrp 判不成立，
+ * weak 被算成 false。
+ *
+ * 更糟的是：那之前 `weak` 全仓库**没有任何地方读它**，注释里承诺的
+ * 「说实话」一次都没发生过。只写不读的安全提示等于没有提示。
+ */
+test('指纹弱的时候要说实话', async (t) => {
+  const fp = (over) => ({ id: 'abc123', subnet: '192.168.0', weak: false, ...over })
+
+  await t.test('VPN 场景：只剩网段 → 要提醒', () => {
+    // 网关、MAC、SSID、搜索域全是 null，这正是 utun 默认路由下的样子
+    assert.match(weakNote(fp({ weak: true })), /认不太出来/)
+    assert.match(weakNote(fp({ weak: true })), /192\.168\.0/)
+    // 要说清楚后果，不能只说「弱」——用户据此决定要不要点同意
+    assert.match(weakNote(fp({ weak: true })), /网段相同/)
+  })
+
+  await t.test('辨识度够就不啰嗦', () => {
+    assert.equal(weakNote(fp()), null)
+  })
+
+  await t.test('没联网（id 为 null）不提醒 —— 那是另一件事', () => {
+    // 未联网时 weak 也是 true，但那时候压根没有「要不要信任」这个问题，
+    // 提醒只会变成噪音
+    assert.equal(weakNote({ id: null, weak: true, subnet: null }), null)
+  })
+
+  await t.test('拿不到网段也得给出一句完整的话', () => {
+    assert.match(weakNote({ id: 'x', weak: true, subnet: null }), /很少的信息/)
+  })
 })
