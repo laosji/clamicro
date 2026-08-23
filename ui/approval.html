@@ -872,6 +872,20 @@ function renderResult(a) {
     code = 'interrupted'; title = '服务重启时中断';
     desc = 'Clamicro 重启了，这条请求已随之失效。Claude Code 那边已按超时处理。';
   }
+  /**
+   * 决定没能送到执行点。
+   *
+   * 这一条比 status 本身更要紧：status 说的是「人怎么决定的」，而用户真正
+   * 关心的是「那个决定生效了吗」。连接在答复之前就断了的话（对面被 Ctrl-C、
+   * 终端关掉），记录写着「已拒绝」，而拒绝这件事哪儿也没到达。
+   * 不说出来，这一页就在替一个从没生效的决定作证。
+   */
+  if (a.delivered === false) {
+    code = 'undelivered';
+    title = '这个决定没能送达';
+    desc = `你选了「${a.status === 'denied' ? '拒绝' : '批准'}」，但请求方在收到之前就断开了`
+      + `（多半是那边被 Ctrl-C 或终端被关掉）。那次操作按它自己的规则走了，不受这个决定影响。`;
+  }
   $('result').dataset.s = a.status;
   $('ricon').textContent = icon;
   $('rcode').textContent = code;

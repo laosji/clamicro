@@ -149,6 +149,14 @@ store.on('event', () => history.touch())
 if (!ONE_SHOT) {
   setInterval(() => {
     approvals.sweep(86_400_000) // 记录留一天，够回看昨天的操作
+    /**
+     * 会话只在 session-end 时才消失，而 kill -9 / 关终端 / 进程崩溃都不发那个
+     * 事件——那样的会话会永远停在「运行中」。这里只标「多久没动静」，
+     * 不替它下死亡判定：一条跑二十分钟的测试命令同样一声不响，
+     * 编一个「出错」跟「永远运行中」是同一类错误。见 store.sweepStale。
+     */
+    const stale = store.sweepStale(30 * 60_000)
+    if (stale) console.log(`[state] ${stale} 个会话超过 30 分钟没有任何上报，已标注`)
     history.touch()
     healHooks()
     // 日志只增不减，一年下来能涨到几 MB。搭在这个已有的 5 分钟巡检上，
@@ -609,6 +617,8 @@ function publicApproval(a, withKey = false) {
     risk: a.risk,
     status: a.status,
     decided_by: a.decided_by,
+    // 决定有没有真的送到执行点。undefined = 没理由怀疑；false = 明确没送到
+    delivered: a.delivered !== false,
     created_at: a.created_at,
     expires_at: a.expires_at,
     auto_decision: a.auto_decision,

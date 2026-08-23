@@ -178,7 +178,33 @@ export function hookRoutes(ctx) {
 
       const outcome = await approvals.wait(ap.id)
       responded = true
-      store.clearWaitingApproval(payload.session_id)
+      // 只清这一条。会话上可能还挂着别的（Claude Code 会并行发起工具调用），
+      // 不带 id 地清等于宣布「这个会话不再等审批了」，而它其实还卡着
+      store.clearWaitingApproval(payload.session_id, ap.id)
+
+      /**
+       * 答复写出去之前先看一眼对面还在不在。
+       *
+       * 走到这里说明人做了决定，但决定要**送到**才算数。连接已经断了的话，
+       * 下面那个 json() 是写进一个死 socket——而记录会一直写着
+       * 「已拒绝 · 手机」。记下来，别让界面替一个从没生效的决定作证。
+       */
+      /**
+       * 判据必须落在 **res** 上，不能用 req.destroyed。
+       *
+       * readBody() 把请求体读完之后，Node 会把可读侧自动 destroy——于是一个
+       * **完全健康**的请求在这里 `req.destroyed` 就是 true（实测确认）。
+       * 拿它做判据的话每一条审批都会走进这个分支、永不写响应，
+       * 审批全线失效。res.destroyed 才是「socket 没了」。
+       */
+      if (res.destroyed || res.writableEnded) {
+        approvals.noteUndelivered(ap.id)
+        console.warn(
+          `[approval] ${ap.id.slice(0, 8)} 的决定（${outcome.decision}）没能送达：` +
+            `请求方已断开，多半是那边被 Ctrl-C 或终端关掉了`,
+        )
+        return true
+      }
 
       /**
        * Codex 说的是 Claude Code 的方言，但不是同一句话。

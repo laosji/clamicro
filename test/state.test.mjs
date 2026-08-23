@@ -152,6 +152,124 @@ test('session-end 把会话移除', () => {
   assert.equal(s.sessions().length, 0)
 })
 
+/**
+ * 并行工具调用下的等待状态。
+ *
+ * Claude Code 会**并行发起工具调用**，同一个会话同时挂两条 PermissionRequest
+ * 是常态。原来 clearWaitingApproval 只认 session_id、不认是哪一条结束了，
+ * 于是批准其中一条整个会话就翻回「运行中」——而 Claude Code 事实上还冻在
+ * 第二条上。实测复现过：批准一条之后 state=Running，而待审批列表里还剩 1 条。
+ *
+ * 「界面说在跑、实际卡着」是这个产品唯一不能破的那条规矩的反面。
+ */
+test('一个会话上挂多条审批', async (t) => {
+  const mk = () => {
+    const s = new Store()
+    s.markWaitingApproval('x', { id: 'ap1', tool_name: 'Bash', summary: 'A', cwd: '/tmp/p' })
+    s.markWaitingApproval('x', { id: 'ap2', tool_name: 'Bash', summary: 'B', cwd: '/tmp/p' })
+    return s
+  }
+
+  await t.test('指针指向最早那条 —— 它才是「此刻卡在哪」', () => {
+    // 原来指向最新那条，于是两条并行时第一条彻底失去入口
+    assert.equal(mk().session('x').pending_approval_id, 'ap1')
+    assert.deepEqual(mk().session('x').pending_approvals, ['ap1', 'ap2'])
+  })
+
+  await t.test('结束一条之后**不能**翻回 Running', () => {
+    const s = mk()
+    s.clearWaitingApproval('x', 'ap1')
+    const x = s.session('x')
+    assert.equal(x.state, STATE.WAITING_APPROVAL, '还有一条挂着，不许说在跑')
+    assert.equal(x.pending_approval_id, 'ap2', '指针要挪到剩下那条')
+  })
+
+  await t.test('最后一条结束才回到 Running', () => {
+    const s = mk()
+    s.clearWaitingApproval('x', 'ap1')
+    s.clearWaitingApproval('x', 'ap2')
+    const x = s.session('x')
+    assert.equal(x.state, STATE.RUNNING)
+    assert.equal(x.pending_approval_id, null)
+    assert.deepEqual(x.pending_approvals, [])
+  })
+
+  await t.test('清一条不存在的 id 不影响别人', () => {
+    const s = mk()
+    s.clearWaitingApproval('x', '不存在')
+    assert.equal(s.session('x').state, STATE.WAITING_APPROVAL)
+    assert.equal(s.session('x').pending_approvals.length, 2)
+  })
+
+  await t.test('不传 id = 全清（老调用方的行为，保持不变）', () => {
+    const s = mk()
+    s.clearWaitingApproval('x')
+    assert.equal(s.session('x').state, STATE.RUNNING)
+    assert.deepEqual(s.session('x').pending_approvals, [])
+  })
+})
+
+/**
+ * 「很久没动静」的会话。
+ *
+ * 会话只在 session-end 时才从表里消失，而 kill -9 / 关终端 / 崩溃都不发那个
+ * 事件——那样的会话会永远停在「运行中」，而 5 分钟巡检扫的是审批、history、
+ * hooks、日志，唯独不扫会话。
+ *
+ * 关键约束：**只陈述观察，不下判定**。沉默不等于死了，一条跑二十分钟的测试
+ * 命令同样一声不响；把它判成出错跟「永远运行中」是同一类错误，只是方向相反。
+ */
+test('陈旧会话只标注、不改状态', async (t) => {
+  const stale = (state) => {
+    const s = new Store()
+    const x = s.session('x')
+    x.state = state
+    x.updated_at = Date.now() - 60 * 60_000 // 一小时前
+    return { s, x }
+  }
+
+  await t.test('运行中且长时间没动静 → 标出来', () => {
+    const { s, x } = stale(STATE.RUNNING)
+    assert.equal(s.sweepStale(30 * 60_000), 1)
+    assert.ok(x.stale_since, '要记下从什么时候开始没动静')
+    assert.equal(x.state, STATE.RUNNING, '状态不许改 —— 我们并不知道它死了')
+  })
+
+  await t.test('标注不能动 updated_at', () => {
+    // 一动就再也判不出陈旧，下一轮巡检会认为它刚刚才上报过
+    const { s, x } = stale(STATE.RUNNING)
+    const before = x.updated_at
+    s.sweepStale(30 * 60_000)
+    assert.equal(x.updated_at, before)
+  })
+
+  await t.test('空闲/已完成的会话不标 —— 它们本来就该没动静', () => {
+    for (const st of [STATE.IDLE, STATE.DONE, STATE.ERROR]) {
+      const { s, x } = stale(st)
+      assert.equal(s.sweepStale(30 * 60_000), 0)
+      assert.equal(x.stale_since, null)
+    }
+  })
+
+  await t.test('没到阈值不标，而且不会反复 emit', () => {
+    const { s, x } = stale(STATE.RUNNING)
+    assert.equal(s.sweepStale(2 * 60 * 60_000), 0)
+    assert.equal(x.stale_since, null)
+    // 已经标过的再扫一次不算新增
+    s.sweepStale(30 * 60_000)
+    assert.equal(s.sweepStale(30 * 60_000), 0)
+  })
+
+  await t.test('又有上报了 → 标注要撤掉', () => {
+    const { s, x } = stale(STATE.RUNNING)
+    s.sweepStale(30 * 60_000)
+    assert.ok(x.stale_since)
+    hook(s, 'pre-tool-use', { session_id: 'x', tool_name: 'Bash', tool_input: { command: 'ls' } })
+    s.sweepStale(30 * 60_000)
+    assert.equal(x.stale_since, null, '活过来了就别再挂着「没动静」')
+  })
+})
+
 test('没有 session_id 的 payload 一律忽略', () => {
   const s = new Store()
   const r = s.applyHook('stop', {}, NOTIFY)

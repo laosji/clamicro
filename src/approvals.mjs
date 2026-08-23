@@ -437,6 +437,26 @@ export class ApprovalStore extends EventEmitter {
   }
 
   /** Claude Code 侧断开（会话被杀 / 终端自己批了）→ 标记放弃，手机上给明确提示。 */
+  /**
+   * 决定做出来了，但**没能送到执行点**。
+   *
+   * `responded` 那个标志置位的时机是「拿到决定」，不是「答复写出去了」。
+   * 如果此刻 socket 已经没了（Claude Code 被 Ctrl-C、终端关掉，而 close
+   * 事件还没派发），json() 就写进一个死连接，而 close 到来时 responded
+   * 已经是 true，于是也不会走 abandon。结果是这条记录写着
+   * 「denied · decided_by: phone」，手机上显示「已拒绝」，
+   * 而拒绝这件事从没到达任何地方。
+   *
+   * 不改 status——人确实做了那个决定，抹掉它才是撒谎。改的是「它生效了吗」，
+   * 那是另一个问题，也是用户真正需要知道的那个。
+   */
+  noteUndelivered(id) {
+    const ap = this.#items.get(id)
+    if (!ap || ap.delivered === false) return
+    ap.delivered = false
+    this.emit('settled', ap) // 让手机那边把这条更新掉
+  }
+
   abandon(id) {
     const ap = this.#items.get(id)
     if (!ap || ap.status !== 'pending') return

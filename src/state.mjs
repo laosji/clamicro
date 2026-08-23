@@ -100,6 +100,21 @@ export class Store extends EventEmitter {
         turn_started_at: null,
         last_message: null,
         updated_at: Date.now(),
+        /**
+         * 这个会话上**还挂着几条**待审批。
+         *
+         * 必须是集合而不是单个 id：Claude Code 会并行发起工具调用，于是同一个
+         * 会话同时挂着两条 PermissionRequest 是常态。原来只有一个
+         * pending_approval_id，第二条进来就把第一条覆盖掉；而
+         * clearWaitingApproval 只认 session_id、不认是哪一条结束了，
+         * 于是**批准其中一条，整个会话就翻回「运行中」**——而 Claude Code
+         * 事实上还冻在第二条上。实测复现过。
+         *
+         * 界面说在跑、实际卡着，是这个产品唯一不能破的那条规矩的反面。
+         */
+        pending_approvals: [],
+        /** 从什么时候开始就没动静了（sweepStale 写）。null = 不陈旧 */
+        stale_since: null,
         limits: null,
         context: null,
         cost_usd: null,
@@ -395,18 +410,74 @@ export class Store extends EventEmitter {
     if (!sessionId) return
     const s = this.session(sessionId)
     if (approval.cwd) s.cwd = approval.cwd
-    this.#touch(s, { state: STATE.WAITING_APPROVAL, sub_state: null, pending_approval_id: approval.id })
+    s.pending_approvals ??= []
+    if (!s.pending_approvals.includes(approval.id)) s.pending_approvals.push(approval.id)
+    // pending_approval_id 保留，指向**最早**那条：它是「这个会话此刻卡在哪」
+    // 最该给出的答案。原来指向最新那条，两条并行时第一条就没了入口。
+    this.#touch(s, {
+      state: STATE.WAITING_APPROVAL,
+      sub_state: null,
+      pending_approval_id: s.pending_approvals[0],
+    })
     this.#log(sessionId, 'approval-requested', `${approval.tool_name}: ${truncate(approval.summary, 160)}`)
   }
 
-  clearWaitingApproval(sessionId) {
+  /**
+   * 某一条审批结束了。
+   *
+   * **必须传 approvalId。** 不传等于「把这个会话上的都清掉」——那是老行为，
+   * 留着只为兼容还没改的调用方，新代码一律传。少了这个参数就没法知道
+   * 「是不是还有别的挂着」，而那正是这个方法出过的 bug。
+   */
+  clearWaitingApproval(sessionId, approvalId) {
     if (!sessionId) return
     const s = this.session(sessionId)
+    s.pending_approvals = approvalId === undefined
+      ? []
+      : (s.pending_approvals ?? []).filter((id) => id !== approvalId)
+
+    // 还有别的挂着 → 状态**不能**翻回 Running，只把指针挪到下一条
+    if (s.pending_approvals.length) {
+      this.#touch(s, { pending_approval_id: s.pending_approvals[0] })
+      return
+    }
     if (s.state === STATE.WAITING_APPROVAL) {
       this.#touch(s, { state: STATE.RUNNING, sub_state: 'Thinking', pending_approval_id: null })
     } else {
       this.#touch(s, { pending_approval_id: null })
     }
+  }
+
+  /**
+   * 把「很久没动静」的会话标出来。**只陈述观察，不改状态。**
+   *
+   * 会话只在 session-end 时才从表里消失，而 kill -9、直接关终端窗口、
+   * 进程崩溃都不会有那个事件。于是一个在工具调用中途被杀掉的会话会
+   * **永远停在「运行中」**：最后一个事件是 pre-tool-use，之后什么都不会来，
+   * 也没有任何巡检会碰它（5 分钟那个扫的是审批、history、hooks、日志）。
+   *
+   * 为什么不直接标成 Error 或者删掉：**沉默不等于死了**。一条跑二十分钟的
+   * 测试命令，从 pre-tool-use 到 post-tool-use 之间同样一声不响。把它判成
+   * 出错是编一个我们并不知道的结论，而这跟「永远运行中」是同一类错误，
+   * 只是方向相反。
+   *
+   * 所以只记「多久没动静」，让界面照实说。真死了的和真在跑的，用户自己
+   * 一眼能分辨——他知道自己有没有在跑长命令，我们不知道。
+   */
+  sweepStale(maxIdleMs) {
+    const now = Date.now()
+    let marked = 0
+    for (const s of this.#sessions.values()) {
+      if (s.state !== STATE.RUNNING && s.state !== STATE.WAITING_APPROVAL) continue
+      const idle = now - s.updated_at
+      const stale = idle > maxIdleMs
+      if (stale === Boolean(s.stale_since)) continue
+      // #touch 会改 updated_at，那正是这里不能用它的原因——一改就再也判不出陈旧
+      s.stale_since = stale ? s.updated_at : null
+      this.emit('session', s)
+      if (stale) marked++
+    }
+    return marked
   }
 
   /**

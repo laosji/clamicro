@@ -165,6 +165,24 @@ test('审批全流程', async (t) => {
     assert.equal(hookRes.hookSpecificOutput.decision.behavior, 'deny')
   })
 
+  await t.test('正常连接不许被当成「已断开」', async () => {
+    /**
+     * 这条守的是一次差点上线的事故。
+     *
+     * 答复之前会检查对面还在不在，判据一度写成 `req.destroyed`——而
+     * readBody() 读完请求体之后 Node 会把可读侧自动 destroy，于是一个
+     * **完全健康**的请求在那一刻 req.destroyed 就是 true（实测确认）。
+     * 结果是每一条审批都短路、永不写响应，审批全线失效。
+     *
+     * 判据必须落在 res 上。这条断言直接盯住那个后果：决定送到了，
+     * 记录就不该说它没送到。
+     */
+    const after = await (await S.get('/api/approvals')).json()
+    const settled = [...after.approvals, ...(after.recentlyExpired ?? [])]
+      .find((a) => a.id === ap.id)
+    if (settled) assert.notEqual(settled.delivered, false, '决定明明送到了，却被记成没送达')
+  })
+
   await t.test('重复决策幂等，返回当前状态而非报错', async () => {
     const again = await S.post(`/api/approvals/${ap.id}/decide`, { decision: 'allow' })
     assert.equal(again.status, 200)
