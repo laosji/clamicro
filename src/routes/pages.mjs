@@ -313,7 +313,9 @@ export function pageRoutes(ctx) {
       const firstEver = !config.onboardedAt
       if (firstEver) config.onboardedAt = Date.now()
 
-      saveConfig(config)
+      // 配对只该动设备簿。整份写会把此刻并发的 CLI 命令（trust / untrust）
+      // 刚落盘的改动抹掉，而装机流程里这两件事恰恰是同时发生的
+      saveConfig(config, { only: ['devices', 'onboardedAt'] })
 
       // 顶替必须**高声**说出来。设备上限的全部价值就是可检测性——
       // 多出来的那台一定会顶掉你，而你只有在被明确告知时才会发现。

@@ -119,7 +119,9 @@ test('DERIVED_KEYS 必须和 saveConfig 剥掉的那组一致', () => {
    * 要么它被写进盘里（旧事故重演），要么它在 config 命令里被标成「默认值」。
    */
   const src = readFileSync(new URL('../src/config.mjs', import.meta.url), 'utf8')
-  const line = src.match(/export function saveConfig\(config\) \{\s*\n\s*const \{([^}]*)\}/)
+  // 签名放宽到 (config, opts) —— saveConfig 多了个 only 参数（作用域写），
+  // 但这条测试盯的是解构行里剥掉哪些派生字段，跟参数个数无关
+  const line = src.match(/export function saveConfig\(config[^)]*\) \{\s*\n\s*const \{([^}]*)\}/)
   assert.ok(line, '没找到 saveConfig 的解构行，这条测试需要跟着改')
   // `...persist` 是 rest 元素，收的是「剩下的全部」，不是被剥掉的字段
   const stripped = line[1].split(',').map((s) => s.trim()).filter((s) => s && !s.startsWith('...'))

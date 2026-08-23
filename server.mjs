@@ -308,7 +308,9 @@ if (process.argv.includes('--trust')) {
     process.exit(1)
   }
   const entry = trust(config, fp)
-  saveConfig(config)
+  // 只写这一项：这条命令跑起来要几百毫秒（算网络指纹），期间手机上改的设置、
+  // 刚配对上的设备都不该被我们这份旧快照抹掉。见 config.mjs 的 saveConfig
+  saveConfig(config, { only: ['trustedNetworks'] })
   console.log(`\n  ✓ 已信任「${entry.label}」（网关 ${fp.gateway ?? '—'}）`)
   console.log(`  服务将在这个网络下暴露到局域网。重启服务生效。`)
   // 这条命令是非交互的，没有「确认」那一步可以插话，所以在结果里说
@@ -362,7 +364,7 @@ if (process.argv.includes('--trust')) {
       console.log(`\n  没有匹配的已信任网络${which ? `（${which}）` : '（当前网络本来就不在列表里）'}\n`)
       process.exit(1)
     }
-    saveConfig(config)
+    saveConfig(config, { only: ['trustedNetworks'] })
     console.log(`\n  ✓ 已撤销信任：${removed.join('、')}`)
     console.log(`  服务在这些网络下将只绑本机。重启服务生效：`)
     console.log(`    npx clamicro stop  然后新开一个 Claude Code 会话\n`)
@@ -398,7 +400,7 @@ if (process.argv.includes('--rotate-token')) {
   const n = config.devices?.length ?? 0
   config.token = randomBytes(32).toString('base64url')
   config.devices = []
-  saveConfig(config)
+  saveConfig(config, { only: ['token', 'devices'] })
   console.log(`\n  ✓ 已换发主令牌${n ? `，并吊销全部 ${n} 台已配对设备` : ''}`)
   console.log(`  \x1b[2m泄漏的旧令牌和所有旧设备登录即刻失效。\x1b[0m`)
   if (n) console.log(`  \x1b[2m手机需要重新扫码配对： npx clamicro qr\x1b[0m`)
@@ -480,8 +482,9 @@ if (process.argv.includes('--devices')) {
       console.log(`\n  没有匹配的设备（${which}）。看一眼： npx clamicro devices\n`)
       process.exit(1)
     }
+    // 吊销尤其不能被并发的整份写覆盖回去：用户会以为已经吊销了
     config.devices = which === 'all' ? [] : all.filter((d) => !d.id.startsWith(which))
-    saveConfig(config)
+    saveConfig(config, { only: ['devices'] })
     console.log(`\n  ✓ 已吊销：${gone.map((d) => `${d.name}（${d.id}）`).join('、')}`)
     // 原来这里两行自相矛盾：先说「立即失效」，紧接着说「重启服务生效」。
     // 现在服务会热加载配置（server.mjs 的 watchConfig），「立即」是真的了

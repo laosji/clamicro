@@ -547,7 +547,7 @@ switch (cmd) {
       const was = stopTunnel()
       const cfg = loadConfig()
       cfg.publicBaseUrl = null
-      saveConfig(cfg)
+      saveConfig(cfg, { only: ['publicBaseUrl'] })
       console.log(was ? c.g('\n  ✓ 隧道已关闭，地址退回局域网') : c.dim('\n  隧道本来就没开'))
       console.log(c.dim('  重启服务生效： npx clamicro stop && 打开一个 Claude Code 会话\n'))
       break
@@ -568,7 +568,7 @@ switch (cmd) {
       process.exit(1)
     }
     cfg.publicBaseUrl = t.url
-    saveConfig(cfg)
+    saveConfig(cfg, { only: ['publicBaseUrl'] })
     console.log(`  ${c.g('✓')} ${t.url}`)
     console.log(c.dim(`    pid ${t.pid}`))
     console.log(c.y('\n  ⚠️ Cloudflare 会终结 TLS —— 技术上看得到你的命令内容。'))

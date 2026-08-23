@@ -358,7 +358,43 @@ export function loadConfig() {
 }
 
 /** 把运行时改动写回磁盘。这几个是每次启动重新探测的派生值，不落盘。 */
-export function saveConfig(config) {
+/** 读盘上那份**原始** JSON（不合并默认值）。读不出来就当空。 */
+function rawOnDisk() {
+  if (!existsSync(CONFIG_FILE)) return {}
+  try {
+    return JSON.parse(readFileSync(CONFIG_FILE, 'utf8'))
+  } catch {
+    // 半截文件 / 手改坏了。这里返回 {} 会把别人的配置整份抹掉，
+    // 所以交给调用方——它会退回「整份写」，那至少还是一份完整的配置
+    return null
+  }
+}
+
+/**
+ * @param opts.only 只写点名的这几个顶层键，其余**以盘上此刻的内容为准**。
+ *
+ * ## 为什么需要它
+ *
+ * 每个短命 CLI 命令（trust / forget / rotate-token / untrust / tunnel）都是
+ * 「进程启动读一份整份配置 → 干完活整份写回」。服务那边也持有一份内存配置，
+ * 配对、改设置时同样整份写回。两边撞上就是后写者赢，先写的被静默抹掉。
+ *
+ * 实测过：终端里跑 trust 的同时，手机上把高危等待时长改成 99 秒。
+ * CLI 启动时读到的还是默认 180 秒，写回时 pruneDefaults 认为「这是默认值」
+ * 于是把这个键**剪掉**——手机上那个 99 秒连痕迹都不剩。而 approval.* 不在
+ * 热加载的三项里，跑着的服务内存里仍是 99 秒，盘上已经是默认：当下看不出
+ * 任何异常，直到下一次重启行为悄悄变回去。
+ *
+ * 窗口不是微秒级：trust 里要算网络指纹（ping -W500 加几个 spawnSync），
+ * 几百毫秒到一秒，而「一边在终端敲 trust 一边拿手机扫码」正是标准安装流程。
+ *
+ * 点名之后，这条命令只对自己那一项负责，别人改了什么原样留着。
+ * 这不能消除所有竞态（两条命令同时改**同一项**仍然是后写者赢），
+ * 但那种情况的损失是「一次操作没生效」，而不是「一个无关的设置被悄悄回滚」。
+ *
+ * 真正的解法是让跑着的服务当唯一的写者、CLI 走 API——那是另一个改动。
+ */
+export function saveConfig(config, opts = {}) {
   const { baseUrl, altUrl, lanIp, localHost, tailscaleIp, tunnelUrl, persistedPort, ...persist } = config
   // 端口写回盘上的原值，别把环境变量的临时覆盖固化进去
   if (persistedPort != null) persist.port = persistedPort
@@ -389,7 +425,26 @@ export function saveConfig(config) {
    *     手机得重新扫码。
    * 0600 在 rename 前设好，避免「已就位但仍是 0644」那一瞬——里面有主令牌。
    */
-  writeAtomic(CONFIG_FILE, JSON.stringify(pruneDefaults(persist, DEFAULTS), null, 2), 0o600)
+  const pruned = pruneDefaults(persist, DEFAULTS)
+
+  let out = pruned
+  const only = Array.isArray(opts.only) ? opts.only.filter(Boolean) : null
+  if (only?.length) {
+    const disk = rawOnDisk()
+    // 盘上那份读不出来（半截 / 被手改坏）时退回整份写：
+    // 此时「保住别人的改动」已经无从谈起，写出一份完整可用的配置更要紧
+    if (disk) {
+      out = { ...disk }
+      for (const k of only) {
+        // pruned 里没有 = 这一项现在等于默认值，那就该从文件里去掉，
+        // 而不是留着旧值——见 pruneDefaults 的注释
+        if (k in pruned) out[k] = pruned[k]
+        else delete out[k]
+      }
+    }
+  }
+
+  writeAtomic(CONFIG_FILE, JSON.stringify(out, null, 2), 0o600)
 }
 
 /**

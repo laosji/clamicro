@@ -327,7 +327,17 @@ export function hookRoutes(ctx) {
 
       // 手机发来的消息在这里注入。Stop 的 decision:block 会阻止 Claude 停下，
       // 并把 reason 当作输入让对话继续——这是 hooks 里唯一能「往里发」的口子。
-      if (event === 'stop' && payload.session_id && capOf(payload.agent).inbox) {
+      /**
+       * `!res.destroyed` 这一层和审批那边的 res 检查是同一件事。
+       *
+       * drain() 是**破坏性**的：队列清空、noteInbox 记一笔「已注入」，
+       * 而消息能不能到，全看后面那个还没写的响应。对面在 stop 这一刻被
+       * Ctrl-C 或者终端被关掉，文字就没了，而手机上显示已送达。
+       *
+       * 断了就别动队列——消息留着，手机上看得见，下一轮再送。
+       * 留着比消失好。
+       */
+      if (event === 'stop' && payload.session_id && capOf(payload.agent).inbox && !res.destroyed) {
         /**
          * `capOf(...).inbox` 这一层是**在伤害发生的那一点**再拦一次。
          *

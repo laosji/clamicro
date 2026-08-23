@@ -230,3 +230,65 @@ test('bind：自动探测占位符绝不能被固化成具体 IP', async (t) => 
     }
   })
 })
+
+/**
+ * 作用域写（saveConfig 的 only）。
+ *
+ * 修的是一个复现过的丢改动：每个短命 CLI 命令都是「启动读整份 → 干完整份写回」，
+ * 服务那边也整份写回，两边撞上就是后写者赢。实测——终端里跑 trust 的同时手机上
+ * 把高危等待时长改成 99 秒，CLI 写回后那个键被 pruneDefaults 当成默认值**剪掉**，
+ * 99 秒连痕迹都不剩；而 approval.* 不在热加载里，跑着的服务内存里还是 99 秒，
+ * 直到下一次重启才悄悄变回去。
+ */
+test('saveConfig 的作用域写', async (t) => {
+  const { mkdtempSync, writeFileSync, readFileSync, mkdirSync } = await import('node:fs')
+  const { tmpdir } = await import('node:os')
+  const { join } = await import('node:path')
+
+  const setup = (disk) => {
+    const home = mkdtempSync(join(tmpdir(), 'clamicro-scoped-'))
+    mkdirSync(join(home, '.claude', 'clamicro'), { recursive: true })
+    writeFileSync(join(home, '.claude', 'clamicro', 'config.json'), JSON.stringify(disk))
+    return home
+  }
+  const read = (home) => JSON.parse(readFileSync(join(home, '.claude', 'clamicro', 'config.json'), 'utf8'))
+
+  await t.test('只改点名的那一项，别人改的原样留着', async () => {
+    const home = setup({ token: 'tok', approval: { timeoutMs: 99000 } })
+    const prev = process.env.HOME
+    process.env.HOME = home
+    try {
+      const m = await import(`../src/config.mjs?scoped=${Math.random()}`)
+      const cfg = m.loadConfig()
+      // 模拟 CLI：拿到快照之后，别人（手机）把 timeoutMs 改成了 12345
+      writeFileSync(join(home, '.claude', 'clamicro', 'config.json'),
+        JSON.stringify({ token: 'tok', approval: { timeoutMs: 12345 } }))
+      cfg.trustedNetworks = { net1: { label: '家里' } }
+      m.saveConfig(cfg, { only: ['trustedNetworks'] })
+
+      const out = read(home)
+      assert.deepEqual(Object.keys(out.trustedNetworks), ['net1'], '自己那一项要写进去')
+      assert.equal(out.approval?.timeoutMs, 12345, '别人刚改的不能被旧快照抹掉')
+    } finally {
+      process.env.HOME = prev
+    }
+  })
+
+  await t.test('不带 only 就是整份写（老行为不变）', async () => {
+    const home = setup({ token: 'tok', approval: { timeoutMs: 99000 } })
+    const prev = process.env.HOME
+    process.env.HOME = home
+    try {
+      const m = await import(`../src/config.mjs?whole=${Math.random()}`)
+      const cfg = m.loadConfig()
+      writeFileSync(join(home, '.claude', 'clamicro', 'config.json'),
+        JSON.stringify({ token: 'tok', approval: { timeoutMs: 12345 } }))
+      m.saveConfig(cfg)
+      // 整份写就是会盖掉——这条不是「应该如此」，是把现状钉住：
+      // 哪天想让它也不盖，得先想清楚整份写的语义
+      assert.equal(read(home).approval?.timeoutMs, 99000)
+    } finally {
+      process.env.HOME = prev
+    }
+  })
+})
