@@ -57,8 +57,10 @@ ordinary issues.
 - **Physical access to an unlocked, paired Mac or phone.** Out of scope, as everywhere.
 - **Ordinary operations auto-approving after 10s** with correct classification. That is the
   documented default, adjustable to 0 in settings.
-- **`npx clamicro install` writing to `~/.claude/settings.json` and `~/.dsh/profiles`.** It
-  shows the diff, asks first, backs up, and appends rather than replaces.
+- **`npx clamicro install` writing to `~/.claude/settings.json`, `~/.dsh/profiles` and
+  `~/.codex/config.toml`.** It shows the diff, asks first, backs up, and appends rather
+  than replaces. The DSH and Codex files belong to other programs, so those two are always
+  opt-in — `--yes` does not answer for you. Uninstall removes exactly what it added.
 
 ## The failure mode that matters most
 

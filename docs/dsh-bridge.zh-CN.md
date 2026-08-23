@@ -154,6 +154,14 @@ export const capOf = (agent) => AGENTS[agent] ?? AGENTS['claude-code']
 
 原则：**能力缺失就不给入口，并且说得出为什么**。这跟「宁可没有审批功能，也不能做假审批」是同一条原则，只是推广到了 pause / cancel / 发消息上。
 
+> **补充（接 Codex 之后）**：光靠界面不够，**服务端也按这张表拦**。
+> `capOf` 在配置还没到手时回退成「全都支持」，而手机上缓存着升级前的页面正是
+> 这个状态。实测过：对一个 DSH 会话调 `/pause` 会返回 ok、界面显示「已暂停」、
+> DSH 照跑；发一条消息会被下一次 stop 上报排空并记成「已注入」，而 DSH 的
+> `send()` 是 fire-and-forget、根本不看回包，那段文字就没了。
+> 现在 `src/routes/api.mjs` 的 control / say 和 `src/routes/hooks.mjs` 的
+> permission-request 都会先查能力，见 `test/agent-caps.test.mjs`。
+
 ### 3.4 额度区块的替代
 
 DSH 没有 statusLine，也没有 5h / 7d 窗口概念（API key 计费）。对应物是 per-request token 累计（参考 `dsh-token-usage` 的做法）。

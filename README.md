@@ -118,11 +118,19 @@ section before you can see it, and a missed approval is a silent automatic decis
 |  | Claude Code | DeepSeek Harness | Codex |
 |---|:--:|:--:|:--:|
 | Mirror status | ✓ | ✓ | ✓ |
-| Approve from phone | ✓ | ✓ | — (wired, not yet verified) |
+| Approve from phone | ✓ | ✓ | — (wired, but **actually off server-side**, see below) |
 | Pause / Resume | ✓ | — | — |
 | Cancel the turn | ✓ | — (protocol supports it, not wired yet) | — |
 | Send a message from the phone | ✓ | — (protocol supports it, not wired yet) | — |
 | Usage | 5h / 7d rolling window | cumulative tokens | not available |
+
+**The server enforces this table too.** The UI alone isn't enough: a phone holding a
+cached page from before the upgrade doesn't know the new backend's capabilities and will
+draw the entry points anyway. So pause / cancel / send-a-message, and the approval
+interception itself, all consult this table first — an unsupported action is refused
+outright rather than accepted and quietly dropped. Codex's `—` under "approve" means that
+endpoint returns "no opinion" and creates no approval record, letting Codex fall back to
+its own permission flow.
 
 The UI **renders by capability**: an action a backend can't do gets no entry point at
 all. A button that does nothing when tapped is worse than no button — you assume the
@@ -201,6 +209,8 @@ Trust is **revocable.** Trusting a network by mistake (tapping "yes" at a café)
 The fingerprint combines **gateway IP + gateway MAC + subnet + SSID + DHCP server + search domain + DNS list**.
 
 The first three are not enough: SSID needs Location permission on recent macOS and simply does not exist on Ethernet, and `00:00:5e:00:01:xx` is a VRRP virtual MAC that is *not* unique across enterprise networks. A real collision was reproduced — two different companies both on `192.168.1.0/24`, both with gateway `192.168.1.1`, both behind VRRP, neither exposing an SSID: all four fields identical, so **once you trusted company A, company B's network counted as trusted**. The last three signals come from DHCP, need no permission, and are almost never all identical across organisations.
+
+**Seven fields still isn't always seven fields.** When a full-tunnel VPN owns the default route, `route -n get default` reports a point-to-point `utun` interface with *no gateway line* — so gateway, MAC, SSID and all three DHCP signals go missing at once and the fingerprint collapses to the subnet alone, i.e. "any network handing out `192.168.0.x`". Reproduced on a real machine. Clamicro can't manufacture the missing signals, so it says so instead: install, `trust`, `networks` and the startup log all warn when the fingerprint has no distinguishing feature left. Disconnect the VPN before trusting a network and you get the real gateway and MAC.
 
 ### Implemented protections
 

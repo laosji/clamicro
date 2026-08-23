@@ -105,6 +105,17 @@ The one screen that matters, top to bottom:
 
 **Read the command.** It's at the top and expanded by default.
 
+**For file writes, read the content instead.** Edit / Write calls aren't commands, so the
+page lists the change line by line — additions in green, removals in red, with a `+12 −3`
+tag for the size. Same reasoning as the command text: this is what the operation actually
+does, and the only part not narrated by the model. (Before, this section showed a file
+path and nothing else — you were asked to approve something you couldn't see.)
+
+Long content is truncated, but **the truncation is always stated** — a line underneath
+tells you how many lines were left out. Context lines that are byte-identical on both
+sides get trimmed as well, and that count is shown too; nothing is hidden by the trimming,
+since both sides carried the same text.
+
 **The model's description sits below it, in smaller grey type** — deliberately. That sentence is written by Claude Code itself: the one piece of text in this whole chain authored by the thing being reviewed. It can disagree with the command, so it doesn't get the primary slot. When it genuinely disagrees, the page says so outright (the red box above).
 
 **Risky fragments are highlighted** inside the command (`rm -rf`, `.ssh/id_rsa`) to point you at the part most worth looking at first.
@@ -114,7 +125,7 @@ command text: `base64 -d | sh`, indirection through a variable, `curl … | sh`,
 dangerous action hidden inside a script file will not be marked. No highlight doesn't
 mean safe — it means no rule matched. What protects you is reading the command.
 
-**Impact tags** (read-only / reads secrets / writes files / network / sudo) are extracted from the command. When it can't tell, it says "impact unknown" — it will **not** pretend something is read-only.
+**Impact tags** (read-only / reads secrets / writes files / network / sudo / `+12 −3` change size) are extracted from the command or its arguments. When it can't tell, it says "impact unknown" — it will **not** pretend something is read-only.
 
 **The countdown at the bottom** answers "what if I ignore this":
 
