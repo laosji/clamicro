@@ -585,6 +585,8 @@ function publicApproval(a, withKey = false) {
     detail: a.detail,
     detail_spans: a.detail_spans ?? [],
     detail_lines: a.detail_lines,
+    // 写文件要写进去的内容。凭证已在 approvals.create 里抹过
+    change: a.change ?? null,
     impact: a.impact,
     mismatch: a.mismatch ?? null,
     // 选择题的题干和选项。只有 AskUserQuestion 有，其余是空数组。

@@ -368,6 +368,21 @@
   summary::-webkit-details-marker{display:none}
   summary::before{content:'▸'; transition:transform .15s}
   details[open] summary::before{transform:rotate(90deg)}
+  /* 改动预览。+ 绿 − 红是所有 diff 工具的共识，别自创一套 */
+  .diff{
+    margin:0; border-radius:10px; overflow:auto; max-height:46vh;
+    background:var(--monobg); border:1px solid var(--line);
+    font:13.5px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;
+  }
+  .diff .dl{display:flex; gap:8px; padding:1px 12px; white-space:pre-wrap; overflow-wrap:anywhere}
+  .diff .dm{flex:0 0 auto; opacity:.7; user-select:none}
+  /* 用主题变量而不是写死的绿/红：这一页有浅色和深色两套，GitHub 那套
+     深色 diff 配色放到浅色背景上基本读不出来 */
+  .diff .add{background:color-mix(in srgb,var(--ok) 12%,transparent); color:var(--ok)}
+  .diff .del{background:color-mix(in srgb,var(--no) 12%,transparent); color:var(--no)}
+  .diff .cut{padding:6px 12px; color:var(--dim); font-style:italic}
+  .chgnote{margin:6px 2px 0; font-size:12px; color:var(--dim)}
+
   .codewrap{position:relative}
   .codewrap::after{
     content:''; position:absolute; left:0; right:0; bottom:0; height:34px; pointer-events:none;
@@ -495,6 +510,9 @@
     <!-- 命令原文在描述之前：description 是模型自己写的，是这条链路里
          唯一不可信的部分，不该占据主视觉。 -->
     <div id="cmdbox"></div>
+    <!-- 要写进文件的内容。跟命令原文同一个位置层级：它们是同一种东西——
+         这次操作真正会做的事，也是唯一不由模型叙述的部分。 -->
+    <div id="changebox"></div>
     <p class="says" id="headline">…</p>
     <!-- 选择题的题干和选项。只有 AskUserQuestion 会用到 -->
     <div class="qs hidden" id="qs"></div>
@@ -628,7 +646,7 @@ function render(a) {
 
   // 选择题的 detail 就是题干本身，而题干已经在选项区完整显示过了。
   // 再画一遍 #cmdbox 等于同一句话连着出现两次
-  if (!isAsk) renderCommand(a);
+  if (!isAsk) { renderCommand(a); renderChange(a); }
   tick();
   ticker = setInterval(tick, 1000);
   syncTimer = setInterval(sync, 3000);
@@ -708,6 +726,48 @@ function renderCommand(a) {
   const note = flagged ? `，其中 ${flagged} 处命中风险规则` : '';
   $('cmdbox').innerHTML =
     `<details open><summary>完整命令（${lines} 行${note}）</summary>${code}</details>`;
+}
+
+/**
+ * 画「要写进去的内容」。
+ *
+ * 在这之前，写文件类操作在这一页上只有一个文件路径——你被要求批准一件
+ * 看不见的事，唯一的依据是模型自己写的那句话，而这一页别处到处都在提醒
+ * 那句话不可信。
+ *
+ * 服务端给的是逐行的 {t,s}，前端只按 t 上色、对 s 做转义，不解析内容。
+ * 跟 detail_spans 是同一个理由：结构由服务端定，前端只做「切片 + 转义」
+ * 这一件不会把用户数据当标记解释的事。
+ */
+function renderChange(a) {
+  const c = a.change;
+  if (!c || !c.lines || !c.lines.length) return;
+
+  const rows = c.lines.map((l) => {
+    const cls = l.t === '+' ? 'add' : 'del';
+    return `<div class="dl ${cls}"><span class="dm">${l.t === '+' ? '+' : '−'}</span><span>${esc(l.s)}</span></div>`;
+  }).join('');
+
+  // 掐掉的是两侧逐字相同的行，没有内容因此被藏起来 —— 但掐了多少必须说，
+  // 否则用户没法判断自己看到的是不是全部
+  const cut = c.trimmed
+    ? `<div class="cut">上下各 ${c.trimmed} 行前后一致，未显示</div>`
+    : '';
+
+  const notes = [];
+  if (c.truncated?.lines) notes.push(`还有 ${c.truncated.lines} 行未显示`);
+  if (c.truncated?.chars) notes.push(`另有 ${c.truncated.chars} 个字符被截断`);
+  const note = notes.length ? `<p class="chgnote">${esc(notes.join('，'))}</p>` : '';
+
+  const tally = [c.added ? `+${c.added}` : '', c.removed ? `−${c.removed}` : ''].filter(Boolean).join(' ');
+  const head = c.kind === 'write' ? '将写入的内容' : c.kind === 'notebook' ? '将改动的单元格' : '将做的改动';
+  const body = `<div class="diff">${cut}${rows}</div>${note}`;
+
+  // 短的直接摊开；长的折起来但**默认展开** —— 跟命令原文一个规矩：
+  // 要看的人不用多点一下，不想看的人滑过去就是了
+  $('changebox').innerHTML = c.lines.length > 24
+    ? `<details open><summary>${head}（${esc(tally)}）</summary>${body}</details>`
+    : body;
 }
 
 function tick() {

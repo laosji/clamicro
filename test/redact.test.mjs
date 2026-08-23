@@ -203,6 +203,36 @@ test('审批详情同样不得带出凭证', async (t) => {
     }
   })
 
+  await t.test('要写进文件的内容同样得抹', () => {
+    /**
+     * 这条比命令行那条更常撞上：往 .env / 配置里写 key 是 agent 每天在干的事，
+     * 而这段内容现在会**原样出现在手机页面上**（改动预览）。
+     * 只抹派生的展示字段，tool_input 一个字节不动 —— 理由同上一条。
+     */
+    const content = `API_KEY=${TOKEN}\nNODE_ENV=production`
+    const ap = mk().create(
+      { session_id: 's', tool_name: 'Write', tool_input: { file_path: '/tmp/.env', content }, cwd: '/tmp' },
+      { autoApproveMs: 0, timeoutMs: 1000 },
+    )
+    const shown = ap.change.lines.map((l) => l.s).join('\n')
+    assert.ok(!shown.includes(TOKEN), `改动预览里还有令牌: ${shown}`)
+    assert.ok(shown.includes('NODE_ENV=production'), '把不该抹的也抹了')
+    assert.equal(ap.tool_input.content, content, 'tool_input 必须逐字保留')
+  })
+
+  await t.test('Edit 的两侧都抹', () => {
+    const ap = mk().create(
+      {
+        session_id: 's',
+        tool_name: 'Edit',
+        tool_input: { file_path: '/tmp/a.ts', old_string: `old ${TOKEN}`, new_string: `new ${TOKEN}` },
+        cwd: '/tmp',
+      },
+      { autoApproveMs: 0, timeoutMs: 1000 },
+    )
+    for (const l of ap.change.lines) assert.ok(!l.s.includes(TOKEN), `${l.t} 那侧漏了`)
+  })
+
   await t.test('不注入抹除器时行为不变', () => {
     const ap = new ApprovalStore().create(
       { session_id: 's', tool_name: 'Bash', tool_input: { command: 'echo hi' }, cwd: '/tmp' },

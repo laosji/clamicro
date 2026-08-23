@@ -3,6 +3,15 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { assessRisk, riskSpans } from './risk/assess.mjs'
 import { analyze, truncateDetail, askQuestions } from './view/describe.mjs'
 import { noRedact } from './redact.mjs'
+
+/** 逐行抹凭证。行的结构（t/s）不动，只换文本。 */
+function redactChange(change, redact) {
+  return {
+    ...change,
+    path: redact(change.path),
+    lines: change.lines.map((l) => ({ t: l.t, s: redact(l.s) })),
+  }
+}
 import { SELF_DEADLINE_MS } from './limits.mjs'
 
 /**
@@ -160,6 +169,15 @@ export class ApprovalStore extends EventEmitter {
       // 唯一不可信的部分，不符时必须让用户看见。
       mismatch: view.mismatch ?? null,
       detail_lines: view.detail ? view.detail.split('\n').length : 0,
+      /**
+       * 写文件类操作要写进去的内容。见 view/describe.mjs 的 fileChange。
+       *
+       * **要抹凭证**，而且这里比命令行更常撞上：往 .env / 配置文件里写 key
+       * 是 agent 每天都在干的事，而这段内容会原样出现在手机页面上。
+       * 抹的是派生的展示字段，tool_input 一个字节都不动——matchKey 拿它
+       * 逐字算哈希去跟 PreToolUse 对账，改了就永远对不上。
+       */
+      change: view.change ? redactChange(view.change, this.#redact) : null,
       // 首页卡片、日志、推送正文仍用一行摘要
       summary: this.#redact(view.headline),
       rule: permission_rule?.action ?? null,
