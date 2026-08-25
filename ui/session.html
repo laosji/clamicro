@@ -140,15 +140,11 @@
   <button class="danger" id="btnCancel">取消本轮</button>
 </footer>
 
+<script src="/ui/agents.js"></script>
 <script>
 const SID = location.pathname.split('/').pop();
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-/* 状态/子状态的中文显示。CSS 类仍用原文，只有显示文本走这张表。和 home.html 各一份，改时同步。 */
-const STATE_LABEL = { Idle: '空闲', Running: '运行中', 'Waiting Approval': '等待批准', Paused: '已暂停', Done: '已完成', Error: '出错' };
-const SUBSTATE_LABEL = { Thinking: '思考中', Working: '工作中', Searching: '搜索中', Editing: '编辑中', Delegating: '委派中', 'Running Test': '跑测试', 'Running Command': '执行命令', 'Calling MCP': '调用 MCP' };
-const stateLabel = (s) => STATE_LABEL[s] ?? s;
-const subStateLabel = (ss) => SUBSTATE_LABEL[ss] ?? ss;
 
 const KIND = {
   'session-start': '会话开始', prompt: '提问', tool: '工具', 'tool-error': '工具失败',
@@ -177,7 +173,7 @@ function render(data) {
     const dir = (s.cwd || '').split('/').filter(Boolean).pop() || s.session_id.slice(0, 8);
     $('name').textContent = s.session_name || dir;
     $('path').textContent = s.cwd || '';
-    $('state').textContent = stateLabel(s.state) + (s.sub_state ? ' · ' + subStateLabel(s.sub_state) : '');
+    $('state').textContent = stateLabel(s.state, s) + (s.sub_state ? ' · ' + subStateLabel(s.sub_state) : '');
     $('state').className = 'state ' + String(s.state).replace(/\s/g, '-');
     /**
      * 后端**不混在 chip 堆里**，单独占一行放在路径下方。
@@ -225,7 +221,9 @@ function render(data) {
     $('btnPause').className = (paused ? 'go' : '') + (cap.pause ? '' : ' hidden');
     // Claude Code 没有运行时暂停原语，说清楚才不会以为点了没反应
     let note = '';
-    if (paused && cap.pause) note = '已请求暂停 — 会在下一个工具调用前停住，当前这一步仍会跑完';
+    if (paused && cap.pause) note = s.held
+      ? '已停住 — 正卡在一个工具调用前，点恢复继续'
+      : '已请求暂停 — 会在下一个工具调用前停住，当前这一步仍会跑完';
     /* 「只能审批」这句话是有前提的：得先真的能审批。Codex 现在连审批都没开，
        照说会向用户承诺一个不存在的能力——而这一页的全部作用就是把「能做什么」
        说准。所以先看 cap.approve。 */
