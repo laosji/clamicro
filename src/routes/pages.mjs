@@ -54,6 +54,34 @@ function dismissPairImage() {
     .catch(() => {})
 }
 
+/**
+ * 把配对地址放进 Mac 的剪贴板。
+ *
+ * 装了 qrencode 的时候，屏幕上只有一张 PNG——码能扫，**地址一个字都拿不到**。
+ * 想在 Mac 自己的浏览器里开一下，或者把它发给另一台设备，就只能回终端重跑
+ * `clamicro qr`（那条路一直是先打印 URL 再画码，见 server.mjs 的 --qr 分支）。
+ * 屏幕前的人明明已经在看着这张码了，却拿不到它编码的那段文字。
+ *
+ * 为什么是剪贴板，不是把地址回显到配对页上：**那一页未登录就能打开**
+ * （见 ui/pair.html 里那段注释），回显等于把配对券公开给整个局域网。
+ * 剪贴板只到得了这台 Mac，和「你得看得见这块屏」是同一条边界——
+ * 能读到它的人，本来就能直接读屏幕上那张码。
+ *
+ * 它会盖掉用户剪贴板里原来的东西，所以通知里必须说出来，不能闷声干。
+ * 券 60 秒作废，留下的很快就只是一段无效文本。
+ *
+ * 全程 best-effort：拷不上不影响配对本身，那张码还在屏幕上。
+ */
+function copyPairUrl(spawnSync, url) {
+  if (process.platform !== 'darwin') return false
+  try {
+    // 缺二进制时 status 是 null，不是非零——只能判 === 0（同 qrencode 那处）
+    return spawnSync('pbcopy', { input: url }).status === 0
+  } catch {
+    return false
+  }
+}
+
 export function pageRoutes(ctx) {
   requireDeps('pageRoutes', ctx, [
     'config', 'approvals', 'notify', 'auth', 'publicApproval', 'HERE',
@@ -127,8 +155,11 @@ export function pageRoutes(ctx) {
         // 缺二进制时 spawnSync 返回 status=null（不是非零），所以只能判 === 0
         const q = spawnSync('qrencode', ['-o', PAIR_PNG, '-s', '10', '-m', '3', loginUrl])
         const qr = q.status === 0
+        let copied = false
         if (qr) {
           spawn('open', [PAIR_PNG], { detached: true, stdio: 'ignore' }).unref()
+          // 码给手机扫，地址给屏幕前的人复制。见 copyPairUrl
+          copied = copyPairUrl(spawnSync, loginUrl)
         } else {
           // 没装 qrencode 就把地址本身弹出来（见 confirm.mjs 的 createUrlShower）。
           // 不这么做的话 Mac 屏幕上什么都没有，而这里、通知、两个前端页面
@@ -148,10 +179,19 @@ export function pageRoutes(ctx) {
         notify({
           title: 'Clamicro',
           subtitle: '配对',
-          body: qr ? '扫描屏幕上的二维码 · 60 秒内有效' : '屏幕上有配对地址 · 60 秒内有效',
+          // 「地址已拷贝」不是可有可无的客套：copyPairUrl 会盖掉用户原来的剪贴板，
+          // 悄悄干这件事等于让人下一次粘贴时莫名其妙拿到一段陌生 URL
+          body: qr
+            ? `扫描屏幕上的二维码${copied ? ' · 地址已拷贝' : ''} · 60 秒内有效`
+            : '屏幕上有配对地址 · 60 秒内有效',
           silent: true, // 你人就在屏幕前等着它，不用出声
         }).catch(() => {})
-        console.log(`[pair] 已在 Mac 上显示${qr ? '二维码' : '配对地址（没装 qrencode）'}（一次性，60 秒）`)
+        // 日志里只记「拷没拷上」，不记地址本身：它是一张还没作废的券，
+        // 而日志会留在盘上远比 60 秒久（同 redact.mjs 提的那个坑）
+        console.log(
+          `[pair] 已在 Mac 上显示${qr ? '二维码' : '配对地址（没装 qrencode）'}` +
+            `${qr && !copied ? '（地址没能拷进剪贴板）' : ''}（一次性，60 秒）`,
+        )
         json(res, 200, { ok: true, qr })
       } catch (err) {
         // 没成功就不该占着 10 秒限流窗口——否则一次失败会连带把重试也锁掉，
