@@ -138,6 +138,24 @@ export function parseLine(line) {
   const ts = Date.parse(row.timestamp ?? '')
   const at = Number.isFinite(ts) ? ts : null
   if (p?.type === 'task_started') return { kind: 'start', at, turnId: p.turn_id ?? null }
+  if (p?.type === 'token_count') {
+    /**
+     * 用量。**这条推翻了 agents.mjs 里「Codex 不上报用量」那句话**——
+     * 那句话对 hook 通道成立（payload 里确实没有），但 TokenCount 就落在
+     * rollout 里，跟读这条路看得见。
+     *
+     * 只取累计 token（对上 QUOTA.TOKENS，DSH 走的是同一条渲染路径）。
+     * 同一条事件里还有 rate_limits.primary 的窗口百分比，但现有的 limits
+     * 模型是写死的 five_hour / seven_day，而 Codex 是单个 30 天窗口
+     * （window_minutes: 43200），塞不进去——那要单独一步泛化。
+     *
+     * 额度耗尽时 info 整个是 null（实测），那时没有数字可用，返回 null
+     * 让它当没发生：报一个 0 比不报更糟，界面会显示「累计 0 tok」。
+     */
+    const total = p.info?.total_token_usage?.total_tokens
+    if (!Number.isFinite(total) || total <= 0) return null
+    return { kind: 'usage', at, tokens: total }
+  }
   if (p?.type === 'task_complete') {
     // error 是个对象（{message}），不是字符串。只取 message：整个对象塞进
     // 时间线的话，用户看到的是一坨 JSON 而不是那句「额度用完了」
@@ -260,6 +278,12 @@ export function createCodexTail({ store, notify, config, home = homedir(), tickM
     const payload = { session_id: sessionId, agent: 'codex' }
     if (evt.kind === 'start') {
       store.applyHook('turn-start', payload, config.notify)
+      return
+    }
+    if (evt.kind === 'usage') {
+      // usage_reported 只在**真的拿到数字**时置 true。置 false 会让界面说
+      // 「该后端不上报用量」，而事实是「这一轮没报」——两回事
+      store.applyHook('turn-usage', { ...payload, tokens: evt.tokens, usage_reported: true }, config.notify)
       return
     }
     const { notify: alert } = store.applyHook(

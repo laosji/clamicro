@@ -44,10 +44,12 @@ export const QUOTA = {
   /**
    * 什么都拿不到。
    *
-   * Codex 走的是纯 hook 通道，而它的 hook payload 里既没有窗口用量也没有
-   * token 数——那些只出现在 app-server 的 TokenCount 事件里，hook 看不见。
-   * 不写成 TOKENS：那会让界面摆出一个「累计 0 token」的位子，而 0 是假的，
-   * 真实情况是「这条链路根本不上报」。
+   * **当前没有后端用这一档**——Codex 曾经是，理由写的是「hook payload 里
+   * 既没有窗口也没有 token 数」。那句话对 hook 通道成立，但接上 rollout
+   * 跟读之后（src/codex-tail.mjs），TokenCount 就看得见了，于是它改成了
+   * TOKENS。留着这一档是因为 agentUsage 认它，将来接一个真的什么都不报的
+   * 适配器时不必重新发明：**空着和「不上报」必须分得开**，都显示成空白的话，
+   * 用户会一直等一个永远不会出现的数字。
    */
   NONE: 'none',
 }
@@ -133,7 +135,24 @@ export const AGENTS = {
     pause: false,
     cancel: false,
     inbox: false,
-    quota: QUOTA.NONE,
+    /**
+     * 用量走 rollout，不走 hook。
+     *
+     * 这里一度是 NONE，理由是「hook payload 里既没有窗口也没有 token 数」
+     * ——对 hook 通道成立，但 TokenCount 事件就落在 rollout 里，跟读那条路
+     * 看得见（src/codex-tail.mjs 的 parseLine）。取的是 `info.
+     * total_token_usage.total_tokens`，语义和 DSH 的累计 token 一致，
+     * 所以走的是同一条渲染路径，UI 不必知道数字是从哪来的。
+     *
+     * 额度耗尽时 Codex 报的 token_count 里 info 整个是 null，那时不写数字、
+     * 也不把 usage_reported 置 false——界面显示「还没跑完一轮」，而不是
+     * 谎称「该后端不上报用量」。
+     *
+     * 同一条事件里还有 rate_limits.primary 的窗口百分比（used_percent /
+     * window_minutes: 43200 / resets_at）。没用上：现有的 limits 模型是写死的
+     * five_hour + seven_day，而 Codex 是单个 30 天窗口，塞不进去。
+     */
+    quota: QUOTA.TOKENS,
     cancelNote: null,
   },
 }

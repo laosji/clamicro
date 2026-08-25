@@ -327,6 +327,22 @@ export class Store extends EventEmitter {
         this.#touch(s, { state: STATE.RUNNING, sub_state: 'Thinking', turn_started_at: Date.now() })
         break
 
+      /**
+       * 用量。同样只有 Codex 走，同样不经过 HTTP（见 codex-tail.mjs）。
+       *
+       * 单独一个事件而不是搭在 turn-end 上：Codex 的 token_count 是独立
+       * 落盘的，时机跟 task_complete 不绑定。搭在一起等于要等回合结束才
+       * 更新，而失败的回合可能根本走不到那一步。
+       */
+      case 'turn-usage': {
+        const n = Number(payload.tokens)
+        const patch = {}
+        if (Number.isFinite(n) && n > 0) patch.tokens = n
+        if (typeof payload.usage_reported === 'boolean') patch.usage_reported = payload.usage_reported
+        if (Object.keys(patch).length) this.#touch(s, patch)
+        break
+      }
+
       case 'turn-end': {
         /**
          * 失败和成功必须分开。

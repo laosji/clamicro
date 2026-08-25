@@ -38,6 +38,18 @@ const started = (turn = 't1', ts = at()) =>
   JSON.stringify({ timestamp: ts, type: 'event_msg', payload: { type: 'task_started', turn_id: turn } })
 const done = (msg = '好了', ts = at()) =>
   JSON.stringify({ timestamp: ts, type: 'event_msg', payload: { type: 'task_complete', turn_id: 't1', last_agent_message: msg, error: null } })
+const usage = (total = 20263, ts = at()) =>
+  JSON.stringify({ timestamp: ts, type: 'event_msg', payload: {
+    type: 'token_count',
+    info: { total_token_usage: { input_tokens: 20056, output_tokens: 207, total_tokens: total } },
+    rate_limits: { primary: { used_percent: 0, window_minutes: 43200, resets_at: 1789190870 } },
+  } })
+/** 额度耗尽时的真实形状：info 整个是 null，rate_limits 里也全是 null */
+const usageEmpty = (ts = at()) =>
+  JSON.stringify({ timestamp: ts, type: 'event_msg', payload: {
+    type: 'token_count', info: null,
+    rate_limits: { limit_id: 'premium', primary: null, secondary: null },
+  } })
 const failed = (m = "You've hit your usage limit.", ts = at()) =>
   JSON.stringify({ timestamp: ts, type: 'event_msg', payload: { type: 'task_complete', turn_id: 't1', last_agent_message: null, error: { message: m } } })
 
@@ -77,6 +89,17 @@ test('parseLine 只认回合事件，别的一律当没看见', async (t) => {
     // 整个对象塞进时间线的话，用户看到的是一坨 JSON 而不是那句人话
     const e = parseLine(failed('额度用完了'))
     assert.equal(e.error, '额度用完了')
+  })
+
+  await t.test('token_count 带数字 —— 认成用量', () => {
+    assert.deepEqual(parseLine(usage(20263, '2026-08-25T08:06:53.502Z')),
+      { kind: 'usage', at: Date.parse('2026-08-25T08:06:53.502Z'), tokens: 20263 })
+  })
+
+  await t.test('token_count 但 info 是 null —— 当没发生', () => {
+    // 额度耗尽时的真实形状。报一个 0 比不报更糟：界面会显示「累计 0 tok」，
+    // 而事实是「这一轮没报」
+    assert.equal(parseLine(usageEmpty()), null)
   })
 
   await t.test('rollout 里的其它行不是异常，返回 null', () => {
@@ -270,6 +293,46 @@ test('首拍不回放历史 —— 旧回合不该被当成刚发生', async (t)
     await tick(tail)
     assert.equal(store.session(SID).state, STATE.DONE)
     assert.equal(store.session(SID).last_message, '这一轮')
+  })
+})
+
+test('用量：Codex 的累计 token 走 rollout', async (t) => {
+  const { home, file } = fakeHome()
+  const store = new Store()
+  const tail = createCodexTail({ store, notify: null, config: CFG, home, tickMs: 10 })
+  t.after(() => { tail.stop(); rmSync(home, { recursive: true, force: true }) })
+
+  tail.follow(SID)
+  await tick(tail)
+
+  await t.test('拿到数字之前，usage_reported 保持 null', () => {
+    // null = 「还没跑完一轮」。置 false 会让界面说「该后端不上报用量」，
+    // 那是另一回事，而且现在已经是假话
+    assert.equal(store.session(SID).usage_reported, null)
+    assert.equal(store.session(SID).tokens, null)
+  })
+
+  await t.test('token_count 到了 —— 累计 token 写进会话', async () => {
+    appendFileSync(file, `${usage(20263)}\n`)
+    await tick(tail)
+    assert.equal(store.session(SID).tokens, 20263)
+    assert.equal(store.session(SID).usage_reported, true)
+  })
+
+  await t.test('info 为 null 的那条不该把数字抹掉', async () => {
+    // 额度耗尽之后每一轮都会报这种空的。覆盖成 0 等于把已知的用量弄丢
+    appendFileSync(file, `${usageEmpty()}\n`)
+    await tick(tail)
+    assert.equal(store.session(SID).tokens, 20263)
+  })
+
+  await t.test('回合结束不会覆盖用量', async () => {
+    // turn-end 走的是现成的 stop 那条路，而它的 payload 里没有 tokens——
+    // 那两处扩散是有条件的，条件不成立时必须**保持原值**而不是写 0
+    appendFileSync(file, `${done('跑完了')}\n`)
+    await tick(tail)
+    assert.equal(store.session(SID).tokens, 20263)
+    assert.equal(store.session(SID).state, STATE.DONE)
   })
 })
 
