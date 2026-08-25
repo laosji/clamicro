@@ -91,6 +91,9 @@ export function apiRoutes(ctx) {
       handler: ({ res }) => json(res, 200, {
         sessions: store.sessions(),
         limits: store.accountLimits(),
+        // 每后端自己的窗口配额（Codex 是单个 30 天窗口）。跟 limits 分开是
+        // 因为那个字段的形状写死了 five_hour/seven_day，见 store.agentLimits
+        agentLimits: store.agentLimits(),
         statusLineSeenAt: store.statusLineSeenAt(),
         // 每个后端最后一次上报的时间。用来区分「这个后端没有会话」和
         // 「这个后端已经不上报了」——两者在列表上长得一样，处置完全相反

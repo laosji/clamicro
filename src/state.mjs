@@ -159,6 +159,23 @@ export class Store extends EventEmitter {
    * 记的是「收到过任何上报」，不是「有活跃会话」——会话结束了后端仍然活着，
    * 这两件事必须分开。
    */
+  /**
+   * 每个后端自己的窗口配额。
+   *
+   * **为什么不并进 #accountLimits**：那个字段的形状是写死的
+   * `{five_hour, seven_day}`，是 Claude Code 的 statusLine 直接映过来的，
+   * 全仓库 33 处引用都建立在这两个名字上。而 Codex 是**单个 30 天窗口**
+   * （window_minutes: 43200），别的后端将来还可能是别的档位——把它们塞进
+   * 那两个名字里就得撒谎（把 30 天叫成 seven_day），换掉那两个名字则要动
+   * 状态栏渲染、CLI status、UI 和三个测试文件。
+   *
+   * 所以另开一张表：键是后端名，值是**一组**窗口，每个窗口自带 key/label。
+   * Claude Code 那条路一个字节都不动，新后端各说各的。
+   */
+  agentLimits() {
+    return Object.fromEntries(this.#agentLimits)
+  }
+
   agentsSeen() {
     return Object.fromEntries(this.#agentSeen)
   }
@@ -340,6 +357,16 @@ export class Store extends EventEmitter {
         if (Number.isFinite(n) && n > 0) patch.tokens = n
         if (typeof payload.usage_reported === 'boolean') patch.usage_reported = payload.usage_reported
         if (Object.keys(patch).length) this.#touch(s, patch)
+        /**
+         * 窗口配额是**账户级**的，不属于某一个会话，所以记在 #agentLimits
+         * 上而不是会话上（同 #accountLimits 的道理）。
+         *
+         * 空数组也要当作「没有」：写进去会让界面画出一组零个格子的容器，
+         * 那比不画更难解释。
+         */
+        if (Array.isArray(payload.windows) && payload.windows.length) {
+          this.#agentLimits.set(s.agent, { windows: payload.windows, at: Date.now() })
+        }
         break
       }
 
@@ -544,6 +571,9 @@ export class Store extends EventEmitter {
   // 额度是账号级的，不是会话级的。按会话存会出现「某个旧会话的陈旧数字
   // 把最新数字顶掉」，首页显示的就不是真实用量了。只认最新一次观测。
   #accountLimits = null
+
+  // agent -> { windows: [{key, label, pct, resets_at}], at }。见 agentLimits()
+  #agentLimits = new Map()
   // statusLine 是会话启动时读一次的。装 clamicro 之前就开着的会话永远不会调它，
   // 表现是额度一直空白且毫无错误。记一笔「有没有被调用过」，好把
   // 「还没有会话上报」和「有会话但额度拿不到」区分开。

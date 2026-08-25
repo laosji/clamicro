@@ -120,6 +120,45 @@ export function findRollout(sessionId, { home = homedir() } = {}) {
 }
 
 /**
+ * 把 window_minutes 翻成人看得懂的短标签。
+ *
+ * 只认这几档：Codex 现在报的是 43200（30 天），别的档位是猜的。猜不出来的
+ * 就按小时/天直接写，**不硬套** Claude 那套 5h/7d——那两个名字是别人的窗口，
+ * 借过来用等于在界面上说一句不成立的话。
+ */
+function windowLabel(minutes) {
+  const m = Number(minutes)
+  if (!Number.isFinite(m) || m <= 0) return null
+  if (m % 1440 === 0) return `${m / 1440}d`
+  if (m % 60 === 0) return `${m / 60}h`
+  return `${m}m`
+}
+
+/**
+ * rate_limits → 我们的窗口数组。
+ *
+ * Codex 给的是 primary / secondary 两个位子（实测 secondary 常年是 null）。
+ * used_percent 缺失时**整条丢掉**而不是补 0：0% 和「不知道」在界面上长得
+ * 一模一样，而它们的含义相反。
+ */
+export function readWindows(rateLimits) {
+  const out = []
+  for (const key of ['primary', 'secondary']) {
+    const w = rateLimits?.[key]
+    if (!w) continue
+    // 先挡 null/undefined 再转数字：Number(null) 是 0 且 isFinite 通过，
+    // 于是「不知道」会被悄悄写成「0%」——那正是这段注释要避免的事
+    if (w.used_percent === null || w.used_percent === undefined) continue
+    const pct = Number(w.used_percent)
+    if (!Number.isFinite(pct)) continue
+    const label = windowLabel(w.window_minutes)
+    if (!label) continue
+    out.push({ key, label, pct, resets_at: Number.isFinite(Number(w.resets_at)) ? Number(w.resets_at) : null })
+  }
+  return out
+}
+
+/**
  * 把一行 rollout JSON 翻成我们认识的回合事件。
  *
  * 认不得的一律返回 null——rollout 里绝大多数行（response_item / world_state /
@@ -153,8 +192,10 @@ export function parseLine(line) {
      * 让它当没发生：报一个 0 比不报更糟，界面会显示「累计 0 tok」。
      */
     const total = p.info?.total_token_usage?.total_tokens
-    if (!Number.isFinite(total) || total <= 0) return null
-    return { kind: 'usage', at, tokens: total }
+    const windows = readWindows(p.rate_limits)
+    // 两样都没有就当没发生。额度耗尽时 info 和 rate_limits 里全是 null（实测）
+    if (!(Number.isFinite(total) && total > 0) && !windows.length) return null
+    return { kind: 'usage', at, tokens: Number.isFinite(total) && total > 0 ? total : null, windows }
   }
   if (p?.type === 'task_complete') {
     // error 是个对象（{message}），不是字符串。只取 message：整个对象塞进
@@ -283,7 +324,13 @@ export function createCodexTail({ store, notify, config, home = homedir(), tickM
     if (evt.kind === 'usage') {
       // usage_reported 只在**真的拿到数字**时置 true。置 false 会让界面说
       // 「该后端不上报用量」，而事实是「这一轮没报」——两回事
-      store.applyHook('turn-usage', { ...payload, tokens: evt.tokens, usage_reported: true }, config.notify)
+      store.applyHook(
+        'turn-usage',
+        // usage_reported 只在**真的拿到 token 数**时置 true：光有窗口百分比
+        // 不等于报了 token，而 agentUsage 的 tokens 分支看的就是这个布尔
+        { ...payload, tokens: evt.tokens, windows: evt.windows, ...(evt.tokens ? { usage_reported: true } : {}) },
+        config.notify,
+      )
       return
     }
     const { notify: alert } = store.applyHook(

@@ -20,7 +20,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, appendFileSync, rmSync, truncate
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { Store, STATE } from '../src/state.mjs'
-import { createCodexTail, findRollout, parseLine } from '../src/codex-tail.mjs'
+import { createCodexTail, findRollout, parseLine, readWindows } from '../src/codex-tail.mjs'
 
 const NOTIFY = { onStop: true, onError: true, minTurnMs: 30_000 }
 const CFG = { notify: NOTIFY }
@@ -91,9 +91,28 @@ test('parseLine 只认回合事件，别的一律当没看见', async (t) => {
     assert.equal(e.error, '额度用完了')
   })
 
-  await t.test('token_count 带数字 —— 认成用量', () => {
-    assert.deepEqual(parseLine(usage(20263, '2026-08-25T08:06:53.502Z')),
-      { kind: 'usage', at: Date.parse('2026-08-25T08:06:53.502Z'), tokens: 20263 })
+  await t.test('token_count 带数字 —— 认成用量，窗口一并带出来', () => {
+    assert.deepEqual(parseLine(usage(20263, '2026-08-25T08:06:53.502Z')), {
+      kind: 'usage',
+      at: Date.parse('2026-08-25T08:06:53.502Z'),
+      tokens: 20263,
+      windows: [{ key: 'primary', label: '30d', pct: 0, resets_at: 1789190870 }],
+    })
+  })
+
+  await t.test('window_minutes 43200 翻成 30d，不硬套 Claude 的 5h/7d', () => {
+    // 借别人的窗口名字等于在界面上说一句不成立的话
+    assert.equal(readWindows({ primary: { used_percent: 1, window_minutes: 43200 } })[0].label, '30d')
+    assert.equal(readWindows({ primary: { used_percent: 1, window_minutes: 300 } })[0].label, '5h')
+    assert.equal(readWindows({ primary: { used_percent: 1, window_minutes: 10080 } })[0].label, '7d')
+  })
+
+  await t.test('used_percent 是 null —— 整条丢掉，不写成 0%', () => {
+    // Number(null) 是 0 且 isFinite 通过，「不知道」会被悄悄写成「0%」，
+    // 而这两者在界面上长得一样、含义相反。为此挂过一次
+    assert.deepEqual(readWindows({ primary: { used_percent: null, window_minutes: 43200 } }), [])
+    // 但真正的 0% 要留着
+    assert.equal(readWindows({ primary: { used_percent: 0, window_minutes: 43200 } }).length, 1)
   })
 
   await t.test('token_count 但 info 是 null —— 当没发生', () => {
@@ -317,6 +336,12 @@ test('用量：Codex 的累计 token 走 rollout', async (t) => {
     await tick(tail)
     assert.equal(store.session(SID).tokens, 20263)
     assert.equal(store.session(SID).usage_reported, true)
+  })
+
+  await t.test('窗口配额记在后端上，不记在会话上', () => {
+    // 它是**账户级**的属性，不属于某一个会话（同 accountLimits 的道理）
+    assert.deepEqual(store.agentLimits().codex.windows,
+      [{ key: 'primary', label: '30d', pct: 0, resets_at: 1789190870 }])
   })
 
   await t.test('info 为 null 的那条不该把数字抹掉', async () => {

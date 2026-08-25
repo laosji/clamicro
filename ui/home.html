@@ -816,6 +816,9 @@ let sessions = [], pending = [], cfg = null, quota = null, inbox = {}, slSeen = 
 let agentsSeen = {};
 /** agent -> 首次上报时间。首页分区的顺序按它排，见 agentKinds */
 let agentsFirstSeen = {};
+// 每后端自己的窗口配额（Codex 是单个 30 天窗口）。跟 quota 分开是因为那个
+// 字段的形状写死了 five_hour/seven_day，见 src/state.mjs 的 agentLimits()
+let agentLimits = {};
 /**
  * 会话列表的后端筛选。null = 全部。
  *
@@ -1883,10 +1886,26 @@ const AGENT_STALE_MS = 600_000;
  * @returns {{html, stale}|null} null = 这个后端没有可说的用量
  */
 function agentUsage(kind, cap, mine) {
+  /**
+   * 后端自己上报的窗口配额（Codex：单个 30 天窗口）。
+   *
+   * 和累计 token **一起显示**，不是二选一：它们回答的是两个不同的问题——
+   * 「这轮花了多少」和「这个月还剩多少」。Claude Code 不走这条（它的窗口
+   * 在全局 quota 里，形状是写死的 five_hour/seven_day），所以这里天然只
+   * 对上报了窗口的后端生效。
+   */
+  const wins = (agentLimits?.[kind]?.windows ?? [])
+    .map((w) => `${esc(w.label)} ${Math.round(Math.min(100, Math.max(0, w.pct)))}%`)
+    .join(' · ');
+
   if (cap.quota === 'tokens') {
     // 累计 token。**不换算成金额**——那要一张会悄悄过期的价目表
     const total = mine.reduce((n, s) => n + (Number(s.tokens) || 0), 0);
-    if (total) return { html: `${esc(fmtTokens(total))} tok`, stale: false };
+    if (total) {
+      return { html: wins ? `${wins} · ${esc(fmtTokens(total))} tok` : `${esc(fmtTokens(total))} tok`, stale: false };
+    }
+    // 窗口有、token 还没有：先把知道的那半说出来，别整条空着
+    if (wins) return { html: wins, stale: false };
 
     /**
      * 没有数字时，「还没轮完」和「这个适配器压根不报用量」要分开说。
@@ -2281,6 +2300,7 @@ async function refresh() {
     slSeen = s.statusLineSeenAt;
     agentsSeen = s.agentsSeen || {};
     agentsFirstSeen = s.agentsFirstSeen || {};
+    agentLimits = s.agentLimits || {};
   }
   if (a) { pending = a.approvals ?? []; recentlyExpired = a.recentlyExpired || []; }
   if (c) {
