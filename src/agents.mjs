@@ -94,11 +94,15 @@ export const AGENTS = {
   /**
    * OpenAI Codex —— ChatGPT 那个 CLI。见 docs/codex-bridge.zh-CN.md。
    *
-   * 接它比接 DSH 便宜得多：这一版（0.147）的 hook 系统跟 Claude Code 几乎
-   * 同构——事件名一字不差（PreToolUse / PermissionRequest / Stop / …），
-   * payload 字段一样（session_id / cwd / tool_name / tool_input / …），
-   * 输出也是同一套 hookSpecificOutput。所以桥接只是一层 curl 中继，
-   * 没有第二个进程、没有插件宿主。
+   * 接它比接 DSH 便宜得多：hook 系统跟 Claude Code 大体同构——payload 字段
+   * 一样（session_id / cwd / tool_name / tool_input / …），输出也是同一套
+   * hookSpecificOutput。所以桥接只是一层 curl 中继，没有第二个进程、
+   * 没有插件宿主。
+   *
+   * 但**不是「一字不差」**，这句话曾经写在这里，是错的：0.149 的事件枚举里
+   * 没有 `Stop`。Codex 根本没有回合级的结束事件，会话走不出 Running——
+   * 那一段靠跟读 rollout JSONL 补，见 src/codex-tail.mjs 和 src/codex.mjs
+   * 里 CODEX_HOOKS 上面那段。
    *
    * ## approve 为什么是 false
    *
@@ -117,8 +121,11 @@ export const AGENTS = {
    * （它一度只是纸面声明——那时 hooks 里接着 PermissionRequest，审批照样
    * 跑完整套，等于把这条还没验证过的拒绝路径直接上了生产。）
    *
-   * pause / cancel / inbox 同理：拦截点都在（PreToolUse 认 continue、
-   * Stop 认 decision:block），没验证就按不存在算。
+   * pause / cancel / inbox 同理，但理由比原来更硬：原来写的是「拦截点都在
+   * （PreToolUse 认 continue、Stop 认 decision:block），没验证就按不存在算」
+   * ——而 **Stop 这个事件在 Codex 里压根不存在**，所以那半条拦截点不是
+   * 「没验证」，是**没有**。PreToolUse 那半条还在，但单靠它拦不住一个
+   * 不调工具的回合。
    */
   codex: {
     label: 'Codex',

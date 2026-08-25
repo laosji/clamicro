@@ -98,8 +98,8 @@ let warnedMatchDrift = false
 const warnedNoApprove = new Set()
 
 export function hookRoutes(ctx) {
-  requireDeps('hookRoutes', ctx, ['config', 'store', 'approvals', 'control', 'inbox', 'history', 'notify', 'notifyApproval'])
-  const { config, store, approvals, control, inbox, history, notify, notifyApproval } = ctx
+  requireDeps('hookRoutes', ctx, ['config', 'store', 'approvals', 'control', 'inbox', 'history', 'notify', 'notifyApproval', 'codexTail'])
+  const { config, store, approvals, control, inbox, history, notify, notifyApproval, codexTail } = ctx
 
   return async function handleHooks(req, res, url, path) {
     // ---- 核心：阻塞式审批 ----
@@ -269,6 +269,33 @@ export function hookRoutes(ctx) {
 
       const payload = await readBody(req)
       adoptAgent(payload, url)
+
+      /**
+       * Codex 的会话要额外跟读它的 rollout 文件。
+       *
+       * 理由见 src/codex-tail.mjs：Codex **没有回合级的结束事件**，光靠
+       * hooks 的话会话收到 user-prompt-submit 之后就永远停在「运行中」。
+       *
+       * 挂在这里而不是 applyHook 里：状态机该是纯的，起停一个轮询器是副作用。
+       * 只对 codex 做——Claude Code 有 Stop，不需要，也不该去读它的目录。
+       */
+      if (payload.agent === 'codex') {
+        /**
+         * 认**任何一条** codex 事件，不只是 session-start。
+         *
+         * 只认 session-start 的话，有一整类会话永远跟不上：**服务启动之前
+         * 就已经开着的那些**。SessionStart 一个会话只发一次，服务重启后
+         * 那条早就过去了，之后只会收到 prompt / pre-tool-use。
+         *
+         * 而这在生产里是常态而非例外——自愈重启、改配置重启、机器睡醒。
+         * 真机上就是这么撞到的：服务 16:19:45 重启，会话 16:20:13 发来
+         * prompt，卡片从此停在「运行中」，因为没人在跟读它。
+         *
+         * follow 是幂等的，所以每条事件都调一次没有代价。
+         */
+        if (event === 'session-end') codexTail.unfollow(payload.session_id)
+        else codexTail.follow(payload.session_id)
+      }
 
       // 同一次工具调用开始执行 = 这次授权已在别处放行（终端弹框、权限规则、
       // acceptEdits 模式…），把还挂着的那条审批销掉，别让它在界面上冒充「待处理」。

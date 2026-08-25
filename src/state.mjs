@@ -315,6 +315,46 @@ export class Store extends EventEmitter {
         break
       }
 
+      /**
+       * 回合开始 / 结束。**只有 Codex 走这两条**，而且不经过 HTTP。
+       *
+       * Codex 没有回合级的结束事件（0.149 的十个 hook 事件里没有 stop），
+       * 所以它的会话靠跟读 rollout JSONL 补回来，见 src/codex-tail.mjs。
+       * 这两个名字**故意不在 HOOK_EVENTS 里**——它们进不了 /hooks/* 路由，
+       * 局域网上伪造不出来，唯一的来源是本机 ~/.codex 下那份文件。
+       */
+      case 'turn-start':
+        this.#touch(s, { state: STATE.RUNNING, sub_state: 'Thinking', turn_started_at: Date.now() })
+        break
+
+      case 'turn-end': {
+        /**
+         * 失败和成功必须分开。
+         *
+         * task_complete 带 error 时（额度耗尽、模型报错…）这个回合**什么都
+         * 没干成**，报「已完成」等于撒谎。ERROR 是状态机里本来就有的一档，
+         * 两个前端也都渲染成「出错」，所以这里不需要动界面。
+         */
+        if (payload.error) {
+          /**
+           * 报错原文要写进 last_message，不能只记时间线。
+           *
+           * 首页的出错卡片渲染的就是这个字段，为空时回落到一句通用的
+           * 「会话异常终止」（见 ui/home.html）。而我们手里明明有那句真话
+           * ——「You've hit your usage limit…」带着重置时间。只记时间线的话，
+           * 用户在卡片上看到的永远是同一句正确但没用的话，连续几个回合失败
+           * 看起来就像状态卡住了没动。
+           */
+          const why = truncate(String(payload.error), 300)
+          this.#touch(s, { state: STATE.ERROR, sub_state: null, turn_started_at: null, last_message: why })
+          this.#log(id, 'turn-error', why)
+          break
+        }
+        // 成功就跟 Claude Code 的 Stop 走同一条路——包括那条「跑完了」的通知。
+        // 复用而不是另写一份：两个后端的「回合结束」对用户是同一件事。
+        return this.applyHook('stop', payload, notifyConfig)
+      }
+
       case 'stop': {
         // turn_started_at 为空 = 服务在会话中途才启动，时长未知。
         // 此时宁可多推一次，也别漏掉一次任务完成。

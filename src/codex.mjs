@@ -26,9 +26,21 @@ export const END = '# <<< clamicro <<<'
  *
  * 几处跟 Claude Code 那张表（src/settings.mjs 的 HOOK_MAP）不一样的地方：
  *
- *   · **没有 Notification / PostToolUseFailure / StopFailure**。Codex 没有这
- *     三个事件，所以那三条端点在 Codex 会话上永远收不到东西——工具失败只能
- *     从 PostToolUse 的 payload 里看出来。
+ *   · **没有 Stop。** 这条最要命，而且一度写错过：这里原本接着 `[[hooks.Stop]]`，
+ *     照着 0.147 的文档抄的。0.149 的事件枚举里根本没有它——二进制里
+ *     snake_case 和 PascalCase 两份互相印证，一共十个：
+ *
+ *         pre_tool_use  permission_request  post_tool_use  pre_compact
+ *         post_compact  session_start       session_end    user_prompt_submit
+ *         subagent_start subagent_stop
+ *
+ *     错得最阴的地方是 **Codex 照样给它发信任凭证**（配置里会出现
+ *     `[hooks.state."…:stop:0:0"]`），所以从任何一个角度看它都像装好了，
+ *     而那条 hook 一辈子不会响。表现是会话永远停在「运行中」。
+ *     补救不在这张表里——Codex 压根没有回合级的结束事件，只能跟读它的
+ *     rollout JSONL，见 src/codex-tail.mjs。
+ *   · **没有 Notification / PostToolUseFailure / StopFailure**。同理收不到，
+ *     工具失败只能从 PostToolUse 的 payload 里看出来。
  *   · **SessionEnd 只能给 3 秒**。Codex 会把这个事件的超时**强行截到 3s**，
  *     写大了它每次启动都在终端里骂一句
  *     （实测：`warning: clamping SessionEnd hook timeout to 3s`）。
@@ -43,7 +55,6 @@ export const CODEX_HOOKS = [
   ['PermissionRequest', 'permission-request', 600],
   ['PreToolUse', 'pre-tool-use', 5],
   ['PostToolUse', 'post-tool-use', 3],
-  ['Stop', 'stop', 5],
   ['SessionEnd', 'session-end', 3],
 ]
 
@@ -55,6 +66,24 @@ export const CODEX_HOOKS = [
  */
 export function hasCodex({ exists = existsSync } = {}) {
   return exists(codexConfig())
+}
+
+/**
+ * 这台机器上 codex 可执行文件在哪。
+ *
+ * PATH 上通常没有——它是 ChatGPT.app 里带的那一份（Codex 已经没有独立
+ * 客户端了）。安装提示要把这条路径原样打出来给人复制，所以不能只答「有/没有」。
+ * 候选顺序跟 scripts/codex-probe.mjs 保持一致。
+ */
+export function codexBin({ exists = existsSync } = {}) {
+  const candidates = [
+    process.env.CODEX_BIN,
+    '/Applications/ChatGPT.app/Contents/Resources/codex',
+    '/opt/homebrew/bin/codex',
+    '/usr/local/bin/codex',
+    join(homedir(), '.local', 'bin', 'codex'),
+  ].filter(Boolean)
+  return candidates.find((c) => exists(c)) ?? null
 }
 
 /** TOML 字符串字面量。路径里出现引号/反斜杠的概率极低，但写坏了是整个配置起不来。 */
@@ -296,7 +325,21 @@ export async function wireUp({
    */
   say('')
   say(`  ${t.y('还差一步（必须做，否则等于没装）：')}`)
-  say(`  ${t.dim('打开一次 Codex，它会问你是否信任这份 hooks 配置——点同意。')}`)
+  /**
+   * 这里原来写的是「打开一次 Codex 并同意」，而那句话对多数人是**空话**。
+   *
+   * 信任提示只在**交互式 TUI** 里出现。而现在 Codex 没有独立客户端了——
+   * 它就在 ChatGPT.app 里，多数人是从桌面 App 或 VS Code 扩展用它的，
+   * 那两条路都不是 TUI，**打开一百次也不会被问**。真机上就是这么卡住的：
+   * 配置写对了、服务跑着、Codex 正常干活，事件一条不来，而每一项检查
+   * 都显示「已安装」。
+   *
+   * 所以这里必须给出**那条命令本身**。codex 一般不在 PATH 上（它是
+   * ChatGPT.app 里带的那一份），路径也得写全。
+   */
+  say(`  ${t.dim('在终端里跑一次下面这条，它会问你是否信任这份 hooks 配置——点同意：')}`)
+  say(`  ${t.dim(`  ${codexBin() ?? '<codex 可执行文件>'}`)}`)
+  say(`  ${t.dim('点完直接退出即可，不用发消息。从 ChatGPT App / VS Code 里打开是问不到这一步的。')}`)
   say(`  ${t.dim('没点之前，Codex 会把 hooks 静默跳过：不报错、不提示，clamicro 一条事件都收不到。')}`)
   say(`  ${t.dim('以后每次改动这段配置（比如换端口），都要再确认一次。')}`)
 

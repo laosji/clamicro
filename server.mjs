@@ -17,6 +17,7 @@ import { json } from './src/http/respond.mjs'
 import { allowedHosts, hostAllowed, isLoopback, applySecurityHeaders } from './src/http/security.mjs'
 import { makeAuth } from './src/auth/token.mjs'
 import { PairingStore, ConfirmStore, addDevice, removeDevice } from './src/auth/pairing.mjs'
+import { createCodexTail } from './src/codex-tail.mjs'
 import { hookRoutes } from './src/routes/hooks.mjs'
 import { pageRoutes } from './src/routes/pages.mjs'
 import { apiRoutes } from './src/routes/api.mjs'
@@ -703,8 +704,13 @@ if (!ONE_SHOT) watchConfig()
 const { sameToken, authorized, loginCookie } = auth0
 
 const auth = auth0
+/**
+ * Codex 的回合结束靠跟读它的 rollout 文件补回来，见 src/codex-tail.mjs。
+ * 只在常驻服务里起——一次性查询跑完就 exit，起个轮询器没有意义。
+ */
+const codexTail = createCodexTail({ store, notify, config })
 const handleHooks = hookRoutes({
-  config, store, approvals, control, inbox, history, notify, notifyApproval,
+  config, store, approvals, control, inbox, history, notify, notifyApproval, codexTail,
 })
 const handlePages = pageRoutes({
   config, approvals, notify, auth, publicApproval, HERE,
@@ -925,6 +931,7 @@ for (const sig of ['SIGINT', 'SIGTERM']) {
     console.log('\n[clamicro] 退出')
     history.flushNow()
     stopWatching()
+    codexTail.stop()
     for (const res of sseClients) res.end()
     for (const s of servers.values()) s.close()
     setTimeout(() => process.exit(0), 500).unref()

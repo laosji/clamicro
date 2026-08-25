@@ -92,6 +92,7 @@ warning: clamping SessionEnd hook timeout to 3s in …/config.toml
 | 表明身份 | 不用（默认后端） | `?agent=codex` 查询参数 |
 | 额度 | statusLine 每次会话上报窗口用量 | **没有**。hook payload 里既没有窗口也没有 token 数 |
 | hook 生效 | 写进 settings.json 即生效 | 还要被**信任**，见 §3 |
+| 回合结束 | `Stop` 事件 | **没有这个事件**，只能跟读 rollout JSONL，见 §3.5 |
 | 拉起服务 | SessionStart 跑 `session-start.sh` | 同一个脚本，多传一个 `codex` 参数 |
 
 「表明身份」为什么走查询参数而不是往 payload 里加字段：中继是 bash，
@@ -120,6 +121,112 @@ Codex 对 hooks 有一道信任闸门，状态写在 config.toml 的 `[hooks.sta
 
 改端口、改事件表都会改变这段内容，因此都要重新信任一次。这一点在安装
 提示里也说了。
+
+### 3.1 信任提示**只在终端 TUI 里出现**
+
+这一条是真机上踩出来的，代价是一个多小时：配置写对了、服务跑着、Codex
+正常干活、`clamicro status` 每一项都绿，事件一条不来。
+
+原因是 Codex 已经**没有独立客户端**了——它就在 `ChatGPT.app` 里，多数人
+从桌面 App 或 VS Code 扩展用它。而那道信任闸门只在**交互式 TUI** 里能点，
+那两条路都不是 TUI，**打开一百次也不会被问**。
+
+绕不过去，我把能试的都试过了：
+
+- `codex` 没有 `hooks trust` 这类子命令（翻过 `--help`、`debug --help`、`features`）
+- `codex doctor` 整份报告里一个字都没提 hooks
+- 手写 `trusted_hash` 不行——那是 Codex 自己算的 sha256，算法没有公开
+- `--dangerously-bypass-hook-trust` 只对**单次调用**生效，落不了盘（探针用的就是它）
+
+所以安装提示里必须给出**那条命令本身**（见 `src/codex.mjs` 的 `codexBin`）：
+
+```bash
+/Applications/ChatGPT.app/Contents/Resources/codex
+```
+
+跑起来点同意，直接退出即可。信任是写进 `config.toml` 持久化的，之后
+桌面 App 和 VS Code 的会话一起生效。
+
+**但桌面 App 要重启一次（⌘Q，不是关窗口）。** 它不像 CLI 那样每次会话起一个
+新进程，而是把所有会话都跑在一个常驻的 app-server daemon 里
+（`codex … app-server`），那个 daemon **启动时读一次配置就不再读了**。
+
+这一条咬过两次，两次的形状一模一样——都是「配置改动晚于进程启动」：
+
+| | 进程起于 | 配置改于 | 结果 |
+|---|---|---|---|
+| ChatGPT.app 本体 | 14:58 | 15:02 写 hooks | 从没弹过信任提示 |
+| app-server daemon | 15:23 | 15:34 写 trust | CLI 同步，桌面不同步 |
+
+判据很直接：比 `ps -eo pid,lstart,command \| grep app-server` 的启动时间和
+`~/.codex/config.toml` 的 mtime，后者晚就得重启。
+
+rollout 第一行的 `originator` 能区分是哪条路来的：`codex-tui`（CLI）
+/ `Codex Desktop`、`codex_work_desktop`（桌面 App）。
+
+### 3.2 Codex 把信任记录写进**我们的哨兵块里面**
+
+实测到的布局：
+
+```
+# >>> clamicro >>> …
+[[hooks.SessionStart]] …        ← 我们写的
+[hooks.state]                   ← Codex 自己追加的，紧贴 END 之前
+[hooks.state."…:session_start:0:0"]
+trusted_hash = "sha256:…"
+# <<< clamicro <<<
+```
+
+今天无害：那些 trust 记录本来就是给 clamicro 自己的 hooks 用的，
+`uninstall` 一并删掉是对的。
+
+**但 `[hooks.state]` 是一张共用的表。** 用户以后装了第二个带 hooks 的工具
+并信任了它，Codex 很可能把那条记录也追加进同一张表——而那张表落在我们的
+哨兵块里面。那时卸载 clamicro 会顺手删掉**别人的**信任记录，没有任何提示，
+对方只会看到自己的 hooks 突然静默失效。
+
+`patchConfig` 的纪律是「块外一个字节都不碰」，但没预料到会有别人往块**内**写。
+**尚未修复**，记在这里免得忘。
+
+### 3.5 没有 `Stop`：会话走不出「运行中」
+
+0.149 的 hook 事件枚举一共十个（二进制里 snake_case / PascalCase 两份互相印证）：
+
+```
+pre_tool_use   permission_request  post_tool_use   pre_compact   post_compact
+session_start  session_end         user_prompt_submit
+subagent_start subagent_stop
+```
+
+**没有 `stop`。** 本文最初照 0.147 的说法写着「事件名一字不差（… Stop …）」，
+那是错的——`CODEX_HOOKS` 里也真的接过 `[[hooks.Stop]]`。
+
+错得最阴的地方是 **Codex 照样给它发信任凭证**（配置里会出现
+`[hooks.state."…:stop:0:0"]`），所以从任何一个角度看它都像装好了，
+而那条 hook 一辈子不会响。表现是：Codex 会话收到 `user-prompt-submit`
+之后**永远停在「运行中」**，跑成功了也一样，只能等 `SessionEnd` 或者
+30 分钟后被 `sweepStale` 标成陈旧。真机现场：`task_complete` 15:35:39 落盘，
+看板 15:38 还在转圈。
+
+Codex 根本没有回合级的结束事件，这是硬限制。补救是**跟读它的 rollout
+JSONL**（`~/.codex/sessions/YYYY/MM/DD/rollout-<ISO>-<session_id>.jsonl`），
+里面有完整的回合线：
+
+```
+{"type":"event_msg","payload":{"type":"task_started","turn_id":…}}
+{"type":"event_msg","payload":{"type":"task_complete","turn_id":…,
+                               "last_agent_message":…,"error":{"message":…}}}
+```
+
+`task_complete` **带 error 字段**，所以「正常结束」和「失败」能区分，不用靠
+超时猜——额度耗尽走的就是这条。实现见 `src/codex-tail.mjs`，状态机落点是
+`state.mjs` 的 `turn-start` / `turn-end`（**故意不在 `HOOK_EVENTS` 里**，
+所以进不了 `/hooks/*` 路由，局域网上伪造不出来）。
+
+为什么读文件不接 `codex app-server proxy`：那是一条有状态的双向协议连接，
+还要依赖跟桌面 App 共用的常驻 daemon。跟读文件是只读的，读错了最坏也只是
+退回今天这个「状态不更新」，不会把别人的会话搞坏，零依赖也保得住。代价是
+rollout 属于 Codex 内部格式、没有版本承诺——所以认不得的字段一律当没看见。
 
 ## 4. 验收：审批闭环（未完成）
 
@@ -161,7 +268,9 @@ PermissionRequest 压根不会触发。探针会把这一条单独报出来；�
 | 文件 | 改了什么 |
 |---|---|
 | `src/agents.mjs` | 加 `codex` 能力条目（当前只开镜像）、`QUOTA.NONE`、按 `~/.codex/config.toml` 探测 |
-| `src/codex.mjs` | 新增。往 config.toml 写/摘哨兵块、校验、安装流程 |
+| `src/codex.mjs` | 新增。往 config.toml 写/摘哨兵块、校验、安装流程、`codexBin` |
+| `src/codex-tail.mjs` | 新增。跟读 rollout JSONL，补回 Codex 没有的回合结束事件（§3.5）|
+| `src/state.mjs` | 加 `turn-start` / `turn-end` 两个**内部**事件（不在 `HOOK_EVENTS` 里）|
 | `bin/codex-hook.sh` | 新增。中继：stdin → `/hooks/*?agent=codex` → stdout |
 | `bin/session-start.sh` | 多接一个可选参数（后端名），其余不变 |
 | `src/routes/hooks.mjs` | 认 `?agent=`；审批回包多一个 codex 分支 + `X-Clamicro-Decision` 响应头 |
