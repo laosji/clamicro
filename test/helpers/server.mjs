@@ -32,21 +32,48 @@ export async function startServer({ port = 8791, env = {} } = {}) {
   const logs = []
   child.stdout.on('data', (d) => logs.push(String(d)))
   child.stderr.on('data', (d) => logs.push(String(d)))
+  let died = null
+  child.on('exit', (code, signal) => { died = signal ? `信号 ${signal}` : `退出码 ${code}` })
 
   const base = `http://127.0.0.1:${port}`
   const deadline = Date.now() + 8000
   let up = false
+  let stranger = false
   while (Date.now() < deadline) {
+    if (died) break
     try {
       const r = await fetch(`${base}/healthz`)
-      if (r.ok) { up = true; break }
+      const body = r.ok ? await r.json() : null
+      /**
+       * **必须认 pid**，不能只看 healthz 通不通。
+       *
+       * 端口被别的进程占着时，healthz 照样回 200——应答的是那个陌生进程，
+       * 而我们的子进程正因为 EADDRINUSE 在退出。原来这里以为起来了，
+       * 下一行去读自己临时 HOME 里的 config.json，撞上一句
+       * `ENOENT: ... config.json`（子进程还没来得及写完就死了）。
+       *
+       * 那句报错指向的地方跟真正的原因毫无关系。这个坑是真踩过的：手动起
+       * 了一个服务占着 8799，两条 codex-tail 的测试立刻开始报「文件不存在」,
+       * 看起来像是配置写入坏了，查了半天才发现是端口。
+       *
+       * pid 这一招不是新发明的：CLI 在 kill 之前用的就是它，理由一模一样
+       * ——「端口上这个进程真的是我要找的那个吗」。见 server.mjs 的 /healthz。
+       */
+      if (body?.ok && body.pid === child.pid) { up = true; break }
+      if (body?.ok) stranger = true
     } catch { /* 还没起来 */ }
     await new Promise((r) => setTimeout(r, 80))
   }
   if (!up) {
     child.kill('SIGKILL')
     rmSync(home, { recursive: true, force: true })
-    throw new Error(`服务没起来。日志：\n${logs.join('')}`)
+    const why = stranger
+      ? `端口 ${port} 被**别的进程**占着（healthz 应答的不是我们起的那个）。`
+        + `test/ 下每个文件的端口必须唯一，也别在跑测试时手动起服务。`
+      : died
+        ? `服务起来就退了（${died}）。`
+        : '服务没起来。'
+    throw new Error(`${why}日志：\n${logs.join('')}`)
   }
 
   const cfgFile = join(home, '.claude', 'clamicro', 'config.json')

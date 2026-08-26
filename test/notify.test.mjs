@@ -19,10 +19,22 @@ const spy = () => {
   fn.calls = calls
   return fn
 }
-const setup = (notifyCfg) => {
+/**
+ * `focus` 必须注入。
+ *
+ * 不注入的话 makeNotifier 回退到 focusActive()，那玩意儿读的是**这台机器
+ * 此刻的专注模式**（~/Library/DoNotDisturb/DB/Assertions.json）。于是
+ * 「消息原样透传」那条会在专注开着时收到一个多出来的 `silent: true` 而变红
+ * ——真机上抓到的：凌晨跑测试，Personal Time 自动开了，一条跟专注毫无关系
+ * 的断言就此失败。
+ *
+ * 测试的结果不该取决于跑它的人当时开没开勿扰。专注本身的行为由下面
+ * 「专注模式：静音但不隐藏」那一组覆盖，那里是显式注入 true/false 的。
+ */
+const setup = (notifyCfg, focus = () => false) => {
   const notch = spy()
   const banner = spy()
-  const notify = makeNotifier({ notify: { macNotify: true, ...notifyCfg } }, { notch, banner })
+  const notify = makeNotifier({ notify: { macNotify: true, ...notifyCfg } }, { notch, banner, focus })
   return { notify, notch, banner }
 }
 const MSG = { title: 'Clamicro', icon: '⚠️', subtitle: 'proj 需要审批', body: 'rm -rf ./x' }

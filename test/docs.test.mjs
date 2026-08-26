@@ -77,3 +77,120 @@ test('文档不得声称自动通过的操作「不推送」', async (t) => {
     })
   }
 })
+
+/**
+ * 架构文档里那张能力矩阵，必须和 src/agents.mjs 的 AGENTS 逐格一致。
+ *
+ * 这条的理由跟这个文件里其它几条一模一样：**文档说错了永远不会让任何测试
+ * 变红**。而这张表比超时值更容易过期——它本来就是为「会变」而存在的：
+ * Codex 的 approve 一旦真机验收通过就要从 ✗ 翻成 ✓，DSH 的 cancel/inbox
+ * 接上控制端点之后同理。
+ *
+ * 说错的后果也更重。这张表是**给下一个改代码的人看的判断依据**：他据此
+ * 决定「这个后端能不能加暂停按钮」。文档说能而代码说不能，产出的就是一个
+ * 点了没反应的按钮——正是 agents.mjs 顶上那段注释花一整屏在防的东西。
+ */
+test('架构文档的能力矩阵和 AGENTS 一致', async (t) => {
+  const { AGENTS } = await import('../src/agents.mjs')
+  const doc = read('docs/architecture.zh-CN.md')
+  const yes = (v) => (v ? '✓' : '✗')
+
+  for (const [key, cap] of Object.entries(AGENTS)) {
+    await t.test(`${cap.label}`, () => {
+      // 认表里那一行：以 | 后端名 | 开头，一直到行尾
+      const row = doc.split('\n').find((l) => l.trim().startsWith(`| ${cap.label} |`))
+      assert.ok(row, `文档的能力矩阵里没有 ${cap.label} 这一行`
+        + `（新加了后端？那 §7 那四个问题也该回答一遍）`)
+
+      const cells = row.split('|').map((c) => c.trim()).filter(Boolean)
+      const [, approve, pause, cancel, inbox, quota] = cells
+      assert.equal(approve, yes(cap.approve), `${cap.label} 的 approve 写反了`)
+      assert.equal(pause, yes(cap.pause), `${cap.label} 的 pause 写反了`)
+      assert.equal(cancel, yes(cap.cancel), `${cap.label} 的 cancel 写反了`)
+      assert.equal(inbox, yes(cap.inbox), `${cap.label} 的 inbox 写反了`)
+      assert.equal(quota, cap.quota.toUpperCase(), `${cap.label} 的额度形态写错了`)
+    })
+  }
+
+  /**
+   * 只看能力矩阵那一张表。
+   *
+   * 不能拿「含 ✓/✗ 的行」去全文筛：§3 那张「每条边的生产者」同样用 ✗ 填格，
+   * 而它的第一列是转移名不是后端名。第一版就是这么写的，于是「→ Paused」
+   * 被当成了一个不存在的后端。
+   */
+  const capTable = () => {
+    const lines = doc.split('\n')
+    const head = lines.findIndex((l) => l.trim().startsWith('| | approve |'))
+    assert.notEqual(head, -1, '找不到能力矩阵的表头，是不是改列名了？')
+    // 表头 + 分隔行之后，一直取到表结束（空行或不再是表格行）
+    const rows = []
+    for (const l of lines.slice(head + 2)) {
+      if (!l.trim().startsWith('|')) break
+      rows.push(l)
+    }
+    return rows
+  }
+
+  await t.test('表里没有多出来的后端', () => {
+    const labels = new Set(Object.values(AGENTS).map((a) => a.label))
+    for (const row of capTable()) {
+      const label = row.split('|')[1].trim()
+      assert.ok(labels.has(label),
+        `文档里的 ${label} 在 AGENTS 里不存在——写成计划了？`
+        + `这张表只描述现在能做到的，计划写进 §7`)
+    }
+  })
+
+  await t.test('每个后端都在表里，一个不落', () => {
+    const listed = new Set(capTable().map((r) => r.split('|')[1].trim()))
+    for (const cap of Object.values(AGENTS)) {
+      assert.ok(listed.has(cap.label), `${cap.label} 不在能力矩阵里`)
+    }
+  })
+
+  await t.test('文档里没有「?」这一档', () => {
+    // 能力表的规矩是「没验证过的按不存在处理」。一个问号会被读成
+    // 「去试试看」，而试的方式就是把那条没验证过的路径接上生产
+    assert.doesNotMatch(capTable().join('\n'), /[?？]/,
+      '能力矩阵里不能有「?」——没验证过就是 ✗')
+  })
+})
+
+/**
+ * 架构文档里指到的文件和符号，必须真的存在。
+ *
+ * 这条是被**这份文档自己**推出来的：它原来用 `文件:行号` 引用代码，而同一轮
+ * 里改 src/state.mjs 加了一个状态档，一口气把五处行号顶跑了——没有任何测试
+ * 会因此变红，读文档的人点过去看到的是毫不相干的一行。
+ *
+ * 所以引用改成「文件 + 符号名」，并由这条测试钉住。符号名不会因为上面加了
+ * 几行就失效，而它一旦被改名，这里就红。
+ */
+test('架构文档引用的文件和符号都还在', async (t) => {
+  const doc = read('docs/architecture.zh-CN.md')
+  // [显示文本](../相对路径) 后面可选地跟着「的 `符号`」
+  const re = /\[[^\]]+\]\(\.\.\/([^)]+)\)(?:\s*的\s*`([^`]+)`)?/g
+
+  let n = 0
+  for (const [, rel, symbol] of doc.matchAll(re)) {
+    n++
+    await t.test(`${rel}${symbol ? ` 的 ${symbol}` : ''}`, () => {
+      let src
+      try {
+        src = read(rel)
+      } catch {
+        assert.fail(`文档指向 ${rel}，但这个文件不在了`)
+      }
+      if (!symbol) return
+      // 分支名（turn-usage / permission-request）和标识符（noteControl）都在
+      // 源码里以原样出现，直接搜字符串就够——这里要挡的是「改名了没同步」
+      assert.ok(src.includes(symbol),
+        `文档说 ${rel} 里有 ${symbol}，但搜不到。改名了就把文档一起改`)
+    })
+  }
+  await t.test('至少解析到了一批引用', () => {
+    // 正则写坏了会一条都匹配不到，然后这个测试永远绿——那比没有更糟
+    assert.ok(n >= 15, `只解析到 ${n} 条引用，正则是不是失效了？`)
+  })
+})

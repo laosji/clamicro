@@ -135,10 +135,20 @@ control.on('change', (sid, st) => {
     broadcast('session', s)
   }
 })
+/**
+ * 「此刻真的有工具调用挂在拦截点上」。
+ *
+ * 这一条是 Paused 的**第二半**：点了暂停状态立刻翻成 Paused，但 agent 还在
+ * 跑手头这一步，直到下一个 PreToolUse 撞上来才真停住。两件事在界面上必须
+ * 分得开，否则「已暂停」这三个字有一段时间是假的。
+ *
+ * 取值走 isHeld() 而不是写死 true：事件两个方向都会来（见 control.mjs 的
+ * #release / #drop），写死的那一版会让标记再也清不掉。
+ */
 control.on('held', (sid) => {
   const s = store.session(sid)
   if (s) {
-    s.held = true
+    s.held = control.isHeld(sid)
     broadcast('session', s)
   }
 })

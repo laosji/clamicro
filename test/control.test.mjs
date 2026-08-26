@@ -124,3 +124,63 @@ test('状态变化会广播出去（UI 靠它更新）', async (t) => {
     c.resume('s')
   })
 })
+
+/**
+ * `held` 事件必须**两个方向都发**。
+ *
+ * 这条是被一个半接通的功能推出来的：`gate()` 挂住时会 emit('held')，
+ * server.mjs 据此把 `s.held` 置为 true——而释放的时候**什么都不发**，
+ * 于是那个标记再也清不掉。一个曾经被暂停过的会话，此后永远显示「正卡在
+ * 工具调用前」，哪怕早就恢复了。
+ *
+ * 当时没人发现，是因为没有任何前端读 `s.held`。接上之后它就是一条持续
+ * 说假话的界面——正是这个项目最不想要的那类故障。
+ */
+test('held 事件在挂住和释放时都会发', async () => {
+  const c = new ControlStore()
+  /** @type {boolean[]} 每次 held 事件发生时的真实挂起状态 */
+  const seen = []
+  c.on('held', (sid) => seen.push(c.isHeld(sid)))
+
+  c.pause('s')
+  const gated = c.gate('s')
+  await tick()
+  assert.deepEqual(seen, [true], '挂住时发一次，且此刻确实挂着')
+
+  c.resume('s')
+  await gated
+  assert.deepEqual(seen, [true, false], '释放时也要发，且此刻已经不挂了')
+  assert.equal(c.isHeld('s'), false)
+})
+
+test('取消消费掉挂起时同样会发 held', async () => {
+  const c = new ControlStore()
+  const seen = []
+  c.on('held', (sid) => seen.push(c.isHeld(sid)))
+
+  c.pause('s')
+  const gated = c.gate('s')
+  await tick()
+  c.cancel('s')
+  const out = await gated
+
+  assert.equal(out?.continue, false, '取消要真的挡下这一步')
+  assert.deepEqual(seen, [true, false])
+})
+
+test('超时自己放行之后 held 也要落回 false', async () => {
+  // MAX_HOLD_MS 是分钟级的，不等它；直接用 #drop 那条路——forget() 走的是
+  // #release，超时走的是 #drop，两条都得发，所以两条都要有断言
+  const c = new ControlStore()
+  const seen = []
+  c.on('held', (sid) => seen.push(c.isHeld(sid)))
+
+  c.pause('s')
+  const gated = c.gate('s')
+  await tick()
+  c.forget('s')
+  await gated
+
+  assert.deepEqual(seen, [true, false])
+  assert.equal(c.isHeld('s'), false)
+})

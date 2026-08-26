@@ -149,8 +149,14 @@ export const AGENTS = {
      * 谎称「该后端不上报用量」。
      *
      * 同一条事件里还有 rate_limits.primary 的窗口百分比（used_percent /
-     * window_minutes: 43200 / resets_at）。没用上：现有的 limits 模型是写死的
-     * five_hour + seven_day，而 Codex 是单个 30 天窗口，塞不进去。
+     * window_minutes: 43200 / resets_at），**也用上了**，但走的不是 limits：
+     * 那个字段的形状写死了 five_hour + seven_day，而 Codex 是单个 30 天窗口，
+     * 塞不进去。所以另开了一条 store.agentLimits（agent -> windows[]），
+     * codex-tail.mjs 的 readWindows 负责翻译，home.html 的 agentUsage 负责显示。
+     *
+     * 注意这两样是**绑在一起**的：agentUsage 只在 `quota === 'tokens'` 这个
+     * 分支里读 windows。也就是说这里改成别的档位，窗口会跟着一起消失，
+     * 而那不会有任何测试变红。
      */
     quota: QUOTA.TOKENS,
     cancelNote: null,

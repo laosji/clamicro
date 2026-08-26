@@ -106,6 +106,17 @@ export class ControlStore extends EventEmitter {
     return null // resume / timeout 都放行
   }
 
+  /**
+   * `held` 事件**两个方向都发**。
+   *
+   * 原来只在挂住的时候发一次，于是 server.mjs 那边把 `s.held` 置 true 之后
+   * 再也没人清——一个曾经被挂住过的会话，此后永远带着「正卡在拦截点上」这
+   * 个标记，哪怕早就 resume 了。当时没人发现是因为**没有任何前端读它**；
+   * 一旦读了，那就是一条持续说假话的界面。
+   *
+   * 所以发的是「挂起集合变了」这件事，值由监听方自己去 isHeld() 取——
+   * 事件里带布尔的话，release 和 drop 各写一遍 false，早晚有一处漏掉。
+   */
   #release(sessionId, outcome) {
     const set = this.#waiters.get(sessionId)
     if (!set || !set.size) return 0
@@ -116,6 +127,7 @@ export class ControlStore extends EventEmitter {
     }
     set.clear()
     this.#waiters.delete(sessionId)
+    this.emit('held', sessionId)
     return n
   }
 
@@ -124,5 +136,6 @@ export class ControlStore extends EventEmitter {
     if (!set) return
     set.delete(entry)
     if (!set.size) this.#waiters.delete(sessionId)
+    this.emit('held', sessionId)
   }
 }

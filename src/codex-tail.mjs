@@ -183,10 +183,12 @@ export function parseLine(line) {
      * 那句话对 hook 通道成立（payload 里确实没有），但 TokenCount 就落在
      * rollout 里，跟读这条路看得见。
      *
-     * 只取累计 token（对上 QUOTA.TOKENS，DSH 走的是同一条渲染路径）。
-     * 同一条事件里还有 rate_limits.primary 的窗口百分比，但现有的 limits
-     * 模型是写死的 five_hour / seven_day，而 Codex 是单个 30 天窗口
-     * （window_minutes: 43200），塞不进去——那要单独一步泛化。
+     * 累计 token 对上 QUOTA.TOKENS，DSH 走的是同一条渲染路径。
+     *
+     * 同一条事件里还有 rate_limits.primary 的窗口百分比，**这里一并取走**
+     * （readWindows）。它进不了 store 的 limits——那个字段的形状写死了
+     * five_hour / seven_day，而 Codex 是单个 30 天窗口（window_minutes:
+     * 43200）。所以走的是另一条：store.agentLimits，按后端存一组窗口。
      *
      * 额度耗尽时 info 整个是 null（实测），那时没有数字可用，返回 null
      * 让它当没发生：报一个 0 比不报更糟，界面会显示「累计 0 tok」。

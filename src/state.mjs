@@ -8,6 +8,22 @@ export const STATE = {
   IDLE: 'Idle',
   RUNNING: 'Running',
   WAITING_APPROVAL: 'Waiting Approval',
+  /**
+   * agent 停下来了，**在终端里等你打字**。
+   *
+   * 从 Idle 里拆出来的。原来两者共用一档，而它们对用户的意思相反：
+   * Idle 是「会话开着，没事发生」——不用管；Waiting Input 是「它卡住了，
+   * 在等你」——你不去终端它就一直不动。合在一起的后果是手机上看不出
+   * 「要不要现在起身」，而那恰恰是这个产品唯一想回答的问题。
+   *
+   * 只有 Claude Code 产生这一档（notification 的 idle_prompt）。别的后端
+   * 没有对应事件，它们的会话永远不会进这一档——这不是缺陷，是那条链路
+   * 确实没有这个信息，见 docs/architecture.zh-CN.md §3。
+   *
+   * 不进 sweepStale：那个扫的是「说在跑却半天没动静」，而这一档是**如实
+   * 地不动**，标成陈旧等于把一个准确的状态说成可疑的。
+   */
+  WAITING_INPUT: 'Waiting Input',
   PAUSED: 'Paused',
   DONE: 'Done',
   ERROR: 'Error',
@@ -324,7 +340,9 @@ export class Store extends EventEmitter {
           this.#touch(s, { state: STATE.WAITING_APPROVAL })
           this.#log(id, 'permission-prompt', truncate(payload.message ?? '', 200))
         } else if (kind === 'idle_prompt') {
-          this.#touch(s, { state: STATE.IDLE, sub_state: null })
+          // 不是 IDLE：那一档的意思是「没事发生」，而这里是「它在等你打字」。
+          // 见 STATE.WAITING_INPUT 上面那段
+          this.#touch(s, { state: STATE.WAITING_INPUT, sub_state: null })
           this.#log(id, 'idle', truncate(payload.message ?? '', 200))
         } else {
           this.#log(id, 'notification', `${kind}: ${truncate(payload.message ?? '', 160)}`)

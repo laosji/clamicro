@@ -476,3 +476,45 @@ test('完成状态带上额度——任务跑完正是你会看一眼的时刻',
     assert.equal(notify.tint, 'ok')
   })
 })
+
+/**
+ * `idle_prompt` 走的是 Waiting Input，不是 Idle。
+ *
+ * 这两档原来是同一个，而它们对用户的意思相反：Idle 是「会话开着，没事发生」
+ * ——不用管；Waiting Input 是「它停下来在等你打字」——你不去终端它就一直
+ * 不动。合在一起的后果是手机上看不出「要不要现在起身」。
+ */
+test('notification 的 idle_prompt 落到 Waiting Input', () => {
+  const s = new Store()
+  s.applyHook('session-start', { session_id: 'x' }, {})
+  assert.equal(s.session('x').state, STATE.IDLE, '刚开始是 Idle')
+
+  s.applyHook('user-prompt-submit', { session_id: 'x', prompt: '跑一下' }, {})
+  assert.equal(s.session('x').state, STATE.RUNNING)
+
+  s.applyHook('notification',
+    { session_id: 'x', notification_type: 'idle_prompt', message: '等待输入' }, {})
+  assert.equal(s.session('x').state, STATE.WAITING_INPUT,
+    'agent 在等人打字，这跟「没事发生」是两回事')
+  assert.notEqual(STATE.WAITING_INPUT, STATE.IDLE)
+})
+
+test('Waiting Input 不会被 sweepStale 标成陈旧', () => {
+  // 陈旧扫的是「说在跑却半天没动静」。Waiting Input 是**如实地不动**，
+  // 标成可疑等于把一个准确的状态说成有问题的
+  const s = new Store()
+  s.applyHook('session-start', { session_id: 'x' }, {})
+  s.applyHook('user-prompt-submit', { session_id: 'x', prompt: '跑一下' }, {})
+  s.applyHook('notification', { session_id: 'x', notification_type: 'idle_prompt' }, {})
+  s.sweepStale(0)
+  assert.equal(s.session('x').stale_since, null)
+})
+
+test('等到人真的回话了，就回 Running', () => {
+  const s = new Store()
+  s.applyHook('session-start', { session_id: 'x' }, {})
+  s.applyHook('notification', { session_id: 'x', notification_type: 'idle_prompt' }, {})
+  assert.equal(s.session('x').state, STATE.WAITING_INPUT)
+  s.applyHook('user-prompt-submit', { session_id: 'x', prompt: '接着来' }, {})
+  assert.equal(s.session('x').state, STATE.RUNNING, '这一档不能是死胡同')
+})

@@ -149,7 +149,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({'&':'&amp;','<':'
 const KIND = {
   'session-start': '会话开始', prompt: '提问', tool: '工具', 'tool-error': '工具失败',
   'approval-requested': '请求审批', 'permission-prompt': '权限提示', control: '控制',
-  'quota-warn': '额度预警', stop: '完成', error: '出错', idle: '空闲',
+  'quota-warn': '额度预警', stop: '完成', error: '出错', idle: '等你回话',
   notification: '通知', 'session-end': '会话结束',
 };
 
@@ -221,7 +221,10 @@ function render(data) {
     $('btnPause').className = (paused ? 'go' : '') + (cap.pause ? '' : ' hidden');
     // Claude Code 没有运行时暂停原语，说清楚才不会以为点了没反应
     let note = '';
-    if (paused && cap.pause) note = s.held
+    // 取消排在最前：暂停中再点取消是常见操作，这时该说的是取消那句
+    if (s.control === 'cancelled' && (s.state === 'Running' || s.state === 'Paused')) {
+      note = '已请求取消 — 会在下一个工具调用前终止本轮，当前这一步仍会跑完';
+    } else if (paused && cap.pause) note = s.held
       ? '已停住 — 正卡在一个工具调用前，点恢复继续'
       : '已请求暂停 — 会在下一个工具调用前停住，当前这一步仍会跑完';
     /* 「只能审批」这句话是有前提的：得先真的能审批。Codex 现在连审批都没开，
