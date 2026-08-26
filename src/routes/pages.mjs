@@ -389,8 +389,9 @@ export function pageRoutes(ctx) {
       return true
     }
 
-    // ---- 静态资源（手势模块，两个页面共用）----
-    const asset = path.match(/^\/ui\/(swipe\.(?:js|css))$/)
+    // ---- 静态资源（页面间共用的模块）----
+    // swipe.*  手势；agents.js  后端 logo 与状态中文名（三个页面共用）
+    const asset = path.match(/^\/ui\/(swipe\.(?:js|css)|agents\.js)$/)
     if (req.method === 'GET' && asset) {
       const body = readFileSync(join(HERE, 'ui', asset[1]), 'utf8')
       res.writeHead(200, {
