@@ -966,13 +966,27 @@ function activityTicker(sid) {
  * **断线时不显示**：那时所有数字都是断开前的旧值，把它摆在顶部等于
  * 拿旧数据冒充当前状态，而这正是这个项目反复强调不能做的事。
  */
-function renderTopUsage() {
-  const el = $('topusage');
-  const off = isDisconnected();
-  const idle = !off && !pending.length
+/**
+ * 「此刻没有正在发生的事」。
+ *
+ * 抽出来是因为**有两个消费者**：header 下面那条用量，和底部那行 skill 计数。
+ * 两处都遵守同一条规矩——参考信息在有事发生时让位（见 renderTopUsage）——
+ * 而各抄一份判据，早晚有一处漏掉某个状态，然后那一处会在最忙的时候
+ * 继续占着位置。
+ *
+ * 「刚完成」也算有事：那一分钟里你多半正想看结果。
+ */
+function isIdleView() {
+  return !isDisconnected() && !pending.length
     && !sessions.some((s) => s.state === 'Error')
     && !sessions.some((s) => s.state === 'Running' || s.state === 'Waiting Approval' || s.state === 'Paused')
     && !sessions.some((s) => s.state === 'Done' && Date.now() - s.updated_at < 60_000);
+}
+
+function renderTopUsage() {
+  const el = $('topusage');
+  const off = isDisconnected();
+  const idle = isIdleView();
 
   /**
    * 三种情况不显示这条：
@@ -2068,8 +2082,18 @@ function agentUsage(kind, cap, mine) {
  * 但**只要有一档数不出来就得画**——那是故障信号，恰恰不能藏。
  */
 function skillLine() {
+  /**
+   * **有事发生时整块不画。**
+   *
+   * 这是这一页的既有规矩，写在 renderTopUsage 上面：主控台要让给「正在
+   * 发生的事」，参考信息降级。第一版没守——于是一个静止的数字挂在
+   * 「运行中 · 思考中」正下方，跟滚动的工具调用抢注意力，而它跟这一刻
+   * 要你判断的事一点关系都没有。
+   *
+   * 装了几个 skill 是**一天都不会变的事实**，它可以等你闲下来再说。
+   */
   const sk = cfg?.skills;
-  if (!sk) return '';
+  if (!sk || !isIdleView()) return '';
   const parts = [];
   if (sk.user !== null && sk.user !== undefined) { if (sk.user) parts.push(`你的 ${sk.user}`); }
   else parts.push('你的 数不出来');
