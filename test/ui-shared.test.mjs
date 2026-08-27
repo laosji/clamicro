@@ -146,3 +146,45 @@ test('agents.js 的两张表覆盖了代码里真实存在的枚举', async (t) 
     assert.equal(win.stateLabel('Paused'), '已暂停')
   })
 })
+
+/**
+ * 渲染 `sub_state` / `state` 的地方**必须过那张表**，不能直接 esc 原值。
+ *
+ * 抓到的实例：home.html 的主控台写 `esc(s0.sub_state)`，于是屏幕上是
+ * `Editing`，而正下方的会话卡片写着「编辑中」——**同一个会话、同一屏、
+ * 两种叫法**。这个文件开头那段讲的就是这类事故，可它只钉了「表定义在一处」，
+ * 没钉「用到的地方都去查表」，于是漏了这一处。
+ *
+ * 加 'Using Skill' 那一档时才被看见：英文夹在中文里太扎眼，而
+ * Editing / Thinking 长得像专有名词，错了好久没人当回事。
+ */
+test('渲染状态名的地方都查表，不直接输出原值', async (t) => {
+  for (const page of PAGES) {
+    const src = read(page)
+    await t.test(page, () => {
+      /*
+       * 找 `esc(<任意>.sub_state)` 和 `esc(<任意>.state)` 这种裸输出。
+       * 查表的写法是 esc(subStateLabel(x)) / esc(stateLabel(x, y))，
+       * 括号里第一个 token 不会是 `.state` 结尾的表达式。
+       *
+       * className 那类用法不算——`esc(s.state).replace(...)` 出来的是 CSS
+       * 类名，本来就该用英文原值。所以只在**没有紧跟 .replace** 时报错。
+       */
+      /*
+       * 先把注释剥掉再扫。第一版没剥，结果被**修复这个 bug 时写的注释**绊倒
+       * ——那段注释里引用了旧代码 `esc(s0.sub_state)` 当反面教材。
+       * 一条会因为「你把原因写下来」而变红的测试是坏测试：它逼着人为了让
+       * 测试过而删掉解释。
+       *
+       * `(?<!:)` 是为了别把字符串里的 `http://` 当成行注释开头。
+       */
+      const code = src.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(?<!:)\/\/[^\n]*/g, ' ')
+      const bare = [...code.matchAll(/esc\(\s*([\w.?[\]]*\.(?:sub_state|state))\s*\)(\s*\.replace)?/g)]
+        .filter((m) => !m[2])
+        .map((m) => m[1])
+      assert.deepEqual(bare, [],
+        `${page} 直接输出了 ${bare.join(', ')} —— 该用 stateLabel() / subStateLabel()，` +
+        `否则同一个状态在这一页和别处会有两种叫法`)
+    })
+  }
+})

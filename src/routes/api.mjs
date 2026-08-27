@@ -4,6 +4,7 @@ import { requireDeps } from './deps.mjs'
 import { MAX_APPROVAL_TIMEOUT_MS, MIN_APPROVAL_TIMEOUT_MS } from '../config.mjs'
 import { notifyHealth } from '../notify.mjs'
 import { AGENTS, capOf, detectAgents } from '../agents.mjs'
+import { countSkills } from '../skills.mjs'
 import { installedInfo } from '../paths.mjs'
 
 /**
@@ -270,6 +271,20 @@ export function apiRoutes(ctx) {
         // 本机装了哪些后端。是个**数组**——多个后端同时在用是常态，不是边界情况。
         // 只用来决定空状态的文案；谁在跑以上报为准，见 src/agents.mjs 的注释
         detectedAgents: detectAgents(),
+        /**
+         * 这台机器上有多少个 skill。**两个数，不是一个。**
+         *
+         * 「已安装」在盘上不是一个数：盘上 SKILL.md 有 83 个，其中 31 个在
+         * marketplaces 底下——那是商店目录，压根没装。合成一个总数之后，
+         * 屏幕上就再也分不出「你自己那几个还在不在」和「插件那些还在不在」，
+         * 而那是两件独立会坏的事。理由写全在 src/skills.mjs 的文件头。
+         *
+         * 每一档都可能是 null——null 是**数不出来**，不是 0。前端必须把这两种
+         * 分开说，否则又是一次「故障显示成正常但没有内容」。
+         *
+         * 不含任何凭证：两个整数加一串插件名。
+         */
+        skills: countSkills(),
         // 提醒通道的健康状况。全是计数和错误文本，不含任何凭证。
         // 通道死掉时，高危审批会全部走到超时被拒、普通审批会照常自动放行，
         // 而你收不到任何一条——这个字段是唯一能让那件事浮出来的东西

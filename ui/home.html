@@ -591,6 +591,13 @@
   }
   .afilter button.on{background:var(--run); color:#000}
   /* 被筛掉多少必须说出来，否则收窄过的列表和「就这么多」长得一样 */
+  /* skill 计数。低权重、居中、和 .ahidden 一个量级——它是参考信息 */
+  .skillsum{
+    display:flex; gap:8px; justify-content:center; align-items:baseline;
+    margin:18px 0 4px; font-size:11.5px; color:var(--dim);
+  }
+  .skillsum .lbl{font-family:ui-monospace,Menlo,monospace; opacity:.75}
+  .skillsum .n{white-space:nowrap}
   .ahidden{margin-top:14px; font-size:12.5px; color:var(--dim); text-align:center}
   /* 发消息失败的说明。用警告色而不是灰色：它要解释「你的字还在，但没发出去」 */
   .sayerr{margin-top:10px; font-size:12.5px; line-height:1.55; color:var(--warn)}
@@ -1244,10 +1251,21 @@ function statusConsole(only) {
     // 这一段不说话的话，界面看起来就是「点了没反应」
     cls = 'is-run'; dotLabel = stateLabel(s0.state, s0);
     right = s0.turn_started_at ? `<span class="ctag">${elapsed(s0.turn_started_at)}</span>` : '';
-    // sub_state 是从 tool_name 推导的（Thinking / Editing / Running Command…），
-    // 不是编的；没有就只说「进行中」，不假装知道细节
+    /*
+     * sub_state 是从 tool_name 推导的（Thinking / Editing / Running Command…），
+     * 不是编的；没有就只说「进行中」，不假装知道细节。
+     *
+     * **必须过 subStateLabel()。** 这里原来是 `esc(s0.sub_state)` 直接上，
+     * 于是主控台写着 `Editing`，而它正下方的会话卡片写着「编辑中」——同一个
+     * 会话、同一屏、两种叫法。ui/agents.js 那份共享表的开头就写着这类事故的
+     * 由来（「靠注释维持的一致性…破了之后的表现不是报错，是同一个会话在两个
+     * 页面上叫不同的名字」），而这一处压根没去用那张表。
+     *
+     * 加 'Using Skill' 那档时才暴露出来——英文夹在中文里太扎眼。前面几档
+     * （Editing / Thinking）一直是错的，只是长得像个专有名词，没人当回事。
+     */
     body = `<div class="crun">
-      <span class="cf">${esc(dirOf(s0))}${s0.sub_state ? ' · ' + esc(s0.sub_state) : ''}</span>
+      <span class="cf">${esc(dirOf(s0))}${s0.sub_state ? ' · ' + esc(subStateLabel(s0.sub_state)) : ''}</span>
       <span class="tdots"><i></i><i></i><i></i></span>
     </div>${activityTicker(s0.session_id)}`;
     meta = s0.control === 'cancelled'
@@ -1864,6 +1882,10 @@ function renderHome() {
 
   renderTopUsage();
 
+  // skill 计数排在**最末尾**：它是参考信息，不是「此刻要你看的东西」。
+  // 同 topusage 那条的取舍——始终有用，但不该和正在发生的事抢位置
+  h += skillLine();
+
   $('view').innerHTML = h;
 
   // （履历原来是横向跑马灯，这里负责「放不下才滚」的判定。改成竖排后
@@ -2024,6 +2046,39 @@ function agentUsage(kind, cap, mine) {
   return { html: `5h ${five}%　·　7d ${seven}%`, stale: quotaStale() };
 }
 
+
+/**
+ * 「这台机器上有多少个 skill」。
+ *
+ * ## 为什么是两个数，不是一个
+ *
+ * 盘上的 SKILL.md 有 83 个，其中 31 个在 marketplaces 底下——**商店目录，
+ * 压根没装**。一个合计数没法表达这件事，更没法表达「你自己那几个还在不在」
+ * 和「插件那些还在不在」——那是两件独立会坏的事。
+ *
+ * ## null 不是 0
+ *
+ * 插件那一档要穿 Claude Code 的内部目录布局（没有版本承诺）。数不出来时
+ * 服务端回 null，这里必须**说出来**，不能显示成 0——「插件 0」和「数不出来」
+ * 长得一样，而它们的处置完全相反。这是这个项目反复踩的那一类坑。
+ *
+ * ## 两档都是 0 就整块不画
+ *
+ * 一个没装过任何 skill 的人，不需要在首页天天看见一行「skill 0 · 0」。
+ * 但**只要有一档数不出来就得画**——那是故障信号，恰恰不能藏。
+ */
+function skillLine() {
+  const sk = cfg?.skills;
+  if (!sk) return '';
+  const parts = [];
+  if (sk.user !== null && sk.user !== undefined) { if (sk.user) parts.push(`你的 ${sk.user}`); }
+  else parts.push('你的 数不出来');
+  if (sk.plugin !== null && sk.plugin !== undefined) { if (sk.plugin) parts.push(`插件 ${sk.plugin}`); }
+  else parts.push('插件 数不出来');
+  if (!parts.length) return '';
+  return `<div class="skillsum"><span class="lbl">skill</span>${
+    parts.map((p) => `<span class="n">${esc(p)}</span>`).join('')}</div>`;
+}
 
 function renderSessions() {
   if (!sessions.length) {
