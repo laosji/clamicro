@@ -64,7 +64,32 @@ function fakeHome(sessionId = SID, lines = []) {
 }
 
 /** 手动推一拍并等它读完。跟读器内部是 setInterval，测试里不等实时。 */
-const tick = (tail) => new Promise((r) => setTimeout(r, 40).unref?.() ?? setTimeout(r, 40))
+/**
+ * 等跟读器至少走一拍。
+ *
+ * **这个定时器绝不能 unref。** 原来写的是
+ *
+ *     new Promise((r) => setTimeout(r, 40).unref?.() ?? setTimeout(r, 40))
+ *
+ * 两个毛病叠在一起：
+ *
+ *   1. `Timeout.unref()` 返回的是 **Timeout 本身**（真值），所以 `??` 右边
+ *      那个兜底的 setTimeout **永远不执行**——它看着像「不支持 unref 就退回
+ *      普通定时器」，实际上一次都没退过。
+ *   2. 于是只剩一个 unref 的定时器，而 unref 的定时器**不保活事件循环**。
+ *      循环一空，就再也没有人来 resolve 这个 promise。
+ *
+ * 表现是 node 的测试运行器报
+ * `Promise resolution is still pending but the event loop has already resolved`，
+ * 而且**只在某些 node 版本上**——CI 里 18/20/22 全红、24 绿，本地 25 也绿。
+ * 不是 flaky，是这个写法本来就不成立，只是在某些版本上恰好有别的句柄替它
+ * 撑着循环。用 `node -e` 单独跑那一行能直接看到退出码 13。
+ *
+ * codex-tail.mjs 自己的轮询定时器 unref 是**对的**——跟读是补充信息，
+ * 不该把服务钉在事件循环上不让它退。但那条理由在测试里正好反过来：
+ * 这里要的就是「把循环撑到那一拍跑完」。同一个手法，两个相反的场景。
+ */
+const tick = () => new Promise((r) => setTimeout(r, 40))
 
 test('parseLine 只认回合事件，别的一律当没看见', async (t) => {
   await t.test('task_started', () => {
@@ -168,11 +193,11 @@ test('回合跑完 → 会话走出「运行中」', async (t) => {
   assert.equal(store.session(SID).state, STATE.RUNNING)
 
   tail.follow(SID)
-  await tick(tail)
+  await tick()
 
   await t.test('task_complete 到了就该是 Done', async () => {
     appendFileSync(file, `${done('跑完了')}\n`)
-    await tick(tail)
+    await tick()
     const s = store.session(SID)
     assert.equal(s.state, STATE.DONE, '这一条不过 = 手机上那张卡片会一直转')
     assert.equal(s.turn_started_at, null)
@@ -190,9 +215,9 @@ test('回合失败 → Error，不是 Done', async (t) => {
   t.after(() => { tail.stop(); rmSync(home, { recursive: true, force: true }) })
 
   tail.follow(SID)
-  await tick(tail)
+  await tick()
   appendFileSync(file, `${started()}\n`)
-  await tick(tail)
+  await tick()
 
   await t.test('task_started 把它推进 Running', () => {
     assert.equal(store.session(SID).state, STATE.RUNNING)
@@ -201,7 +226,7 @@ test('回合失败 → Error，不是 Done', async (t) => {
   await t.test('带 error 的 task_complete 是 Error', async () => {
     // 额度耗尽那个回合**什么都没干成**，报「已完成」等于撒谎
     appendFileSync(file, `${failed()}\n`)
-    await tick(tail)
+    await tick()
     assert.equal(store.session(SID).state, STATE.ERROR)
   })
 
@@ -227,16 +252,16 @@ test('文件那一侧的糙活', async (t) => {
     t.after(() => { tail.stop(); rmSync(home, { recursive: true, force: true }) })
 
     tail.follow(SID)          // 此刻 ~/.codex/sessions 整个都不存在
-    await tick(tail)
+    await tick()
     assert.deepEqual(tail.following(), [SID], '找不到文件不该把会话丢掉')
 
     const dir = join(home, '.codex', 'sessions', '2026', '08', '25')
     mkdirSync(dir, { recursive: true })
     const file = join(dir, `rollout-x-${SID}.jsonl`)
     writeFileSync(file, '')
-    await tick(tail)
+    await tick()
     appendFileSync(file, `${done('迟到但接上了')}\n`)
-    await tick(tail)
+    await tick()
     assert.equal(store.session(SID).state, STATE.DONE)
   })
 
@@ -247,14 +272,14 @@ test('文件那一侧的糙活', async (t) => {
     t.after(() => { tail.stop(); rmSync(home, { recursive: true, force: true }) })
 
     tail.follow(SID)
-    await tick(tail)
+    await tick()
     // 追加日志不是原子的：一拍正好读到半行是常态，不是异常
     const line = done('半行拼回来了')
     appendFileSync(file, line.slice(0, 20))
-    await tick(tail)
+    await tick()
     assert.equal(store.session(SID).state, STATE.IDLE, '半行不该产生任何状态变化')
     appendFileSync(file, `${line.slice(20)}\n`)
-    await tick(tail)
+    await tick()
     assert.equal(store.session(SID).state, STATE.DONE, '后半行到了就该拼起来生效')
   })
 
@@ -265,10 +290,10 @@ test('文件那一侧的糙活', async (t) => {
     t.after(() => { tail.stop(); rmSync(home, { recursive: true, force: true }) })
 
     tail.follow(SID)
-    await tick(tail)
+    await tick()
     truncateSync(file, 0)
     appendFileSync(file, `${failed('截断之后的新内容')}\n`)
-    await tick(tail)
+    await tick()
     assert.equal(store.session(SID).state, STATE.ERROR)
   })
 
@@ -279,10 +304,10 @@ test('文件那一侧的糙活', async (t) => {
     t.after(() => { tail.stop(); rmSync(home, { recursive: true, force: true }) })
 
     tail.follow(SID)
-    await tick(tail)
+    await tick()
     tail.unfollow(SID)
     appendFileSync(file, `${done()}\n`)
-    await tick(tail)
+    await tick()
     assert.equal(store.session(SID).state, STATE.IDLE)
     assert.deepEqual(tail.following(), [])
   })
@@ -301,7 +326,7 @@ test('首拍不回放历史 —— 旧回合不该被当成刚发生', async (t)
   t.after(() => { tail.stop(); rmSync(home, { recursive: true, force: true }) })
 
   tail.follow(SID)
-  await tick(tail)
+  await tick()
 
   await t.test('旧的 task_complete 被忽略', () => {
     assert.equal(store.session(SID).state, STATE.IDLE, '不该凭空报一次「已完成」')
@@ -309,7 +334,7 @@ test('首拍不回放历史 —— 旧回合不该被当成刚发生', async (t)
 
   await t.test('新追加的照常生效', async () => {
     appendFileSync(file, `${done('这一轮')}\n`)
-    await tick(tail)
+    await tick()
     assert.equal(store.session(SID).state, STATE.DONE)
     assert.equal(store.session(SID).last_message, '这一轮')
   })
@@ -322,7 +347,7 @@ test('用量：Codex 的累计 token 走 rollout', async (t) => {
   t.after(() => { tail.stop(); rmSync(home, { recursive: true, force: true }) })
 
   tail.follow(SID)
-  await tick(tail)
+  await tick()
 
   await t.test('拿到数字之前，usage_reported 保持 null', () => {
     // null = 「还没跑完一轮」。置 false 会让界面说「该后端不上报用量」，
@@ -333,7 +358,7 @@ test('用量：Codex 的累计 token 走 rollout', async (t) => {
 
   await t.test('token_count 到了 —— 累计 token 写进会话', async () => {
     appendFileSync(file, `${usage(20263)}\n`)
-    await tick(tail)
+    await tick()
     assert.equal(store.session(SID).tokens, 20263)
     assert.equal(store.session(SID).usage_reported, true)
   })
@@ -347,7 +372,7 @@ test('用量：Codex 的累计 token 走 rollout', async (t) => {
   await t.test('info 为 null 的那条不该把数字抹掉', async () => {
     // 额度耗尽之后每一轮都会报这种空的。覆盖成 0 等于把已知的用量弄丢
     appendFileSync(file, `${usageEmpty()}\n`)
-    await tick(tail)
+    await tick()
     assert.equal(store.session(SID).tokens, 20263)
   })
 
@@ -355,7 +380,7 @@ test('用量：Codex 的累计 token 走 rollout', async (t) => {
     // turn-end 走的是现成的 stop 那条路，而它的 payload 里没有 tokens——
     // 那两处扩散是有条件的，条件不成立时必须**保持原值**而不是写 0
     appendFileSync(file, `${done('跑完了')}\n`)
-    await tick(tail)
+    await tick()
     assert.equal(store.session(SID).tokens, 20263)
     assert.equal(store.session(SID).state, STATE.DONE)
   })
