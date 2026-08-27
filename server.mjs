@@ -18,6 +18,7 @@ import { allowedHosts, hostAllowed, isLoopback, applySecurityHeaders } from './s
 import { makeAuth } from './src/auth/token.mjs'
 import { PairingStore, ConfirmStore, addDevice, removeDevice } from './src/auth/pairing.mjs'
 import { createCodexTail } from './src/codex-tail.mjs'
+import { createLanGate } from './src/lanbind.mjs'
 import { shouldExit } from './src/lifecycle.mjs'
 import { hookRoutes } from './src/routes/hooks.mjs'
 import { pageRoutes } from './src/routes/pages.mjs'
@@ -938,109 +939,25 @@ function stopListening(host) {
 for (const host of bindHosts) listenOn(host)
 
 /**
- * 此刻**真正**对外暴露的那个局域网地址。null = 只剩回环（和 Tailscale）。
- *
- * 为什么不能直接用 config.lanIp：那是 loadConfig 在**启动那一刻**探测的值，
- * 之后再没变过。收缩那条路原来写的是 `stopListening(config.lanIp)`——
- * 换过一次 IP 之后，还活着的套接字已经不是它了，于是关了一个早就没用的旧
- * socket，新地址上的监听原样留着，而日志和通知照样说「已摘掉局域网监听」。
- * 界面说的和事实相反，方向还是往不安全那侧偏。
- *
- * 那为什么不干脆把 config.lanIp 更新掉：/healthz 的 `stale` 判据正是
- * `detectLanIp() !== config.lanIp`，它靠这个值保持「旧」才成立。改它等于把
- * 「地址变了 → 下次开会话自动重启到新地址」这条自愈悄悄关掉，而深链基址
- * （baseUrl / altUrl）本来就只在启动时算，不重启就还是旧的。
- *
- * 所以另存一个：谁真的挂在 servers 里，收缩时就关谁。
+ * 局域网暴露面的开关。整段搬进 src/lanbind.mjs 了 —— 那里说了为什么：
+ * 这段逻辑内联在这个文件里时**测不了**（判据是 detectLanIp 和 fingerprint，
+ * 一个读 os.networkInterfaces、一个 spawn route/arp），而它已经出过两个
+ * 只有代码审查发现、一条测试都没红的 bug。
  */
-let lanBound = bindHosts.includes(config.lanIp) ? config.lanIp : null
-
-/**
- * 把局域网监听挪到 ip 上（null = 全摘掉），并让 Host 白名单跟着走。
- *
- * 两件事必须在同一个地方做完。分开写的结果就是这次修的两个 bug：
- * 白名单没跟上 → 恢复出来的监听是画的；记录没跟上 → 收缩收错了对象。
- */
-function rebindLan(ip) {
-  if (lanBound && lanBound !== ip) stopListening(lanBound)
-  lanBound = ip ?? null
-  // 白名单按「现在暴露在哪」重算。摘掉之后旧 IP 也一并移出——那个地址上
-  // 已经没有监听了，留在白名单里只是一条对不上事实的记录
-  ALLOWED_HOSTS = allowedHosts({ ...config, lanIp: lanBound })
-  if (lanBound) listenOn(lanBound)
-}
-
-/**
- * 网络变了就重新过一遍信任闸门。
- *
- * 闸门原先只在进程启动时判一次。多数情况下换网络会同时换 IP，旧套接字绑的
- * 地址不再属于本机、暴露面自然消失，SessionStart 那边也会因为 stale 重启。
- * 但**换到不同网络却恰好拿到相同 IP**（192.168.1.x 到处都是）时套接字依旧
- * 有效，人就真的暴露在陌生网络上了。
- *
- * 这里只做收缩，不做扩张：新网络不可信就摘掉局域网监听。要重新暴露得显式
- * `clamicro trust` 再重启——「失败即收缩」比「自动恢复」安全。
- */
-let currentNetId = net.id
-const stopWatching = watchNetwork(() => {
-  const ip = detectLanIp()
-  const fp = fingerprint(ip)
-
-  /**
-   * **拿不到网关 ≠ 换到了陌生网络。**
-   *
-   * fingerprint 在取不到默认网关时返回 `id: null`（未联网）。而全隧道 VPN
-   * 周期性重连、Wi-Fi 抖一下，都会制造这么一个瞬间。以前这里把 null 当成
-   * 「一个不认识的新网络」，于是**摘掉局域网监听**——手机当场连不上，
-   * 而 `networks` 还显示当前网络已信任，看不出任何异常。
-   *
-   * 收缩是有代价的动作，不能在证据不足时执行。信息缺失就什么都不做，
-   * 等下一次事件——网络真变了，下一次一样能判出来。
-   */
-  if (!fp.id) return
-  if (fp.id === currentNetId) return
-  currentNetId = fp.id
-
-  if (isTrusted(config, fp)) {
-    console.log(`[clamicro] 网络变为「${fp.label}」（已信任）`)
-    /**
-     * **恢复必须和收缩对称。**
-     *
-     * 以前这条分支只打日志。于是任何一次误判（哪怕下一秒就纠正）都会让
-     * 局域网监听**永久消失**，直到进程重启——日志里「未被信任」和「已信任」
-     * 反复横跳，而实际状态一路单向退化成只剩回环。
-     *
-     * 「失败即收缩」是对的策略，但它的前提是「恢复也要真的发生」。
-     * 只有一半的策略不是保守，是坏掉。
-     */
-    if (ip && ip !== lanBound) {
-      // 走 rebindLan 而不是裸 listenOn：白名单要跟着换，旧地址上的
-      // 监听要摘掉。见 rebindLan 上面那段
-      rebindLan(ip)
-      console.log(`[clamicro] 已恢复局域网监听 ${ip}:${config.port}`)
-    }
-    if (ip !== config.lanIp) {
-      console.log(`[clamicro] 地址变了，新开一个 Claude Code 会话会自动重启到新地址`)
-      console.log(`[clamicro] 之后重新生成二维码： npx clamicro qr`)
-    }
-    return
-  }
-
-  // 判据是「此刻真的挂着的那个」，不是启动时探到的那个。见 lanBound
-  const wasExposed = lanBound !== null && servers.has(lanBound)
-  rebindLan(null)
-  console.warn(`[security] 网络变为「${fp.label}」，未被信任${wasExposed ? '，已摘掉局域网监听' : ''}`)
-  console.warn(`[security] 确认可信后执行： npx clamicro trust`)
-  if (wasExposed) {
-    notify({
-      title: 'Clamicro',
-      subtitle: '已收缩到本机',
-      body: `换到了未信任的网络「${fp.label}」，局域网访问已关闭。确认可信后执行 npx clamicro trust`,
-      level: 'timeSensitive',
-      group: 'clamicro-net',
-    }).catch(() => {})
-  }
+const lanGate = createLanGate({
+  config,
+  listenOn,
+  stopListening,
+  // 白名单和监听是同一件事的两半，所以换白名单的口子只有这一个
+  applyAllowedHosts: (hosts) => { ALLOWED_HOSTS = hosts },
+  detectLanIp,
+  fingerprint,
+  isTrusted,
+  notify,
 })
+lanGate.start({ lanIp: config.lanIp, netId: net.id, bindHosts })
+
+const stopWatching = watchNetwork(() => lanGate.onNetworkChange())
 
 console.log(`[clamicro] 网络 ${net.label}${trusted ? ' ✓ 已信任' : ' ✗ 未信任（仅本机可用）'}`)
 console.log(`[clamicro] 配置文件 ${CONFIG_FILE}`)
