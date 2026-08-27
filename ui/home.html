@@ -1946,6 +1946,13 @@ function agentUsage(kind, cap, mine) {
    * 「这轮花了多少」和「这个月还剩多少」。Claude Code 不走这条（它的窗口
    * 在全局 quota 里，形状是写死的 five_hour/seven_day），所以这里天然只
    * 对上报了窗口的后端生效。
+   *
+   * **下面每一档都要把 wins 带上，不能只在 tokens 那一档里读。**
+   * 一度只有 tokens 分支读它，于是产生一个隐式耦合：把 Codex 的 quota 档位
+   * 改成别的，30 天窗口会跟着一起从界面上消失——而**没有任何测试会变红**，
+   * 因为改的是 agents.mjs 里一个看起来无关的字段。窗口是后端**自己报的
+   * 事实**，跟我们给它归的档位无关，所以判据只能是「有没有收到」。
+   * docs/architecture.zh-CN.md §6.3 记过这个坑，这里把它关掉。
    */
   const wins = (agentLimits?.[kind]?.windows ?? [])
     .map((w) => `${esc(w.label)} ${Math.round(Math.min(100, Math.max(0, w.pct)))}%`)
@@ -1984,9 +1991,15 @@ function agentUsage(kind, cap, mine) {
    * 都没有的区域，分不清是没数据还是还没加载。跟 DSH 那条「该后端不上报
    * 用量」是同一个理由。
    */
-  if (cap.quota === 'none') return { html: '不上报用量', stale: false };
+  if (cap.quota === 'none') {
+    // 档位说「不上报」，可这个后端**真的报了窗口**——以实际收到的为准。
+    // 见下面 `wins` 那段：窗口不该被档位吞掉
+    if (wins) return { html: wins, stale: false };
+    return { html: '不上报用量', stale: false };
+  }
 
-  if (cap.quota !== 'window') return null;
+  // 既不是 tokens 也不是 window 的档位（将来可能有），窗口照样要显示
+  if (cap.quota !== 'window') return wins ? { html: wins, stale: false } : null;
 
   /**
    * 窗口配额是**账户级**的，不属于某一个会话，所以取 store 的 accountLimits
@@ -1997,6 +2010,9 @@ function agentUsage(kind, cap, mine) {
    *   · 到过但没带额度字段 → 上报在跑，只是这次没有
    */
   if (!quota) {
+    // 账户级的那份没有，但这个后端自己报了窗口的话，先说它——「暂无额度数据」
+    // 是关于 Claude statusLine 的话，对一个自报窗口的后端并不成立
+    if (wins) return { html: wins, stale: false };
     const why = quotaWhy();
     return {
       html: why === 'hooks-only' ? '额度只有终端里的 claude 会上报' : '暂无额度数据',

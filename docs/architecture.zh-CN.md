@@ -369,10 +369,13 @@ Claude Code 的窗口走 `limits`，形状**写死**了 `five_hour` + `seven_day
 [src/state.mjs](../src/state.mjs) 的 `turn-usage` 分支）：`codex-tail.mjs` 的 `readWindows`
 翻译，`home.html` 的 `agentUsage` 显示，和累计 token 并排。
 
-两条模型回答的是同一个问题，将来该合并成一条。合并之前有一个**隐式耦合**
-值得知道：`agentUsage` 只在 `quota === 'tokens'` 分支里读 `windows`，所以
-把 Codex 的 quota 档位改成别的，30 天窗口会跟着一起从界面上消失，而不会有
-任何测试变红。
+两条模型回答的是同一个问题，将来该合并成一条。
+
+这里原来有一个**隐式耦合**：`agentUsage` 只在 `quota === 'tokens'` 分支里读
+`windows`，所以把 Codex 的 quota 档位改成别的，30 天窗口会跟着一起从界面上
+消失，而不会有任何测试变红。**已经修掉**——每一档都带上 `wins`，判据改成
+「有没有收到」而不是「归在哪一档」：窗口是后端**自己报的事实**，跟我们给它
+归的类无关。`test/agent-usage.test.mjs` 逐档跑一遍钉住这件事。
 
 ### 6.4 `QUOTA.NONE` 当前没有后端使用
 
