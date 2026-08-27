@@ -689,9 +689,18 @@ function publicApproval(a, withKey = false) {
 // ---- helpers ----
 
 
-// Host 白名单在启动时算一次。IP 变了由 SessionStart 的 stale 检查重启进程，
-// 网络变了由 netwatch 收缩监听——都不需要在运行期改这个集合。
-const ALLOWED_HOSTS = allowedHosts(config)
+/**
+ * Host 白名单。
+ *
+ * 曾经是 `const`，注释写着「启动时算一次就够，IP 变了由 SessionStart 的 stale
+ * 检查重启进程」。那句话对**重启**成立，对 netwatch 那条**不重启就恢复监听**
+ * 的路径不成立：换到另一个已信任网络、拿到新 IP 时，下面会 listenOn(新IP) 并
+ * 打印「已恢复局域网监听」——而这个集合里装的还是旧 IP，手机连过来 Host 对不上，
+ * hostAllowed 一律 403 bad host。日志说恢复了，实际连不上，比不恢复更难查。
+ *
+ * 所以它得能跟着改。改的入口只有 rebindLan() 一个。
+ */
+let ALLOWED_HOSTS = allowedHosts(config)
 const pairing = new PairingStore()
 // 等 Mac 确认的那一段。扫码请求立刻返回等待页，结果落这里，手机轮询取。
 const confirms = new ConfirmStore()
@@ -783,7 +792,30 @@ const handleApi = apiRoutes({
 
 // ---- routes ----
 async function handler(req, res) {
-  const url = new URL(req.url, `http://${req.headers.host ?? 'localhost'}`)
+  /**
+   * URL 解析**必须自己兜住**，不能让它裸奔在 try 外面。
+   *
+   * `new URL('/x', 'http://[')` 抛 ERR_INVALID_URL，而这一行跑在 http 的请求
+   * 回调里、是同步抛出——没有 catch 就是 uncaughtException，**整个进程当场退出**。
+   *
+   * 要命的是它的位置：在 hostAllowed（DNS rebinding 白名单）、isLoopback
+   * （hooks 闸门）、authorized（令牌）**全部之前**。也就是说这三道闸门一道都
+   * 拦不住它——任何能对这个端口开一条 TCP 的人（信任网络下是整个局域网，
+   * 开着隧道时是整个公网）发一个 `Host: [` 就能把服务干掉，不需要任何凭证。
+   *
+   * 而服务一走，正挂着的阻塞审批连接跟着断，手机那条链路静默消失，
+   * 要等下一个 SessionStart hook 才被拉起来。实测复现过：
+   *   "[" => (no response) / SERVER EXITED 1
+   *
+   * Host 头畸形的请求一律 400。它到不了任何业务逻辑，所以不必区分是谁发的。
+   */
+  let url
+  try {
+    url = new URL(req.url, `http://${req.headers.host ?? 'localhost'}`)
+  } catch {
+    console.warn(`[security] 拒绝畸形请求 Host: ${req.headers.host} url: ${req.url}`)
+    return json(res, 400, { error: 'bad request' })
+  }
   const path = url.pathname
 
   try {
@@ -906,6 +938,39 @@ function stopListening(host) {
 for (const host of bindHosts) listenOn(host)
 
 /**
+ * 此刻**真正**对外暴露的那个局域网地址。null = 只剩回环（和 Tailscale）。
+ *
+ * 为什么不能直接用 config.lanIp：那是 loadConfig 在**启动那一刻**探测的值，
+ * 之后再没变过。收缩那条路原来写的是 `stopListening(config.lanIp)`——
+ * 换过一次 IP 之后，还活着的套接字已经不是它了，于是关了一个早就没用的旧
+ * socket，新地址上的监听原样留着，而日志和通知照样说「已摘掉局域网监听」。
+ * 界面说的和事实相反，方向还是往不安全那侧偏。
+ *
+ * 那为什么不干脆把 config.lanIp 更新掉：/healthz 的 `stale` 判据正是
+ * `detectLanIp() !== config.lanIp`，它靠这个值保持「旧」才成立。改它等于把
+ * 「地址变了 → 下次开会话自动重启到新地址」这条自愈悄悄关掉，而深链基址
+ * （baseUrl / altUrl）本来就只在启动时算，不重启就还是旧的。
+ *
+ * 所以另存一个：谁真的挂在 servers 里，收缩时就关谁。
+ */
+let lanBound = bindHosts.includes(config.lanIp) ? config.lanIp : null
+
+/**
+ * 把局域网监听挪到 ip 上（null = 全摘掉），并让 Host 白名单跟着走。
+ *
+ * 两件事必须在同一个地方做完。分开写的结果就是这次修的两个 bug：
+ * 白名单没跟上 → 恢复出来的监听是画的；记录没跟上 → 收缩收错了对象。
+ */
+function rebindLan(ip) {
+  if (lanBound && lanBound !== ip) stopListening(lanBound)
+  lanBound = ip ?? null
+  // 白名单按「现在暴露在哪」重算。摘掉之后旧 IP 也一并移出——那个地址上
+  // 已经没有监听了，留在白名单里只是一条对不上事实的记录
+  ALLOWED_HOSTS = allowedHosts({ ...config, lanIp: lanBound })
+  if (lanBound) listenOn(lanBound)
+}
+
+/**
  * 网络变了就重新过一遍信任闸门。
  *
  * 闸门原先只在进程启动时判一次。多数情况下换网络会同时换 IP，旧套接字绑的
@@ -948,8 +1013,10 @@ const stopWatching = watchNetwork(() => {
      * 「失败即收缩」是对的策略，但它的前提是「恢复也要真的发生」。
      * 只有一半的策略不是保守，是坏掉。
      */
-    if (ip && !servers.has(ip)) {
-      listenOn(ip)
+    if (ip && ip !== lanBound) {
+      // 走 rebindLan 而不是裸 listenOn：白名单要跟着换，旧地址上的
+      // 监听要摘掉。见 rebindLan 上面那段
+      rebindLan(ip)
       console.log(`[clamicro] 已恢复局域网监听 ${ip}:${config.port}`)
     }
     if (ip !== config.lanIp) {
@@ -959,8 +1026,9 @@ const stopWatching = watchNetwork(() => {
     return
   }
 
-  const wasExposed = servers.has(config.lanIp)
-  if (config.lanIp) stopListening(config.lanIp)
+  // 判据是「此刻真的挂着的那个」，不是启动时探到的那个。见 lanBound
+  const wasExposed = lanBound !== null && servers.has(lanBound)
+  rebindLan(null)
   console.warn(`[security] 网络变为「${fp.label}」，未被信任${wasExposed ? '，已摘掉局域网监听' : ''}`)
   console.warn(`[security] 确认可信后执行： npx clamicro trust`)
   if (wasExposed) {

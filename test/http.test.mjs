@@ -41,6 +41,28 @@ test('Host 白名单挡 DNS rebinding', async (t) => {
   await t.test('大小写不敏感（LocalHostName 可能是混合大小写）', async () => {
     assert.equal((await S.raw('/healthz', { host: 'LOCALHOST:8791' })).status, 200)
   })
+
+  /**
+   * 畸形 Host **不能把进程带走**。
+   *
+   * `new URL('/healthz', 'http://[')` 抛 ERR_INVALID_URL，而那一行原来裸奔在
+   * handler 的 try 外面——同步抛出 = uncaughtException = 进程当场退出。
+   *
+   * 它的位置比这一节测的所有闸门都靠前：Host 白名单、isLoopback、令牌，
+   * 一道都拦不住。也就是说任何能对端口开一条 TCP 的人（信任网络下是整个
+   * 局域网，开着隧道时是整个公网）发四个字节就能杀掉服务，而服务一走，
+   * 正挂着的阻塞审批全部断线。
+   *
+   * 断言必须包含**之后还活着**这一条：只断言这一条请求回了 400 的话，
+   * 进程在响应写出去之后才死一样能通过。
+   */
+  await t.test('畸形 Host 回 400，且服务还活着', async () => {
+    for (const host of ['[', '[::1', 'a b', '%%']) {
+      const r = await S.raw('/healthz', { host }).catch((e) => ({ status: `ERR ${e.code ?? e.message}` }))
+      assert.equal(r.status, 400, `Host: ${host} 应该被拒成 400`)
+    }
+    assert.equal((await S.raw('/healthz', { host: '127.0.0.1:8791' })).status, 200, '进程被畸形 Host 打死了')
+  })
 })
 
 test('安全响应头', async () => {
