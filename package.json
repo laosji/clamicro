@@ -1,6 +1,6 @@
 {
   "name": "clamicro",
-  "version": "2.17.0",
+  "version": "2.17.1",
   "description": "Watch Claude Code from your phone and approve what it wants to run. LAN-direct, zero dependencies.",
   "keywords": [
     "claude-code",

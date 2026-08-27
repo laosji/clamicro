@@ -226,6 +226,19 @@ export class Store extends EventEmitter {
    * 于是我们误以为某个后端还活着。失败方向是**多跑一会儿**，而不是提前
    * 关掉——那是这里唯一能接受的方向。
    */
+  /**
+   * 记下一个宿主 pid。两个来源：SessionStart（一个会话一次）和 statusLine
+   * （每回合），后者是重启后重新认识宿主的那条路，见 bin/statusline.sh。
+   *
+   * 单独一个方法而不是让两处各自 `#owners.set`：那张表的语义（不随会话结束
+   * 而清空）只写在 owners() 上面，多一个写入点就多一次抄错的机会。
+   */
+  noteOwner(pid) {
+    if (!Number.isInteger(pid) || pid <= 0) return false
+    this.#owners.set(pid, Date.now())
+    return true
+  }
+
   owners() {
     return [...this.#owners].map(([pid, at]) => ({ pid, at }))
   }
@@ -350,10 +363,7 @@ export class Store extends EventEmitter {
       case 'session-start':
         // 宿主进程。见 src/lifecycle.mjs —— 全部宿主都没了服务就自己退出。
         // 同时记进 #owners：那张表不随会话结束而清空，见 owners()
-        if (Number.isInteger(payload.owner_pid) && payload.owner_pid > 0) {
-          s.owner_pid = payload.owner_pid
-          this.#owners.set(payload.owner_pid, Date.now())
-        }
+        if (this.noteOwner(payload.owner_pid)) s.owner_pid = payload.owner_pid
         this.#touch(s, { state: STATE.IDLE, sub_state: null })
         this.#log(id, 'session-start', payload.source ?? 'startup')
         break

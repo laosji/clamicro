@@ -85,11 +85,20 @@ test('不知道宿主是谁的会话 —— 新鲜的拦住，陈旧的不再算
     assert.equal(r.why, 'unknown-owner')
   })
 
-  await t.test('超过陈旧线就不再钉住服务', () => {
-    // 否则一个 kill -9 留下的老会话（没有 session-end、也没有宿主信息）
-    // 会把服务钉死到下次重启
+  /**
+   * 陈旧的未知会话**不再算数**——但那只是让它不再"拦住"，不等于"因此就退"。
+   *
+   * 这条断言原来写的是 `exit === true`，而那是错的：走到这一步时我们对宿主
+   * 一无所知（`known === 0`），退出的依据只剩「一条老会话过期了」。真机上
+   * 就是这么关掉的（见下面「零信息的时候不许关自己」那一组）。
+   *
+   * 原来的顾虑仍然成立——kill -9 留下的老会话不该把服务钉死到重启——
+   * 但解法是**别让它成为唯一依据**，而不是在零信息的时候动手。
+   */
+  await t.test('超过陈旧线就不再拦住（但也不构成退出的理由）', () => {
     const r = ask([s({ owner_pid: null, updated_at: NOW - 31 * 60_000 })])
-    assert.equal(r.exit, true)
+    assert.notEqual(r.why, 'unknown-owner', '过期了还在拦，那条陈旧线白设了')
+    assert.equal(r.exit, false, '对宿主一无所知，只凭一条老会话过期就关自己')
   })
 
   await t.test('陈旧的未知会话 + 活着的宿主 —— 仍然不退', () => {
@@ -122,10 +131,20 @@ test('应用开着、但当前一个会话都没有 —— 不退', async (t) =>
   })
 })
 
-test('从没见过任何宿主时也退，理由要说得出来', () => {
+/**
+ * 这条测试原来叫「从没见过任何宿主时**也退**」，断言 `exit === true`。
+ *
+ * **它把 bug 写成了规范。** 2.17.0 发出去当天就在真机上撞了：服务重启后
+ * 一无所知，十分钟没有 hook 到达（用户在读代码），于是自己关了，而 Claude
+ * Code 一直开着。名字和断言一起改掉，别让下一个人照着它再改回去。
+ *
+ * 理由字符串保留：关停也好、不关也好，`why` 都得说得出来，否则用户手上
+ * 只有一个消失的进程和零条线索。
+ */
+test('从没见过任何宿主 —— 不退，但理由要说得出来', () => {
   const r = ask([])
-  assert.equal(r.exit, true)
-  assert.equal(r.why, 'no-owner-known', '关停必须留下理由，否则用户手上只有一个消失的进程')
+  assert.equal(r.exit, false, '一无所知 ≠ 没人在用')
+  assert.equal(r.why, 'no-owner-known')
 })
 
 test('alive() 的边界', async (t) => {
@@ -148,5 +167,97 @@ test('alive() 的边界', async (t) => {
   await t.test('ESRCH 算死了', () => {
     const kill = () => { const e = new Error('no such process'); e.code = 'ESRCH'; throw e }
     assert.equal(alive(4242, kill), false)
+  })
+})
+
+/**
+ * **一无所知不等于没人在用。**
+ *
+ * 这一组是 2.17.0 发出去之后当场撞到的回归，日志留着：
+ *
+ *     14:44:03 [clamicro] 监听 http://127.0.0.1:8765     ← 服务重启
+ *     14:49:03 [lifecycle] 没有后端在用了（no-owner-known），再确认一次就退出
+ *     14:54:03 [lifecycle] 所有后端都退出了，服务关闭
+ *
+ * 而那台机器上 Claude Code 一直开着、正在干活。
+ *
+ * 触发路径：会话表和 owners 都不落盘，服务重启后一无所知；而 SessionStart
+ * 一个会话只发一次、早就过去了。于是接下来十分钟没有 hook 到达（用户在读
+ * 代码、在想事情），服务就走了。上面那道 unknown-owner 拦不住——它要求
+ * **会话记录存在**，而重启后那张表是空的。
+ *
+ * 代价不对等：关错 = 九个 hook 全部连不上，而 hook 失败被当成非阻塞错误，
+ * PermissionRequest 不再阻塞，本该上手机的操作直接跑过去。另一边只是一个
+ * 闲置的 node 进程。
+ */
+test('零信息的时候不许关自己', async (t) => {
+  const now = Date.now()
+
+  await t.test('刚重启、什么都没收到 → 不退', () => {
+    const r = shouldExit([], { owners: [], now })
+    assert.equal(r.exit, false, '一无所知就把自己关了 —— 这是 2.17.0 的那个回归')
+    assert.equal(r.why, 'no-owner-known')
+  })
+
+  await t.test('会话表空、owners 空，隔多久都不退', () => {
+    // 「等久一点再退」不是解法：用户读一小时代码期间一条 hook 都不会来
+    for (const ago of [0, 60_000, 3600_000, 86_400_000]) {
+      assert.equal(shouldExit([], { owners: [], now: now + ago }).exit, false, `${ago}ms 后退了`)
+    }
+  })
+
+  /**
+   * 反过来这一条同样要钉住：确实**知道过**宿主、而它们现在都死了，
+   * 那就该退。否则这个功能等于没有。
+   */
+  await t.test('知道过宿主、且都死了 → 退', () => {
+    const r = shouldExit([], { owners: [{ pid: 4242 }], now, isAlive: () => false })
+    assert.equal(r.exit, true, '功能被修没了')
+    assert.equal(r.why, 'all-owners-gone')
+  })
+
+  await t.test('知道过、还有一个活着 → 不退', () => {
+    assert.equal(shouldExit([], { owners: [{ pid: 4242 }], now, isAlive: () => true }).exit, false)
+  })
+})
+
+/**
+ * statusLine 也带宿主 pid —— 这是「重启后重新认识宿主」那条路。
+ *
+ * SessionStart 一个会话只发一次，服务重启后再也收不到。而 statusLine
+ * 每回合都跑（bin/statusline.sh），所以重启之后**一个回合**服务就重新
+ * 知道谁在用，不必等下一次开会话。
+ *
+ * 上面那条「零信息不许关自己」是兜底；这条是让它尽快不再处于零信息。
+ */
+test('statusLine 能把宿主重新教给服务', async (t) => {
+  const { Store } = await import('../src/state.mjs')
+
+  await t.test('noteOwner 记进 owners，且不随会话结束清空', () => {
+    const st = new Store()
+    assert.equal(st.owners().length, 0)
+    st.noteOwner(4242)
+    assert.deepEqual(st.owners().map((o) => o.pid), [4242])
+    // 会话结束不影响：owners 回答的是「应用还开着吗」
+    st.applyHook('session-end', { session_id: 'x' }, {})
+    assert.deepEqual(st.owners().map((o) => o.pid), [4242])
+  })
+
+  await t.test('非法 pid 一律不记 —— 它要喂给 process.kill', () => {
+    const st = new Store()
+    for (const bad of [0, -1, null, undefined, NaN, 1.5, '123', {}]) {
+      assert.equal(st.noteOwner(bad), false, `${String(bad)} 不该被记下`)
+    }
+    assert.equal(st.owners().length, 0)
+  })
+
+  await t.test('重启的现场：一无所知 → 收到一次 statusLine → 重新有了依据', () => {
+    const st = new Store()
+    // 重启后：没有会话、没有 owners
+    assert.equal(shouldExit(st.sessions(), { owners: st.owners() }).why, 'no-owner-known')
+    st.noteOwner(process.pid) // statusLine 带上来的
+    const r = shouldExit(st.sessions(), { owners: st.owners() })
+    assert.equal(r.exit, false)
+    assert.equal(r.why, 'owner-alive', '收到 owner 之后判据应该变成「宿主活着」')
   })
 })

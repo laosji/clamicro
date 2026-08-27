@@ -421,6 +421,18 @@ export function hookRoutes(ctx) {
 
     if (req.method === 'POST' && path === '/statusline') {
       const payload = await readBody(req)
+      /**
+       * statusLine 也带宿主 pid（`?owner=`，见 bin/statusline.sh）。
+       *
+       * SessionStart 那条**一个会话只发一次**，服务重启后就再也收不到——
+       * 而 lifecycle 曾经把「一无所知」当成「没人在用」把自己关掉。
+       * 这条每回合都来，重启后一个回合就重新认识宿主。
+       *
+       * 只认纯数字：它要喂给 `process.kill(pid, 0)`，一个非数字就是一次抛异常，
+       * 而这里是每次状态栏渲染的必经之路。
+       */
+      const owner = url.searchParams.get('owner')
+      if (owner && /^\d+$/.test(owner)) store.noteOwner(Number(owner))
       const warn = store.applyStatusLine(payload, { quotaWarnPct: config.notify.quotaWarnPct })
       history.touch()
       if (warn) notify(warn).catch(() => {})

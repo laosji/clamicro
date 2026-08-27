@@ -109,6 +109,52 @@ export function shouldExit(sessions, {
     if (now - (s.updated_at ?? 0) < staleMs) return { exit: false, why: 'unknown-owner' }
   }
 
-  // 到这里：没有任何活着的宿主，也没有新鲜的未知会话
-  return { exit: true, why: known ? 'all-owners-gone' : 'no-owner-known' }
+  /**
+   * 到这里：没有任何活着的宿主，也没有新鲜的未知会话。
+   *
+   * ## 一无所知**不等于**没人在用
+   *
+   * `known === 0` 的意思是「我什么都不知道」，不是「我确认过没人」。原来这
+   * 两种一起走 exit:true，而这**跟这个文件开头写的原则正好相反**——那里说的
+   * 是「不确定就不退」。
+   *
+   * 真机上当场就撞了，日志留着：
+   *
+   *     14:44:03 [clamicro] 监听 http://127.0.0.1:8765     ← 服务重启
+   *     14:49:03 [lifecycle] 没有后端在用了（no-owner-known），再确认一次就退出
+   *     14:54:03 [lifecycle] 所有后端都退出了，服务关闭
+   *
+   * 而那台机器上 Claude Code 一直开着、正在干活。
+   *
+   * ## 触发路径
+   *
+   * 会话表和 `#owners` **都不落盘**（有意的，见下），所以服务因为任何原因
+   * 重启之后，它对「谁在用」一无所知。而 `SessionStart` 一个会话只发一次,
+   * 早就过去了、不会再来。于是只要接下来十分钟没有 hook 到达——用户在读代码、
+   * 在想事情、在开会——服务就自己走了。
+   *
+   * 上面那道 `unknown-owner` 拦不住：它要求**会话记录存在**，而重启后那张表
+   * 是空的。
+   *
+   * ## 代价不对等，所以只往一边偏
+   *
+   * 服务一走，九个 hook 全部连不上。而 hook 失败会被当成**非阻塞错误**——
+   * `PermissionRequest` 不再阻塞，本该上手机等人批的操作直接跑过去，手机上
+   * 什么都不显示，终端里也没有报错。这正是本文件开头那句「审批静默失效，
+   * 而用户完全不会把两件事联系起来」。
+   *
+   * 另一边的代价是一个闲置的 node 进程。
+   *
+   * ## 为什么不把 owners 落盘
+   *
+   * 想过，不做。**盘上的 pid 跨重启就没有意义了**——PID 会被系统回收，
+   * 这个仓库已经为此栽过两次（service-id.mjs 的 stop、config.mjs 的
+   * tunnelAlive，两处都写着「PID 本身从来不足以标识一个进程」）。存下来的
+   * pid 在下次开机后可能指向一个毫不相干的进程。
+   *
+   * 而且它救不了什么：重启后服务只要收到**一条** statusLine 或 SessionStart
+   * 就重新认识了宿主（见 bin/statusline.sh 的 `owner=`），窗口只有一个回合。
+   */
+  if (!known) return { exit: false, why: 'no-owner-known' }
+  return { exit: true, why: 'all-owners-gone' }
 }

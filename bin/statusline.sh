@@ -7,8 +7,16 @@
 #
 # 服务没起时 curl 失败、输出为空，走后面的兜底文案，绝不阻塞终端。
 
+# 宿主进程 PID。SessionStart 也带（bin/session-start.sh），但那个**一个会话
+# 只发一次**——服务一旦重启就再也收不到，于是它对「谁在用」一无所知，而
+# lifecycle 那边曾经把「一无所知」当成「没人用」直接关掉自己。
+#
+# statusLine 每次响应更新都跑，所以这条通道让重启后的服务**一个回合内**
+# 就重新认识宿主，不必等下一次开会话。
+#
+# 猜错了也不伤：多出来的 pid 只会让服务**多跑一会儿**，不会让它提前关。
 cat | curl -s -m 1 -X POST \
   -H 'Content-Type: application/json' \
   --data-binary @- \
-  "http://127.0.0.1:${CLAMICRO_PORT:-8765}/statusline?render=1" \
+  "http://127.0.0.1:${CLAMICRO_PORT:-8765}/statusline?render=1&owner=${PPID}" \
   || printf 'Clamicro 未运行'
