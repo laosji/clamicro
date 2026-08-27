@@ -93,6 +93,12 @@ To upgrade, run `npx clamicro install` again.
 | Full event timeline per session | all hooks |
 | Pause / Resume / Cancel the current turn | `PreToolUse` gate |
 | Quota-nearly-exhausted warning | `statusLine` |
+| Which skills a session actually used | `Skill` tool calls in the hook stream |
+| How many skills are installed — yours vs. from enabled plugins | local read of `~/.claude` |
+
+> The last row is the only one that is **not** derived from the event stream. It reads the
+> disk, so it is split into two numbers and each can say "can't tell" instead of `0` —
+> "installed" is not one number (a marketplace listing is not an installed skill).
 
 > This table describes **Claude Code**. With another backend attached, what you can do
 > depends on that backend — see "More than Claude Code" below.
