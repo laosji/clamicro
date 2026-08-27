@@ -152,7 +152,8 @@ export function analyze(toolName, toolInput) {
    * （Bash / Write）各自还会来一条审批，所以这里不拔高成 danger；
    * 但也不能标成「只读」——那是说反话，而**错的标签比没有标签更危险**。
    */
-  if (toolName === 'Skill') {
+  // 大小写不敏感，同 state.mjs 的 isSkill——理由见那里（DSH 的工具名是小写的）
+  if (String(toolName ?? '').toLowerCase() === 'skill') {
     const name = String(t.skill ?? '').trim()
     const args = String(t.args ?? '').trim()
     return {

@@ -109,7 +109,6 @@ test('子状态是从 tool_name 推导的（Claude Code 不发这类事件）', 
  */
 test('时间线：工具调用那一行不能只有一个工具名', async (t) => {
   const cases = [
-    ['Skill', { skill: 'poster', args: '香港银行利率' }, /poster/],
     ['Bash', { command: 'npm run build' }, /npm run build/],
     ['Read', { file_path: '/a/b.js' }, /b\.js/],
     ['WebFetch', { url: 'https://example.com' }, /example\.com/],
@@ -123,6 +122,43 @@ test('时间线：工具调用那一行不能只有一个工具名', async (t) =
       assert.match(line, expect, `实际: ${JSON.stringify(line)}`)
     })
   }
+})
+
+/**
+ * skill 调用**单独一个事件类型**。
+ *
+ * 混在 tool 里的话，时间线上是 `工具 / Skill: poster`——工具名占掉了主位，
+ * 而「Skill」这个词对人零信息量。而且会话页要列「用过哪些 skill」时，就只能
+ * 去解析那个给人看的展示串，上游一改措辞就静默对不上账。
+ */
+test('skill 调用有自己的事件类型，detail 只放名字', async (t) => {
+  await t.test('type 是 skill，不是 tool', () => {
+    const s = new Store()
+    hook(s, 'pre-tool-use', { tool_name: 'Skill', tool_input: { skill: 'poster', args: 'x' } })
+    const ev = s.events().find((e) => e.type === 'skill')
+    assert.ok(ev, `没有 skill 事件，实际类型: ${s.events().map((e) => e.type).join()}`)
+    // 只放名字：会话页按这个去重，不做字符串解析
+    assert.equal(ev.detail, 'poster')
+    assert.ok(!s.events().some((e) => e.type === 'tool'), '不该同时再记一条 tool，那样时间线会重复')
+  })
+
+  /**
+   * 大小写不敏感。assess.mjs 用血换来的那条：接 DSH 时它的工具叫 `bash`
+   * （小写），整套按 `=== 'Bash'` 写的规则一条都没跑，而且不报错。
+   */
+  await t.test('小写的 skill 也认（DSH 那套工具名是小写的）', () => {
+    const s = new Store()
+    hook(s, 'pre-tool-use', { tool_name: 'skill', tool_input: { skill: 'morning' } })
+    assert.equal(s.events().find((e) => e.type === 'skill')?.detail, 'morning')
+    assert.equal(s.session('x').sub_state, 'Using Skill')
+  })
+
+  await t.test('没报 skill 名时给个说得出口的占位，而不是空 detail', () => {
+    const s = new Store()
+    hook(s, 'pre-tool-use', { tool_name: 'Skill', tool_input: {} })
+    const ev = s.events().find((e) => e.type === 'skill')
+    assert.ok(ev.detail && ev.detail.trim(), `detail 是空的: ${JSON.stringify(ev.detail)}`)
+  })
 })
 
 test('任务完成提醒的时长阈值', async (t) => {

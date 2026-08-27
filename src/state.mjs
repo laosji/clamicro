@@ -29,6 +29,19 @@ export const STATE = {
   ERROR: 'Error',
 }
 
+/**
+ * 这次调用是不是在用一个 skill。
+ *
+ * **大小写不敏感**，理由是 assess.mjs 用血换来的那条：接 DSH 时实测它的工具
+ * 叫 `bash`（小写），于是整套按 `=== 'Bash'` 写的规则一条都没跑，而且不报错。
+ * 名字差一个字母就整条链路静默失效，这里不重蹈。
+ *
+ * 判据只认名字、不认参数形状：`summarizeInput` 那边认 `input.skill` 是**第二道**
+ * ——万一哪天来了个我们不认得的名字但带着 skill 参数，时间线至少还写得出
+ * 「用了哪个」，不会退回一个空冒号。两道门是故意的。
+ */
+const isSkill = (toolName) => String(toolName ?? '').toLowerCase() === 'skill'
+
 // Claude Code 没有子状态事件，只能从 tool_name 推导（计划 §3）
 function subStateForTool(toolName, toolInput) {
   if (!toolName) return 'Working'
@@ -37,7 +50,7 @@ function subStateForTool(toolName, toolInput) {
   if (toolName === 'Task' || toolName === 'Agent') return 'Delegating'
   // 和 'Calling MCP' 并列：两者都是「去用一个我们自己不知道内容的东西」。
   // 落到 'Working' 的话，手机上一个 skill 调用和一次普通工具调用长得一样
-  if (toolName === 'Skill') return 'Using Skill'
+  if (isSkill(toolName)) return 'Using Skill'
   if (toolName === 'Bash') {
     const cmd = toolInput?.command ?? ''
     if (/\b(test|pytest|jest|vitest|go test|cargo test|npm t|npm run test)\b/.test(cmd)) {
@@ -355,7 +368,29 @@ export class Store extends EventEmitter {
           state: s.state === STATE.PAUSED ? STATE.PAUSED : STATE.RUNNING,
           sub_state: subStateForTool(payload.tool_name, payload.tool_input),
         })
-        this.#log(id, 'tool', `${payload.tool_name}: ${truncate(summarizeInput(payload.tool_input), 160)}`)
+        /**
+         * skill 调用**单独一个事件类型**，不混在 tool 里。
+         *
+         * 时间线上它本来长这样：`工具 / Skill: poster`——工具名占掉了那行的
+         * 主位，而「Skill」这个词对人零信息量。现在是 `使用 skill / poster`，
+         * 一眼就是那个名字。
+         *
+         * 更要紧的是 detail **只放名字**，不放 `Skill: ` 这种复合串。会话页
+         * 的「用过哪些 skill」直接按 `type === 'skill'` 筛、拿 detail 去重，
+         * 不用去解析一个给人看的展示字符串——那种解析一旦上游改了措辞就静默
+         * 对不上账，而这个仓库在 match_key 那里已经为同一类耦合写过一整段
+         * 警告了。
+         *
+         * 老数据（history.json 里 type 是 tool 的那些）不会被这个列表认到。
+         * 这是可接受的：那份列表说的是「这个会话用过什么」，少几条旧的比
+         * 为了兼容去解析展示串划算。
+         */
+        if (isSkill(payload.tool_name)) {
+          const name = String(payload.tool_input?.skill ?? '').trim()
+          this.#log(id, 'skill', truncate(name || '未具名 skill', 80))
+        } else {
+          this.#log(id, 'tool', `${payload.tool_name}: ${truncate(summarizeInput(payload.tool_input), 160)}`)
+        }
         break
 
       case 'post-tool-use':

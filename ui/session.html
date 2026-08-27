@@ -10,12 +10,12 @@
 <style>
   :root{
     --bg:#f7f8fa; --card:#fff; --fg:#12151a; --dim:#6b7280; --line:#e4e7ec; --monobg:#f0f2f5;
-    --ok:#0a7d34; --no:#b42318; --warn:#b54708; --run:#1570ef;
+    --ok:#0a7d34; --no:#b42318; --warn:#b54708; --run:#1570ef; --calm:#475467;
   }
   @media (prefers-color-scheme:dark){
     :root{
       --bg:#0b0d10; --card:#14181d; --fg:#e8eaed; --dim:#8b93a1; --line:#242a32; --monobg:#0f1318;
-      --ok:#4ade80; --no:#f87171; --warn:#fbbf24; --run:#60a5fa;
+      --ok:#4ade80; --no:#f87171; --warn:#fbbf24; --run:#60a5fa; --calm:#9aa3b0;
     }
   }
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
@@ -72,6 +72,16 @@
   .ev[data-t="stop"]::before{background:var(--ok)}
   .ev[data-t="error"]::before,.ev[data-t="tool-error"]::before{background:var(--no)}
   .ev[data-t="approval-requested"]::before,.ev[data-t="control"]::before,.ev[data-t="quota-warn"]::before{background:var(--warn)}
+  /* skill 自成一色：它不是一次普通工具调用，是往这一轮里装了一段别人写的指令 */
+  .ev[data-t="skill"]::before{background:var(--calm)}
+  /* 用过哪些 skill。**只在真用过时才画**——一条写着「无」的空行等于告诉你
+     这里有个功能坏了，而事实是这一轮压根没用 skill */
+  .skills{display:flex; gap:6px; flex-wrap:wrap; align-items:baseline; margin-top:9px}
+  .skills .lbl{font-size:11.5px; color:var(--dim); flex:0 0 auto}
+  .skills .sk{
+    font:11.5px ui-monospace,Menlo,monospace; padding:3px 8px; border-radius:20px;
+    background:var(--monobg); color:var(--calm);
+  }
   .ev .h{display:flex; align-items:baseline; gap:8px}
   .ev .k{font-size:12px; color:var(--dim); flex:0 0 auto}
   .ev .t{font-size:11.5px; color:var(--dim); margin-left:auto; flex:0 0 auto; font-variant-numeric:tabular-nums}
@@ -130,6 +140,7 @@
   <!-- 后端身份单独一行：它决定这一页哪些操作有效，不该混在状态数字里 -->
   <div class="agent hidden" id="agent"></div>
   <div class="chips" id="chips"></div>
+  <div class="skills hidden" id="skills"></div>
 </header>
 
 <main><div class="tl" id="tl"></div></main>
@@ -149,7 +160,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({'&':'&amp;','<':'
 const KIND = {
   'session-start': '会话开始', prompt: '提问', tool: '工具', 'tool-error': '工具失败',
   'approval-requested': '请求审批', 'permission-prompt': '权限提示', control: '控制',
-  'quota-warn': '额度预警', stop: '完成', error: '出错', idle: '等你回话',
+  'quota-warn': '额度预警', stop: '完成', error: '出错', idle: '等你回话', skill: '使用 skill',
   notification: '通知', 'session-end': '会话结束',
 };
 
@@ -236,6 +247,38 @@ function render(data) {
     $('note').textContent = note;
     $('note').classList.toggle('hidden', !note);
   }
+
+  /**
+   * 这个会话用过哪些 skill。
+   *
+   * ## 数据来自事件流，不是磁盘
+   *
+   * 「盘上装了哪些 skill」和「这一轮真的用了哪些」是两个问题，而只有后者
+   * 是**观测到的事实**——它不会因为插件启停、marketplace 更新、项目级
+   * skill 目录而悄悄变得不对。前者要诚实地算出来得分三档来源（用户级 /
+   * 已启用插件带的 / 项目级），少算一档就是在骗人。
+   *
+   * 而且这一页要回答的是「它是不是在按我期望的路子走」，那正是这一条。
+   *
+   * ## 去重但保留首次出现的顺序
+   *
+   * 同一个 skill 一轮里被调好几次很常见（每次带不同参数）。列成一排重复的
+   * 名字既占地方又没多说什么。按先后排，因为那是它实际发生的顺序。
+   *
+   * ## 一条都没有就整块不画
+   *
+   * 不画一个写着「无」的空行——这一页别处已经反复守这条规矩（没有窗口读数
+   * 的后端整条 ctx 不画，而不是画一个 0%）。空着和「没用过」在屏幕上长得
+   * 一样，但前者会让人以为这里坏了。
+   */
+  const skills = [...new Set(
+    (data.events || []).filter((e) => e.type === 'skill' && e.detail).map((e) => e.detail),
+  )];
+  $('skills').innerHTML = skills.length
+    ? `<span class="lbl">用过的 skill</span>` +
+      skills.map((k) => `<span class="sk">${esc(k)}</span>`).join('')
+    : '';
+  $('skills').classList.toggle('hidden', !skills.length);
 
   const evs = (data.events || []).slice().reverse();
   if (evs.length) {
