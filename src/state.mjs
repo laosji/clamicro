@@ -35,6 +35,9 @@ function subStateForTool(toolName, toolInput) {
   if (/^(Read|Grep|Glob|WebSearch|WebFetch|NotebookRead)$/.test(toolName)) return 'Searching'
   if (/^(Edit|Write|NotebookEdit)$/.test(toolName)) return 'Editing'
   if (toolName === 'Task' || toolName === 'Agent') return 'Delegating'
+  // 和 'Calling MCP' 并列：两者都是「去用一个我们自己不知道内容的东西」。
+  // 落到 'Working' 的话，手机上一个 skill 调用和一次普通工具调用长得一样
+  if (toolName === 'Skill') return 'Using Skill'
   if (toolName === 'Bash') {
     const cmd = toolInput?.command ?? ''
     if (/\b(test|pytest|jest|vitest|go test|cargo test|npm t|npm run test)\b/.test(cmd)) {
@@ -720,7 +723,18 @@ export class Store extends EventEmitter {
   }
 }
 
+/**
+ * 时间线那一行冒号后面写什么。**纯粹是个字段挑选器**，不做判断。
+ *
+ * `input.skill` 是补进来的：Skill 的入参是 {skill, args}，上面这串一个都不沾，
+ * 于是实测时间线里是一条 `Skill: `——冒号后面空的。手机上滚过去，你知道它
+ * 调了个 skill，但不知道调的是哪个，而那正是唯一有信息量的那半句。
+ *
+ * 排在 description 前面：Skill 没有 description，但将来某个工具两样都有时，
+ * 更具体的那个更该显示。
+ */
 function summarizeInput(input) {
   if (!input || typeof input !== 'object') return ''
-  return input.command ?? input.file_path ?? input.pattern ?? input.url ?? input.description ?? ''
+  return input.command ?? input.file_path ?? input.pattern ?? input.url
+    ?? input.skill ?? input.description ?? ''
 }

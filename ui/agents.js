@@ -35,7 +35,7 @@ function agentLogo(agent) { return AGENT_LOGOS[agent] || ''; }
 
 /* 状态/子状态的中文显示。CSS 类仍用原文，只有显示文本走这张表。 */
 const STATE_LABEL = { Idle: '空闲', Running: '运行中', 'Waiting Approval': '等待批准', 'Waiting Input': '等你回话', Paused: '已暂停', Done: '已完成', Error: '出错' };
-const SUBSTATE_LABEL = { Thinking: '思考中', Working: '工作中', Searching: '搜索中', Editing: '编辑中', Delegating: '委派中', 'Running Test': '跑测试', 'Running Command': '执行命令', 'Calling MCP': '调用 MCP' };
+const SUBSTATE_LABEL = { Thinking: '思考中', Working: '工作中', Searching: '搜索中', Editing: '编辑中', Delegating: '委派中', 'Running Test': '跑测试', 'Running Command': '执行命令', 'Calling MCP': '调用 MCP', 'Using Skill': '使用 skill' };
 /**
  * 状态的中文名。
  *

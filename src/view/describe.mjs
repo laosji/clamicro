@@ -131,6 +131,37 @@ export function analyze(toolName, toolInput) {
     }
   }
 
+  /**
+   * Skill —— 走通用分支的话，headline 是光秃秃的 `Skill`。
+   *
+   * 这和上面 AskUserQuestion 那段注释说的是**同一个病**：真正的信息
+   * （用的是哪个 skill）被埋进 detail 里的一坨 JSON，而卡片和通知上最大的
+   * 那行字只有一个对人零信息量的工具名。那次特判了 AskUserQuestion，
+   * Skill 没跟上。
+   *
+   * 时间线那条更糟，实测是 `Skill: `——冒号后面什么都没有，因为
+   * summarizeInput 只认 command/file_path/pattern/url/description，
+   * 而 Skill 的入参是 {skill, args}，一个都不沾（那边一并补了）。
+   *
+   * detail 放 args 而不是 skill 名：detail 是**主视觉**，而 skill 名已经在
+   * headline 里了，重复一遍等于这张卡片什么都没多说。没有 args 时退回名字
+   * ——主视觉空着比重复更糟。
+   *
+   * impact 说的是**事实**，不是危险等级：调用一个 skill 本身什么都不执行，
+   * 它把一段别人写好的指令装进这一轮，模型接着照办。真正动手的那些
+   * （Bash / Write）各自还会来一条审批，所以这里不拔高成 danger；
+   * 但也不能标成「只读」——那是说反话，而**错的标签比没有标签更危险**。
+   */
+  if (toolName === 'Skill') {
+    const name = String(t.skill ?? '').trim()
+    const args = String(t.args ?? '').trim()
+    return {
+      headline: name ? `使用 skill「${name}」` : '使用一个 skill',
+      detail: args || name,
+      impact: [{ label: '装载 skill 指令', tone: 'warn' }],
+    }
+  }
+
   if (toolName?.startsWith('mcp__')) {
     return {
       headline: `MCP 调用 ${toolName.split('__').slice(1).join(' · ')}`,

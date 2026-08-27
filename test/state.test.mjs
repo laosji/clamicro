@@ -83,6 +83,8 @@ test('子状态是从 tool_name 推导的（Claude Code 不发这类事件）', 
     ['Bash', { command: 'npm run test' }, 'Running Test'],
     ['Bash', { command: 'pytest -q' }, 'Running Test'],
     ['mcp__slack__post', {}, 'Calling MCP'],
+    // 落到 'Working' 的话，手机上一次 skill 调用和一次普通工具调用长得一样
+    ['Skill', { skill: 'poster', args: 'x' }, 'Using Skill'],
     ['SomethingNew', {}, 'Working'],
   ]
   for (const [tool, input, expect] of cases) {
@@ -90,6 +92,35 @@ test('子状态是从 tool_name 推导的（Claude Code 不发这类事件）', 
       const s = new Store()
       hook(s, 'pre-tool-use', { tool_name: tool, tool_input: input })
       assert.equal(s.session('x').sub_state, expect)
+    })
+  }
+})
+
+/**
+ * 时间线那一行冒号后面**不能是空的**。
+ *
+ * summarizeInput 是个字段挑选器，只认 command/file_path/pattern/url/description。
+ * Skill 的入参是 {skill, args}，一个都不沾，于是实测手机上滚过去的是一条
+ * `Skill: `——你知道它调了个 skill，但不知道调的是哪个，而那是这行里唯一
+ * 有信息量的半句。
+ *
+ * 钉的是「冒号后面有东西」这个契约，不是某个具体串：将来加别的工具时，
+ * 漏掉字段的表现和这次一模一样，而它不会让任何现有测试变红。
+ */
+test('时间线：工具调用那一行不能只有一个工具名', async (t) => {
+  const cases = [
+    ['Skill', { skill: 'poster', args: '香港银行利率' }, /poster/],
+    ['Bash', { command: 'npm run build' }, /npm run build/],
+    ['Read', { file_path: '/a/b.js' }, /b\.js/],
+    ['WebFetch', { url: 'https://example.com' }, /example\.com/],
+  ]
+  for (const [tool, input, expect] of cases) {
+    await t.test(tool, () => {
+      const s = new Store()
+      hook(s, 'pre-tool-use', { tool_name: tool, tool_input: input })
+      const line = s.events().find((e) => e.type === 'tool').detail
+      assert.doesNotMatch(line, /^\w+:\s*$/, `冒号后面是空的: ${JSON.stringify(line)}`)
+      assert.match(line, expect, `实际: ${JSON.stringify(line)}`)
     })
   }
 })

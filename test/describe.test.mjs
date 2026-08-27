@@ -69,6 +69,28 @@ test('analyze 按工具类型分层', async (t) => {
     assert.match(analyze('WebFetch', { url: 'https://example.com/x' }).headline, /example\.com/)
     assert.match(analyze('mcp__slack__post', {}).headline, /MCP 调用 slack · post/)
   })
+  /**
+   * Skill 走通用分支的话，卡片上最大的那行字是光秃秃的 `Skill`——
+   * 一个对人零信息量的工具名，而「哪个 skill」被埋进 detail 的 JSON 里。
+   * 这跟上面 AskUserQuestion 特判要解决的是同一件事。
+   */
+  await t.test('Skill：headline 说清是哪个，detail 给参数', () => {
+    const v = analyze('Skill', { skill: 'poster', args: '香港银行利率' })
+    assert.match(v.headline, /poster/, `headline 里必须有 skill 名，实际: ${v.headline}`)
+    assert.equal(v.detail, '香港银行利率')
+    // 「只读」是说反话——它把一段别人写的指令装进这一轮
+    assert.ok(v.impact.length, 'impact 不能是空的')
+    assert.ok(!v.impact.some((i) => i.label === '只读'))
+  })
+  await t.test('Skill 没带参数时，主视觉退回 skill 名而不是空着', () => {
+    const v = analyze('Skill', { skill: 'morning' })
+    assert.equal(v.detail, 'morning')
+  })
+  await t.test('Skill 缺字段也不炸', () => {
+    for (const bad of [{}, null, 'str', { skill: null }]) {
+      assert.ok(analyze('Skill', bad).headline, `analyze('Skill', ${JSON.stringify(bad)}) 没给出 headline`)
+    }
+  })
   await t.test('坏 URL 不炸', () => {
     assert.ok(analyze('WebFetch', { url: 'not a url' }).headline)
   })
