@@ -32,7 +32,15 @@ export class ControlStore extends EventEmitter {
     return this.#state.get(sessionId) ?? CONTROL.NONE
   }
 
-  /** 有没有会话正处于「已请求暂停但还没撞上拦截点」的状态 */
+  /**
+   * 此刻**真的**有工具调用挂在拦截点上吗。
+   *
+   * 注释一度写反了（说的是「已请求暂停但还没撞上拦截点」），而它恰好是这个
+   * 方法的**反面**——有 waiter 就说明已经撞上了。三个调用方（server.mjs 的
+   * held 事件、api.mjs 的控制响应、ui/agents.js 的 stateLabel）用的都是正确
+   * 语义，所以错的只有这行字。但 Paused 分「暂停中 / 已暂停」两个词全靠它，
+   * 下一个照着注释改代码的人会把那两个词反过来。
+   */
   isHeld(sessionId) {
     return (this.#waiters.get(sessionId)?.size ?? 0) > 0
   }

@@ -166,7 +166,21 @@ export function hookRoutes(ctx) {
        * 「按钮在那儿点了没反应」正是能力矩阵要消灭的东西，不能在这条
        * 最要紧的路径上把它放回来。
        */
-      if (payload.agent) s.agent = normalizeAgent(payload.agent)
+      /**
+       * `s &&` 不能省。`store.session(undefined)` 返回的是 **null**——
+       * 一条不带 session_id 的 PermissionRequest（畸形上报、将来某个适配器
+       * 漏填）会在这里抛 TypeError，被外层 catch 兜成 200 {}。
+       *
+       * 后果不是「少认一次 agent」：抛出的位置在 `approvals.wait()` **之前**，
+       * 于是审批记录已经建好、却没有任何人在等它——一条永远 pending、
+       * 手机上点了也送不回去的幽灵条目，直到被 sweep 清掉。
+       *
+       * 下面 label 那行早就写了 `s?.`，说明这里本来就预见过 s 可能是 null，
+       * 只有这一行漏了。加上之后这条路径能正常走完：markWaitingApproval
+       * 自己会因为没有 sessionId 而早退，审批仍然出现在 /api/approvals 里，
+       * 决定照样回得去。
+       */
+      if (s && payload.agent) s.agent = normalizeAgent(payload.agent)
 
       store.markWaitingApproval(payload.session_id, ap)
 

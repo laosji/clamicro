@@ -1,6 +1,7 @@
-import { readFileSync, writeFileSync, renameSync, existsSync, chmodSync } from 'node:fs'
+import { readFileSync, renameSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { CONFIG_DIR } from './config.mjs'
+import { writeAtomic } from './atomic.mjs'
 
 export const HISTORY_FILE = join(CONFIG_DIR, 'history.json')
 
@@ -69,10 +70,18 @@ export class History {
         // 而 statusLine 只在 Claude Code 渲染状态栏时才推一次，可能等很久
         limits: d.limits ?? null,
       }
-      const tmp = `${HISTORY_FILE}.tmp`
-      writeFileSync(tmp, JSON.stringify(payload))
-      renameSync(tmp, HISTORY_FILE) // 原子替换
-      chmodSync(HISTORY_FILE, 0o600) // 含命令原文
+      /**
+       * 走 writeAtomic，不再自己手写这三步。原来是
+       * `writeFileSync(tmp) → rename → chmod(0600)`，两个毛病：
+       *
+       *   · **chmod 在 rename 之后**。中间有一瞬间 history.json 是默认的 0644，
+       *     而这个文件里装的是命令原文。atomic.mjs 存在的理由之一就是这条，
+       *     它的注释写得很清楚——config.json 和 settings.json 都迁过去了，
+       *     只有这里还留着旧写法。
+       *   · **临时文件名不带 pid**。两个进程同时落盘会互相踩（一次性 CLI 命令
+       *     也会经 history.touch 排上一次 flush）。
+       */
+      writeAtomic(HISTORY_FILE, JSON.stringify(payload), 0o600)
     } catch (err) {
       console.error(`[history] 落盘失败: ${err.message}`)
     }
