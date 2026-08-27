@@ -238,7 +238,9 @@ function run(argv) {
      * 注意 emoji（⚠️ ⚡️ 📱）自带颜色不受 textColor 影响，只有 ✓ ✕ 这类
      * **字形**图标会跟着变——所以状态类的图标优先用字形。
      */
-    centeredGlyph(box, icon, TOP_R + 6 + 15, midY, 17, tint)
+    // 居中放在左侧那一块里（0 到 TOP_R + SIDE_ICON），不写死偏移：
+    // 写死的那个 36 在 53pt 宽的空当里偏右，看着像没对齐
+    centeredGlyph(box, icon, (TOP_R + SIDE_ICON) / 2, midY, 17, tint)
     const textX = TOP_R + SIDE_ICON + notchW
     const t = label(title, $.NSMakeRect(textX, midY - 9, SIDE_TEXT - 12, 18), 12.5, $.NSFontWeightMedium, 1, tint)
     t.setAlignment($.NSTextAlignmentLeft)
@@ -268,11 +270,43 @@ function run(argv) {
     return p
   }
 
-  /** 把窗口摆到内置屏顶端正中，并按当前尺寸重画轮廓 */
+  /**
+   * 紧凑态左侧那块的宽度（窗口左边缘到刘海左边缘）。
+   *
+   * 终态是 TOP_R + SIDE_ICON —— 内容的落点（图标、textX）全是按这个数算的。
+   * 动画中途按进度插值，这样刘海区在整个展开过程里都**贴着物理刘海不动**，
+   * 只有两侧往外推。
+   */
+  const leftGapAt = (w) => (W === W0 ? TOP_R + SIDE_ICON : TOP_R + SIDE_ICON * Math.min(1, Math.max(0, (w - W0) / (W - W0))))
+
+  /**
+   * 把窗口摆到内置屏顶端，并按当前尺寸重画轮廓。
+   *
+   * ## 紧凑态为什么不能居中
+   *
+   * 原来两种形态都是 `(frame.width - w) / 2`。而紧凑态的内容是按
+   * 「刘海从窗口左边 TOP_R + SIDE_ICON 处开始」算的（textX 就是这么写的）。
+   * 窗口一居中，刘海在窗口里的**实际**位置变成 (W - notchW) / 2 —— 两者只有
+   * 在 SIDE_ICON === SIDE_TEXT 时才相等，而 SIDE_TEXT 是按字宽算的（54–150），
+   * 几乎永远不等。
+   *
+   * 差值是 (SIDE_TEXT - SIDE_ICON) / 2，全部落在文字左边被物理刘海压住：
+   * 短标签（SIDE_TEXT=54）压掉 8pt，长标签（150）压掉 56pt。真机上就是
+   * 「刘海内容有点被遮挡」。
+   *
+   * 修法是**别居中**：按刘海左边缘对齐，胶囊保持窄。改成两侧等宽也能修，
+   * 但那会让长文案时的胶囊平白宽出一截，而紧凑态的意义就是「一眼扫过、
+   * 不占地方」。
+   *
+   * 展开态仍然居中：它的内容压在刘海**下方**，本来就是对称的。
+   */
+  const alignNotch = !hasSub && notch.w > 0 && notch.l > 0
   const layout = (w, h) => {
     win.setFrameDisplay(
       $.NSMakeRect(
-        frame.origin.x + (frame.size.width - w) / 2,
+        alignNotch
+          ? frame.origin.x + notch.l - leftGapAt(w)
+          : frame.origin.x + (frame.size.width - w) / 2,
         frame.origin.y + frame.size.height - h, // 贴住屏幕最顶端——刘海就在那里
         w,
         h,
@@ -281,8 +315,15 @@ function run(argv) {
     )
     body.setFrame($.NSMakeRect(0, 0, w, h))
     mask.setPath(shape(w, h))
-    // 容器钉在顶部：窗口从刘海高度长到全高时，文字不能跟着往下滑
-    box.setFrame($.NSMakeRect((w - W) / 2, h - H, W, H))
+    // 容器钉在顶部：窗口从刘海高度长到全高时，文字不能跟着往下滑。
+    // 横向同理：对齐模式下容器跟着刘海走，别再按窗口居中——否则内容会在
+    // 展开过程中相对刘海滑动，而它正是我们要钉住的那个参照物
+    box.setFrame($.NSMakeRect(
+      alignNotch ? leftGapAt(w) - (TOP_R + SIDE_ICON) : (w - W) / 2,
+      h - H,
+      W,
+      H,
+    ))
   }
 
   // 起始形态就是刘海本身：从它「长出来」，而不是凭空淡入。
@@ -454,10 +495,12 @@ function notchSize(screen) {
     if (top <= 0) return { w: 0, h: 0 }
     const l = Number(screen.auxiliaryTopLeftArea.size.width) || 0
     const r = Number(screen.auxiliaryTopRightArea.size.width) || 0
-    if (l <= 0 || r <= 0) return { w: 0, h: top }
-    return { w: Math.ceil(Number(screen.frame.size.width) - l - r), h: Math.ceil(top) }
+    if (l <= 0 || r <= 0) return { w: 0, h: top, l: 0 }
+    // l 是刘海**左边缘**在屏幕坐标里的位置。紧凑态要靠它把窗口对齐物理刘海，
+    // 光有宽度不够——刘海未必正好在屏幕正中（实测 l=763 / r=762，差 1pt）
+    return { w: Math.ceil(Number(screen.frame.size.width) - l - r), h: Math.ceil(top), l }
   } catch {
-    return { w: 0, h: 0 }
+    return { w: 0, h: 0, l: 0 }
   }
 }
 
