@@ -21,6 +21,9 @@
 import { test, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
 import { makeNotifier, notifyHealth, resetNotifyHealth } from '../src/notify.mjs'
+import { mkdtempSync, writeFileSync, chmodSync, rmSync } from 'node:fs'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os' 
 
 const cfg = (style = 'banner') => ({ notify: { macNotify: true, style, respectFocus: false } })
 const ok = () => {}
@@ -103,4 +106,53 @@ test('错误文本会截断', async () => {
   const notify = makeNotifier(cfg(), { banner: boom('x'.repeat(5000)), notch: ok, focus: () => false })
   await notify({ title: 'x' })
   assert.ok(notifyHealth().lastError.length <= 200)
+})
+
+
+/**
+ * **真实的横幅通道**，不是注入的桩。
+ *
+ * 上面每一条都用 `banner: boom()` 测「抛了会不会记账」，而真正的
+ * notifyBanner 原来**从来不抛**：`p.on('close', resolve)` 不看退出码，
+ * osascript 语法错误、二进制不在、被安全策略拦下，全都算「发出去了」。
+ * 于是这整个文件测的健康记录，对生产里那条横幅通道一次都没生效过。
+ *
+ * 而这不是假想：转义顺序那个 bug（先转义后截断，留下悬空反斜杠）实测扫
+ * 120 种对齐有 48 次让 osascript 真的编译失败——日志里一行没有，
+ * failed 一直是 0。**没抛异常不等于送达了**，这条对横幅同样成立。
+ *
+ * 用 PATH 换掉 osascript：spawn 在调用那一刻按 process.env.PATH 找二进制，
+ * 所以同进程改一下就够，不必起子进程。
+ */
+test('横幅：osascript 非 0 退出要记成失败，不能算送达', async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'clamicro-osa-'))
+  const realPath = process.env.PATH
+  const stub = (body) => {
+    writeFileSync(join(dir, 'osascript'), body)
+    chmodSync(join(dir, 'osascript'), 0o755)
+    process.env.PATH = `${dir}:${realPath}`
+  }
+  t.after(() => {
+    process.env.PATH = realPath
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  await t.test('语法错误 → failed+1，且 stderr 进 lastError', async () => {
+    resetNotifyHealth()
+    stub('#!/bin/sh\necho "0:0: syntax error: A identifier can not go after this (-2740)" >&2\nexit 1\n')
+    // 不注入 banner：要走真的那条
+    await makeNotifier(cfg(), { notch: ok, focus: () => false })({ title: 'x', body: 'rm -rf /' })
+    const h = notifyHealth()
+    assert.equal(h.failed, 1, '非 0 退出被当成了成功')
+    assert.equal(h.ok, 0)
+    assert.match(h.lastError, /syntax error/, `理由要说人话，实际: ${h.lastError}`)
+  })
+
+  await t.test('退出码 0 → 仍然算 ok', async () => {
+    resetNotifyHealth()
+    stub('#!/bin/sh\nexit 0\n')
+    await makeNotifier(cfg(), { notch: ok, focus: () => false })({ title: 'x', body: 'ls' })
+    assert.equal(notifyHealth().failed, 0)
+    assert.equal(notifyHealth().ok, 1)
+  })
 })

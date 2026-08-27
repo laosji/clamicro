@@ -40,9 +40,35 @@ import { showHud } from './hud.mjs' // 声音也归它管，见 notifyNotch
 export { plainText }
 
 
+/**
+ * 把一段文本安全地嵌进 osascript 的字符串字面量。
+ *
+ * **先截断，再转义——顺序不能反。** 原来是先转义再 `slice(0, 200)`：转义会让
+ * 字符串变长，那一刀就可能正好落在 `\"` 这对中间，留下一个孤立的反斜杠，
+ * 它会把收尾的引号吃掉，整条 AppleScript 于是语法错误：
+ *
+ *   osascript: 235:244: syntax error: “标识符”不能跟在““"””之后。 (-2740)
+ *
+ * 而通知正文就是 `ap.summary`——shell 命令原文，引号遍地。命中概率跟前 200
+ * 字符里有多少引号成正比，不是理论问题。命中时这条提醒**整条消失**，
+ * 正是这个文件顶上那句「通知的第一职责是送达」的反面。
+ *
+ * 控制字符换成空格：AppleScript 字面量里放不了裸换行。body/subtitle 走
+ * plainText 时已经把 \s 压掉了，但 title 没有，而 \u0007 这类也不算 \s。
+ *
+ * 导出是为了让测试打在这段真实逻辑上，而不是一份会漂移的拷贝——
+ * 同 confirm.mjs 的 escapeAppleScript。**那边是同一件事的第二份实现**，
+ * 改这里时去看一眼：这个仓库反复栽在「同一个错误在两个地方只修了一个」上。
+ */
+export function escapeOsaString(s, max = 200) {
+  return String(s ?? '')
+    .replace(/[\u0000-\u001f\u007f]/g, ' ')
+    .slice(0, max)
+    .replace(/["\\]/g, '\\$&')
+}
+
 async function notifyBanner(msg) {
-  // osascript 的字符串要转义引号和反斜杠，否则命令会被截断
-  const esc = (s) => String(s ?? '').replace(/["\\]/g, '\\$&').slice(0, 200)
+  const esc = (s) => escapeOsaString(s)
   const parts = [
     `display notification "${esc(plainText(msg.body))}"`,
     `with title "${esc(msg.title ?? 'Clamicro')}"`,
@@ -50,10 +76,36 @@ async function notifyBanner(msg) {
   if (msg.subtitle) parts.push(`subtitle "${esc(plainText(msg.subtitle))}"`)
   // 配对码这类「你正等着它出现」的通知不该出声——你人就在屏幕前
   if (msg.silent !== true) parts.push('sound name "Ping"')
-  await new Promise((resolve) => {
-    const p = spawn('osascript', ['-e', parts.join(' ')], { stdio: 'ignore' })
-    p.on('close', resolve)
-    p.on('error', resolve)
+  /**
+   * 非 0 退出要**抛出来**，不能跟成功走同一条路。
+   *
+   * 原来两个事件都直接 resolve：osascript 语法错误、二进制不在、被安全策略
+   * 拦下——全都被当成「发出去了」。于是上面 makeNotifier 里那套健康计数
+   * （consecutiveFails / lastError，`/api/config` 的 notifyHealth 就靠它）
+   * **对横幅这条通道从来没有生效过**：它只在 banner 自己 throw 时才记账，
+   * 而这里永远不 throw。
+   *
+   * 这正是上面那个转义顺序 bug 能潜这么久的原因——实测扫 120 种对齐，
+   * 修复前有 48 次 osascript 真的编译失败，而日志里一行都没有，
+   * `[notify] xxx` 照常打印，健康记录里 failed 一直是 0。
+   *
+   * 说到底这就是这个文件顶上写的那条：**没抛异常不等于送达了**。刘海那条
+   * 路承认了这一点（HUD 的 done(code) 认退出码），横幅这条一直没认。
+   * 两个调用方都已经 catch 了（style=banner 那条 try/catch 记 fail，
+   * notch 回落那条 .catch 记 fail），所以拒绝在这里是安全的。
+   *
+   * stderr 收下来当理由：`syntax error: … (-2740)` 比「退出码 1」有用得多。
+   */
+  await new Promise((resolve, reject) => {
+    const p = spawn('osascript', ['-e', parts.join(' ')], { stdio: ['ignore', 'ignore', 'pipe'] })
+    let err = ''
+    p.stderr?.on('data', (d) => { err += d })
+    p.on('close', (code) => {
+      if (!code) return resolve()
+      reject(new Error(err.trim().split('\n')[0] || `osascript 退出码 ${code}`))
+    })
+    // spawn 本身失败（osascript 不在、fork 不出来）同样是「没送达」
+    p.on('error', reject)
   })
 }
 

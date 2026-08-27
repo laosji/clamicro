@@ -196,6 +196,26 @@ test('设备名是 User-Agent，必须当成敌意输入', async (t) => {
     assert.ok(escapeAppleScript('x'.repeat(500)).length <= 120)
   })
 
+  /**
+   * 截断排在转义**之前**。
+   *
+   * 反过来的话，转义撑长的字符串被切在 `\"` 这对中间，留下一个孤立的反斜杠
+   * ——它会把整段脚本收尾的那个引号吃掉，osascript 语法错误、非 0 退出，
+   * confirm 按 interrupted 处理，于是谁都配不上对。方向是 fail-closed，
+   * 但那是一次谁也看不懂的故障。notify.mjs 的 escapeOsaString 同理，
+   * 那边是真出过事的。
+   */
+  await t.test('截断不会切在转义序列中间（不留悬空反斜杠）', () => {
+    for (let n = 100; n <= 140; n++) {
+      for (const ch of ['"', '\\']) {
+        const out = escapeAppleScript('x'.repeat(n) + ch.repeat(40))
+        // 末尾的反斜杠必须是偶数个：奇数就说明有一个是孤儿
+        const trailing = out.length - out.replace(/\\+$/, '').length
+        assert.equal(trailing % 2, 0, `n=${n} ch=${ch} 末尾 ${trailing} 个反斜杠: ${out.slice(-8)}`)
+      }
+    }
+  })
+
   await t.test('非字符串不炸', () => {
     for (const v of [null, undefined, 123, {}]) assert.equal(typeof escapeAppleScript(v), 'string')
   })

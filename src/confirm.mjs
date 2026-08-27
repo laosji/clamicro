@@ -33,20 +33,33 @@ export const CONFIRM_TIMEOUT_MS = 60_000
 /**
  * AppleScript 字符串转义。
  *
- * 设备名来自 **User-Agent**，是完全受对方控制的一段文本，而它要被拼进一段
- * 会被执行的 AppleScript。不转义的话，一个精心构造的 UA 就能在你的 Mac 上
- * 执行任意 AppleScript——比拿到设备令牌严重得多。
+ * 设备名一路追上去来自 **User-Agent**，而它要被拼进一段会被执行的
+ * AppleScript。不转义的话，一个精心构造的 UA 就能在你的 Mac 上执行任意
+ * AppleScript——比拿到设备令牌严重得多。
+ *
+ * 今天这条路上还隔着 pages.mjs 的 deviceNameOf，它只回 iPhone/iPad/Mac/
+ * Android 四个固定词，所以 UA 其实进不来。**但转义不能因此省掉**：那一层是
+ * 「顺手做的可读性处理」，不是安全边界，哪天改成透传 UA（很自然的一次改动）
+ * 就直接落到这里。这个函数是那条边界本身。
  *
  * 反斜杠必须**先**处理，否则会把后面转义引号时新加的反斜杠再转一遍。
  * 控制字符换成空格：AppleScript 字面量里放不了裸换行，而且一个多行的
  * 「设备名」本身就是在试图伪造对话框的其余部分。
+ *
+ * **截断必须排在转义之前。** 原来 `.slice(0, 120)` 在最后一步：转义会让字符串
+ * 变长，那一刀就可能落在 `\\"` 这对中间，留下一个孤立的反斜杠把收尾引号吃掉
+ * ——整段 AppleScript 语法错误、osascript 非 0 退出、confirm 按 interrupted
+ * 处理，于是**谁都配不上对**。方向是安全的（fail-closed），但那是一次谁也
+ * 看不懂的故障。今天这里够不着（设备名是 deviceNameOf 给的固定几个词），
+ * 所以它是颗**没被踩到的雷**——而 notify.mjs 的 escapeOsaString 是同一件事的
+ * 另一份实现，同样的顺序在那边是真出过事的。改一处记得看另一处。
  */
 export function escapeAppleScript(s) {
   return String(s ?? '')
     .replace(/[\u0000-\u001f\u007f]/g, ' ')
+    .slice(0, 120)
     .replace(/\\/g, '\\\\')
     .replace(/"/g, '\\"')
-    .slice(0, 120)
 }
 
 /**

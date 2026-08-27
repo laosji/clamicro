@@ -11,7 +11,7 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { makeNotifier } from '../src/notify.mjs'
+import { makeNotifier, escapeOsaString } from '../src/notify.mjs'
 
 const spy = () => {
   const calls = []
@@ -200,5 +200,41 @@ test('通知正文剥掉 markdown', async (t) => {
 
   await t.test('非字符串不炸', () => {
     for (const v of [null, undefined, 123, {}]) assert.equal(plainText(v), '')
+  })
+})
+
+/**
+ * 嵌进 osascript 字符串字面量的那一层。
+ *
+ * 不测「屏幕上长什么样」（测不了），测的是**这条提醒还发不发得出去**：
+ * 转义排在截断前面的话，那一刀可能落在 `\\"` 这对中间，留下一个孤立的
+ * 反斜杠把收尾引号吃掉，整段 AppleScript 语法错误、osascript 非 0 退出，
+ * 这条提醒于是整条消失。而通知正文就是命令原文，引号遍地。
+ *
+ * 实测过原来的写法：
+ *   osascript: 235:244: syntax error: “标识符”不能跟在““"””之后。 (-2740)
+ */
+test('osascript 字符串转义', async (t) => {
+  await t.test('引号和反斜杠都转义了，闭不掉字符串', () => {
+    const out = escapeOsaString('rm -rf "/tmp/a\\b"')
+    assert.ok(!/(^|[^\\])"/.test(out), `有未转义的引号: ${out}`)
+  })
+
+  await t.test('截断不会切在转义序列中间（不留悬空反斜杠）', () => {
+    for (let n = 180; n <= 220; n++) {
+      for (const ch of ['"', '\\']) {
+        const out = escapeOsaString('x'.repeat(n) + ch.repeat(40))
+        const trailing = out.length - out.replace(/\\+$/, '').length
+        assert.equal(trailing % 2, 0, `n=${n} 末尾 ${trailing} 个反斜杠: ${out.slice(-8)}`)
+      }
+    }
+  })
+
+  await t.test('控制字符换成空格 —— 字面量里放不了裸换行', () => {
+    assert.equal(escapeOsaString('a\nb'), 'a b')
+  })
+
+  await t.test('非字符串不炸', () => {
+    for (const v of [null, undefined, 123, {}]) assert.equal(typeof escapeOsaString(v), 'string')
   })
 })
