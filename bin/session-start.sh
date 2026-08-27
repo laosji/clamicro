@@ -51,7 +51,20 @@ elif health | grep -q '"stale":true'; then
 fi
 
 URL="${BASE}/hooks/session-start"
-[ -n "$AGENT" ] && URL="${URL}?agent=${AGENT}"
+sep='?'
+[ -n "$AGENT" ] && { URL="${URL}${sep}agent=${AGENT}"; sep='&'; }
+
+# 宿主进程 PID。服务靠它判「还有没有人在用」——全部宿主都没了就自己退出，
+# 而不是空转到天亮（见 src/lifecycle.mjs）。
+#
+# $PPID 就是 agent 本身，中间**没有 shell**：实测过，Claude Code 的 hook
+# 父进程是 .../claude-code/<ver>/claude.app/Contents/MacOS/claude，Codex 的是
+# ChatGPT.app 里那个 app-server。所以不用往上追祖父。
+#
+# 两个后端的形状不一样，用的时候要知道：Claude Code 是**一个会话一个进程**，
+# 而 Codex 的 app-server 是**所有会话共用的常驻进程**。所以这个 PID 只够回答
+# 「这个后端还开着吗」，不够回答「这个会话还活着吗」——后者仍归 sweepStale。
+URL="${URL}${sep}owner=${PPID}"
 
 curl -s -m 2 -X POST -H 'Content-Type: application/json' \
   --data-binary "$input" "$URL" >/dev/null 2>&1 || true

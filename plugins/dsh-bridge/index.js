@@ -129,7 +129,20 @@ export function apply(ctx, rawConfig) {
 
         if (!seen.has(sid)) {
           seen.add(sid)
-          reporter.send('session-start', { session_id: sid, cwd: cwdOf(session), source: 'dsh' })
+          /**
+           * `owner_pid` = DSH 自己的进程号。
+           *
+           * clamicro 靠它判「还有没有后端在用」，全没了就自己退出，而不是
+           * 空转到天亮。这个插件跑在 DSH 主进程内，所以 `process.pid`
+           * **就是** DSH——不用像 hook 脚本那样去追父进程。
+           *
+           * 注意它是**所有会话共用的**：DSH 不像 Claude Code 一个会话一个
+           * 进程。所以它只够回答「DSH 还开着吗」，不够回答「这个会话还
+           * 活着吗」。
+           */
+          reporter.send('session-start', {
+            session_id: sid, cwd: cwdOf(session), source: 'dsh', owner_pid: process.pid,
+          })
         }
 
         const mapped = translator.map(sid, event)

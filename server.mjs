@@ -18,6 +18,7 @@ import { allowedHosts, hostAllowed, isLoopback, applySecurityHeaders } from './s
 import { makeAuth } from './src/auth/token.mjs'
 import { PairingStore, ConfirmStore, addDevice, removeDevice } from './src/auth/pairing.mjs'
 import { createCodexTail } from './src/codex-tail.mjs'
+import { shouldExit } from './src/lifecycle.mjs'
 import { hookRoutes } from './src/routes/hooks.mjs'
 import { pageRoutes } from './src/routes/pages.mjs'
 import { apiRoutes } from './src/routes/api.mjs'
@@ -174,7 +175,53 @@ if (!ONE_SHOT) {
     // 不为它单开定时器
     const cut = rotateLog()
     if (cut) console.log(`[log] 日志已截断：${Math.round(cut.was / 1024)}KB → ${Math.round(cut.now / 1024)}KB`)
+    maybeExit()
   }, 300_000).unref()
+}
+
+/**
+ * 所有后端都退出了就自己走。判据见 src/lifecycle.mjs。
+ *
+ * ## 为什么要连着两拍才动手
+ *
+ * 巡检是 5 分钟一拍，两拍就是关掉最后一个应用之后**至少十分钟**。这个余量
+ * 是给「重启」留的：退出 ChatGPT 再打开、Claude Code 自己更新重开，中间
+ * 都有一小段谁都不在的窗口。一拍就退的话，那段窗口里服务会走掉，而紧接着
+ * 的 SessionStart 又要重新把它拉起来——用户看到的是手机上莫名其妙断一下线。
+ *
+ * ## 前台启动的不退
+ *
+ * `clamicro start` 是 `stdio: 'inherit'` 的前台进程，人正盯着这个终端窗口，
+ * 而窗口里的进程自己消失是最莫名其妙的一种行为。hook 拉起的那条是
+ * `nohup … &` + `disown`，stdout 指向日志文件，isTTY 为假。
+ */
+let exitStreak = 0
+function maybeExit() {
+  const { exit, why } = shouldExit(store.sessions(), {
+    // 见过的宿主，会话结束了也还在表里——「应用还开着」才是这里要的判据
+    owners: store.owners(),
+    pendingApprovals: approvals.pending().length,
+    foreground: process.stdout.isTTY === true,
+  })
+  if (!exit) {
+    if (exitStreak) console.log(`[lifecycle] 又有人在用了（${why}），取消关停`)
+    exitStreak = 0
+    return
+  }
+  exitStreak += 1
+  if (exitStreak < 2) {
+    console.log(`[lifecycle] 没有后端在用了（${why}），再确认一次就退出`)
+    return
+  }
+  // 关停必须留下理由：否则用户下次发现服务不在了，手上只有一个消失的
+  // 进程和零条线索。下次开 Claude Code / Codex 时 SessionStart 会把它拉回来
+  console.log(`[lifecycle] 所有后端都退出了（${why}），服务关闭。下次开会话会自动拉起`)
+  history.flushNow()
+  stopWatching()
+  codexTail.stop()
+  for (const res of sseClients) res.end()
+  for (const s of servers.values()) s.close()
+  setTimeout(() => process.exit(0), 500).unref()
 }
 
 /**

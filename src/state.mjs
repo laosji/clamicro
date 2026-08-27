@@ -136,6 +136,15 @@ export class Store extends EventEmitter {
         cost_usd: null,
         // 累计 token。只有按 API key 计费、没有窗口配额的后端会有（quota:'tokens'）。
         // 不换算成金额：那要一张会悄悄过期的价目表，而一个不准的金额比没有更糟
+        /**
+         * 起这个会话的那个进程。session-start 时由 hook 带上来（`?owner=`）。
+         *
+         * 形状因后端而异，用之前必须知道：Claude Code 是**一个会话一个进程**，
+         * 而 Codex 的 app-server、DSH 的主进程都是**所有会话共用的常驻进程**。
+         * 所以它只够回答「这个后端还开着吗」，**不够**回答「这个会话还活着吗」
+         * ——后者仍归 sweepStale。拿它去收会话会把 Codex 的会话全判错。
+         */
+        owner_pid: null,
         tokens: null,
         // 后端有没有上报过用量。null=还没轮完不知道；true=上报过；false=报过
         // 但适配器不报用量。用它把「没报用量」和「0 token」区分开（见 agentUsage）。
@@ -188,6 +197,23 @@ export class Store extends EventEmitter {
    * 所以另开一张表：键是后端名，值是**一组**窗口，每个窗口自带 key/label。
    * Claude Code 那条路一个字节都不动，新后端各说各的。
    */
+  /**
+   * 见过的宿主进程：pid -> 最后一次见到的时间。
+   *
+   * **记在会话之外，而且会话结束了也不删。** 这正是它和 `session.owner_pid`
+   * 的区别，也是「所有应用退出后关服务」这个要求的字面意思：
+   * Claude Code 开着但当前没有会话时，服务不该走——它的进程还在。
+   * 只看当前会话的话，一个正常结束的会话就会让服务在十分钟后退出，
+   * 而那时应用还开着，用户下次开会话又得等它重新拉起。
+   *
+   * pid 复用的风险是知道的：一个死掉的 pid 理论上会被无关进程占回去，
+   * 于是我们误以为某个后端还活着。失败方向是**多跑一会儿**，而不是提前
+   * 关掉——那是这里唯一能接受的方向。
+   */
+  owners() {
+    return [...this.#owners].map(([pid, at]) => ({ pid, at }))
+  }
+
   agentLimits() {
     return Object.fromEntries(this.#agentLimits)
   }
@@ -306,6 +332,12 @@ export class Store extends EventEmitter {
 
     switch (eventName) {
       case 'session-start':
+        // 宿主进程。见 src/lifecycle.mjs —— 全部宿主都没了服务就自己退出。
+        // 同时记进 #owners：那张表不随会话结束而清空，见 owners()
+        if (Number.isInteger(payload.owner_pid) && payload.owner_pid > 0) {
+          s.owner_pid = payload.owner_pid
+          this.#owners.set(payload.owner_pid, Date.now())
+        }
         this.#touch(s, { state: STATE.IDLE, sub_state: null })
         this.#log(id, 'session-start', payload.source ?? 'startup')
         break
@@ -592,6 +624,9 @@ export class Store extends EventEmitter {
 
   // agent -> { windows: [{key, label, pct, resets_at}], at }。见 agentLimits()
   #agentLimits = new Map()
+
+  // 宿主 pid -> 最后一次见到的时间。见 owners()
+  #owners = new Map()
   // statusLine 是会话启动时读一次的。装 clamicro 之前就开着的会话永远不会调它，
   // 表现是额度一直空白且毫无错误。记一笔「有没有被调用过」，好把
   // 「还没有会话上报」和「有会话但额度拿不到」区分开。

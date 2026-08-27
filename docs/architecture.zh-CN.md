@@ -290,6 +290,51 @@ Agent ◄──── 响应即决策 ────────┘
 这就是为什么 Codex 的 inbox 不可能有：它**没有 `Stop` 事件**，那个唯一能往
 里发话的口子不存在。也是为什么单靠 `PreToolUse` 拦不住一个不调工具的回合。
 
+## 5.5 进程生命周期：谁把服务拉起来，谁让它走
+
+**拉起来**是各后端的 SessionStart：
+
+| 后端 | 会不会拉起 | 机制 |
+|---|---|---|
+| Claude Code | 会 | SessionStart 是 `command` 类型，跑 `bin/session-start.sh` |
+| Codex | 会 | `bin/codex-hook.sh` 的 session-start `exec` 同一个脚本 |
+| DSH | **不会** | 插件进程内 `fetch`，连不上只记一行日志 |
+
+DSH 这条是个真实的缺口：**只开 DSH 的话服务不会起来**，手机上什么都没有，
+唯一的线索是 DSH 自己日志里的一行。补它需要 DSH 侧有一个「启动时执行命令」
+的口子，目前没找到。
+
+**让它走**是 `src/lifecycle.mjs`：所有后端都退出了就自己关，而不是空转到天亮。
+
+判据不是「会话数为零」——`session-end` 在 kill -9 / 关终端 / 崩溃时都不发，
+那样的会话永远赖在表里，服务于是**永远不退**（方向正好反了）。也不是按名字
+搜进程——`service-id.mjs` 早有结论「命令行只用来验证一个已知 PID，不用来
+查找进程」，而 Claude Code 的可执行文件路径带版本号、有三种形态。
+
+用的是 **session-start 时宿主自报的 PID**（`?owner=`），判活是 `kill(pid, 0)`。
+实测 `$PPID` 就是 agent 本身，中间没有 shell：
+
+```
+claude-code  ppid → …/claude-code/<ver>/claude.app/Contents/MacOS/claude
+codex        ppid → /Applications/ChatGPT.app/…/codex … app-server
+dsh          插件在 DSH 进程内，直接 process.pid
+```
+
+**形状因后端而异，这决定了它只能做这一件事**：Claude Code 是一个会话一个
+进程，而 Codex 的 app-server、DSH 的主进程是所有会话共用的常驻进程。所以它
+回答的是「这个后端还开着吗」，**不是**「这个会话还活着吗」——后者仍归
+`sweepStale`。拿它去收会话会把 Codex 的会话全判错。
+
+四条「拦住」，方向一律偏保守（关错的代价是审批静默失效，多跑的代价只是一个
+闲置进程）：前台启动（`clamicro start`，人正盯着那个窗口）、有待审批（服务
+一走卡片永远挂着，而 Codex 拿不到回包会当作「无意见」放行）、任一宿主还活着、
+有**新鲜的**未知宿主会话（升级期的老会话；过了陈旧线才不再算数，否则一个
+kill -9 留下的会话会把服务钉死到重启）。
+
+还要**连着两拍**（巡检 5 分钟一拍，即至少十分钟）才动手。这个余量是给重启
+留的：退出 ChatGPT 再打开、Claude Code 自我更新，中间都有一段谁都不在的窗口，
+一拍就退会让用户看到手机莫名断一下线。
+
 ## 6. 已知的粗糙处
 
 写在这里是为了不让它们被当成设计。

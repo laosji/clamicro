@@ -90,6 +90,18 @@ export function adoptAgent(payload, url) {
    * 不认识的」不是一回事，后者该被纠正，前者不该被凭空补上。
    */
   if (payload.agent) payload.agent = normalizeAgent(payload.agent)
+
+  /**
+   * 宿主进程 PID（`?owner=`，session-start.sh 带上来的）。
+   *
+   * 服务靠它判「还有没有人在用」。只认查询参数、只认纯数字：这条会喂给
+   * `process.kill(pid, 0)`，一个非数字就是一次抛异常，而它在的位置是
+   * **每一条 hook 的必经之路**。
+   */
+  if (!payload.owner_pid) {
+    const o = url?.searchParams?.get('owner')
+    if (o && /^\d+$/.test(o)) payload.owner_pid = Number(o)
+  }
 }
 
 // 对账漂移只喊一次：它一旦发生就是每次工具调用都发生，每条都喊等于没喊
