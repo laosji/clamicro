@@ -390,8 +390,12 @@ export function pageRoutes(ctx) {
     }
 
     // ---- 静态资源（页面间共用的模块）----
-    // swipe.*  手势；agents.js  后端 logo 与状态中文名（三个页面共用）
-    const asset = path.match(/^\/ui\/(swipe\.(?:js|css)|agents\.js)$/)
+    // swipe.*  手势；agents.js  后端 logo 与状态中文名（三个页面共用）；
+    // view.js  界面的纯判断（新鲜度 / 空闲态），搬出来是为了能在 vm 里跑测试
+    //
+    // 这里是**白名单不是前缀**：新加一个 ui/*.js 却忘了加进来，表现不是少一个
+    // 功能，而是页面 404 那个 <script>、整段脚本 ReferenceError、白屏。
+    const asset = path.match(/^\/ui\/(swipe\.(?:js|css)|agents\.js|view\.js)$/)
     if (req.method === 'GET' && asset) {
       const body = readFileSync(join(HERE, 'ui', asset[1]), 'utf8')
       res.writeHead(200, {

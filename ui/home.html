@@ -798,41 +798,20 @@
 
 <script src="/ui/agents.js"></script>
 <script src="/ui/swipe.js"></script>
+<script src="/ui/view.js"></script>
 <script>
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
 /**
- * 「运行中，但很久没动静了」。
+ * 把这个页面的几个全局装成一个普通对象，交给 ui/view.js 里的纯判断。
  *
- * 会话只在 session-end 时才消失，而 kill -9 / 关终端 / 崩溃都不发那个事件——
- * 那样的会话会永远停在「运行中」。服务端只标「从什么时候开始没动静」
- * （stale_since），不替它下死亡判定：一条跑二十分钟的测试命令同样一声不响。
- *
- * 所以这里也只说观察到的事实。真死了的和真在跑的，用户自己一眼能分辨——
- * 他知道自己有没有在跑长命令，我们不知道。
+ * 判断本身搬去了那边（那边能在 vm 里直接跑，这里不能）。留在这里的只有
+ * 「当前值是哪几个变量」这一件事——**绑定和判断分开**，是为了让判断可测；
+ * 名字跟那边不重，是为了让那边的修改一定生效：同名的话，后加载的这份会
+ * 静默覆盖 view.js 里那份，而那种覆盖不报错，只是让你改了没反应。
  */
-/*
- * 名字里带 session 不是啰嗦。**这个函数曾经整个是死代码**：它原来也叫
- * `staleNote`，而 1500 行开外还有一个同名的 `staleNote()`（讲额度新鲜度）。
- * 同一个文件里两个同名函数声明，**后声明的赢**——于是会话卡片上那句
- * `staleNote(s)` 调的是额度那个，参数被静默丢掉。
- *
- * 三个后果，全是实测出来的：
- *   1. 这句「很久没动静」从来没在界面上出现过，而服务端的 stale_since
- *      一直好好地在算（还有测试钉着）
- *   2. 每张会话卡片改成显示额度那句「新开一个 Claude Code 会话就会刷新」
- *      ——在 DSH / Codex 的卡片上那是**假话**
- *   3. 额度那个要读 `quota.at`，而 quota 只有 statusLine 会写。于是
- *      **纯 DSH / 纯 Codex 的用户一打开会话 tab 就是「页面渲染出错」**
- *
- * 重名不会报错，也不会有任何测试变红。test/ui-shared.test.mjs 现在扫这件事。
- */
-function sessionStaleNote(s) {
-  if (!s.stale_since) return '';
-  const mins = Math.round((Date.now() - s.stale_since) / 60000);
-  const howLong = mins >= 60 ? `${Math.round(mins / 60)} 小时` : `${mins} 分钟`;
-  return `<div class="stalenote">已经 ${howLong}没有任何上报 —— 可能还在跑一条长命令，也可能那边已经没了</div>`;
-}
+const viewState = () => ({ sessions, pending, disconnected: isDisconnected() });
 /* 状态/子状态的中文显示。状态字符串同时是内部状态机值和 CSS 类名（.state.Running），
    所以 CSS 类仍用原文，只有**显示文本**走这张表。home.html 和 session.html 各一份，改时同步。 */
 
@@ -990,27 +969,10 @@ function activityTicker(sid) {
  * **断线时不显示**：那时所有数字都是断开前的旧值，把它摆在顶部等于
  * 拿旧数据冒充当前状态，而这正是这个项目反复强调不能做的事。
  */
-/**
- * 「此刻没有正在发生的事」。
- *
- * 抽出来是因为**有两个消费者**：header 下面那条用量，和底部那行 skill 计数。
- * 两处都遵守同一条规矩——参考信息在有事发生时让位（见 renderTopUsage）——
- * 而各抄一份判据，早晚有一处漏掉某个状态，然后那一处会在最忙的时候
- * 继续占着位置。
- *
- * 「刚完成」也算有事：那一分钟里你多半正想看结果。
- */
-function isIdleView() {
-  return !isDisconnected() && !pending.length
-    && !sessions.some((s) => s.state === 'Error')
-    && !sessions.some((s) => s.state === 'Running' || s.state === 'Waiting Approval' || s.state === 'Paused')
-    && !sessions.some((s) => s.state === 'Done' && Date.now() - s.updated_at < 60_000);
-}
-
 function renderTopUsage() {
   const el = $('topusage');
   const off = isDisconnected();
-  const idle = isIdleView();
+  const idle = isIdleView(viewState());
 
   /**
    * 三种情况不显示这条：
@@ -1024,7 +986,7 @@ function renderTopUsage() {
    *            比不显示更容易误导。主控台那边会整段说清是怎么回事
    */
   const multi = agentKinds().size > 1;
-  const unrefreshable = quotaStale() && quotaWhy() === 'hooks-only';
+  const unrefreshable = quotaStale(quota) && quotaWhy() === 'hooks-only';
   if (!quota || off || idle || multi || unrefreshable) { el.hidden = true; return; }
   el.hidden = false;
 
@@ -1039,7 +1001,7 @@ function renderTopUsage() {
   el.innerHTML = row('5h', quota.five_hour, false) + row('7d', quota.seven_day, true);
   // 过期的数字要看得出来是过期的。只在右边写一行小字不够——人是先看条和
   // 百分比的，那两样看着永远像当前值
-  el.classList.toggle('stale', quotaStale());
+  el.classList.toggle('stale', quotaStale(quota));
 }
 
 const fmtLeft = (s) => (s >= 60 ? `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}` : `${s}s`);
@@ -1551,11 +1513,11 @@ function agentGaugeBody(kind, cap) {
   if (cap.quota === 'window') {
     // 窗口配额来自 statusLine，而它只有 Claude Code 会调。拿不到时说清为什么
     if (!quota) return `<div style="font-size:12px;color:var(--dim);line-height:1.55">${QUOTA_WHY_TEXT[quotaWhy()]}</div>`;
-    const g = `<div class="cusage${quotaStale() ? ' stale' : ''}">
+    const g = `<div class="cusage${quotaStale(quota) ? ' stale' : ''}">
       ${gauge('5h', quota.five_hour?.pct, resetCell(quota.five_hour))}
       ${gauge('7d', quota.seven_day?.pct, resetCell(quota.seven_day))}
     </div>`;
-    return quotaStale() ? `${g}<div class="gwhy">${quotaStaleNote()}</div>` : g;
+    return quotaStale(quota) ? `${g}<div class="gwhy">${quotaStaleNote(quota, quotaWhy())}</div>` : g;
   }
   const wins = agentLimits?.[kind]?.windows ?? [];
   if (!wins.length) return '';
@@ -1569,7 +1531,7 @@ function quotaBody() {
     return `<div style="font-size:12.5px;color:var(--dim);line-height:1.55">${QUOTA_WHY_TEXT[quotaWhy()]}</div>${others}`;
   }
 
-  const gauges = `<div class="cusage${quotaStale() ? ' stale' : ''}">
+  const gauges = `<div class="cusage${quotaStale(quota) ? ' stale' : ''}">
     ${gauge('5h', quota.five_hour?.pct, resetCell(quota.five_hour))}
     ${gauge('7d', quota.seven_day?.pct, resetCell(quota.seven_day))}
   </div>`;
@@ -1590,46 +1552,8 @@ function quotaBody() {
    * 下面这句话仍然要有，而且要跟在环后面：环回答「有多少」，它回答
    * 「这数儿还能不能信、怎么才能看到新的」。
    */
-  if (quotaStale()) return `${gauges}<div class="gwhy">${quotaStaleNote()}</div>${others}`;
+  if (quotaStale(quota)) return `${gauges}<div class="gwhy">${quotaStaleNote(quota, quotaWhy())}</div>${others}`;
   return gauges + others;
-}
-
-/**
- * 过期时环下面那一行：**多旧 + 怎么才能看到新的。**
- *
- * 这行字曾经是一条 ⚠️ 开头的独立警告（「⚠️ 这是 19 小时前的旧数据。新开一个
- * Claude Code 会话才会刷新。」）。放在灰环下面它是**这张卡上最响的东西**——
- * 一个黄三角，配着两句话，为的是说一件既不紧急、也不需要你此刻做任何事的事。
- * 而「不是当前值」这件事，两只灰环已经说过了；警告图标只是把同一句话喊了一遍。
- *
- * 现在压成一行轻字，句式跟另外几档保持一致：
- *
- *     19 小时前的数据 · 新开一个 Claude Code 会话就会刷新
- *
- * 前半句回答「还能不能信」，后半句回答「那我怎么办」，中间一个 · 分开——
- * 两件事各一次，没有第二遍。「就会」而不是「才会」：前者说的是「这么点事
- * 就够了」，后者听起来像在拦你。
- */
-/* 讲的是**额度读数**有多旧，跟某个会话无关——所以不接参数，名字也要说出来。
-   跟 sessionStaleNote 重过名，见那里那段。 */
-function quotaStaleNote() {
-  const how = quotaWhy() === 'hooks-only'
-    // `claude` 放句中不放句末：它是一段不可断行的等宽字，摆在最后会被整个
-    // 甩到第二行独占一行，一句两行的小字于是长得像两句
-    ? '此界面不刷新，在终端跑 <code>claude</code> 才看得到当前值'
-    : '新开一个 Claude Code 会话就会刷新';
-  return `${esc(ago(quota.at))}的数据 · ${how}`;
-}
-
-/**
- * 这份用量是不是已经过期了。
- *
- * statusLine 在活跃会话里每次响应都上报，秒级新鲜；超过 10 分钟没动静就说明
- * 没有会话在报。**这时候把旧数字当当前值展示是在骗人**，所以环压灰、
- * 底下补一句 quotaStaleNote()——判据只有这一处，界面各部分不能各判各的。
- */
-function quotaStale() {
-  return !!quota && Date.now() - quota.at > 600_000;
 }
 
 /**
@@ -1645,7 +1569,7 @@ function quotaStale() {
  * 所以「多旧」只在环外面说一次，环自己只管重置时间这一件事。
  */
 function resetCell(w) {
-  if (quotaStale()) return '';
+  if (quotaStale(quota)) return '';
   return until(w?.resets_at);
 }
 
@@ -1657,16 +1581,6 @@ function until(ts) {
   return h >= 24 ? `${Math.floor(h / 24)} 天后重置` : h ? `${h} 小时 ${m} 分后重置` : `${m} 分后重置`;
 }
 
-function ago(ts) {
-  if (!ts) return '未知';
-  const s = Math.round((Date.now() - ts) / 1000);
-  if (s < 60) return `${s} 秒前`;
-  if (s < 3600) return `${Math.round(s / 60)} 分钟前`;
-  if (s < 86400) return `${Math.round(s / 3600)} 小时前`;
-  // 到小时就封顶的话，四天前的数据会写成「96 小时前」——那个数字要在脑子里
-  // 除一下才知道有多久，而这一行的全部作用就是让人一眼判断「还能不能信」
-  return `${Math.round(s / 86400)} 天前`;
-}
 
 const dirOf = (s) => (s.cwd || '').split('/').filter(Boolean).pop() || s.session_id.slice(0, 8);
 
@@ -2172,7 +2086,7 @@ function agentUsage(kind, cap, mine) {
   }
   const five = Math.round(quota.five_hour?.pct ?? 0);
   const seven = Math.round(quota.seven_day?.pct ?? 0);
-  return { html: `5h ${five}%　·　7d ${seven}%`, stale: quotaStale() };
+  return { html: `5h ${five}%　·　7d ${seven}%`, stale: quotaStale(quota) };
 }
 
 
@@ -2246,7 +2160,7 @@ function skillLineUnused() {
    * 装了几个 skill 是**一天都不会变的事实**，它可以等你闲下来再说。
    */
   const sk = cfg?.skills;
-  if (!sk || !isIdleView()) return '';
+  if (!sk || !isIdleView(viewState())) return '';
   const parts = [];
   if (sk.user !== null && sk.user !== undefined) { if (sk.user) parts.push(`你的 ${sk.user}`); }
   else parts.push('你的 数不出来');

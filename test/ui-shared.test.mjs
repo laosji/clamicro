@@ -68,7 +68,50 @@ test('服务端真的会把 /ui/agents.js 发出去', () => {
   assert.ok(m, '没找到静态资源那条正则，是不是改写法了？')
   const re = new RegExp(m[1].slice(1, -1))
   assert.ok(re.test('/ui/agents.js'), 'pages.mjs 的白名单没放行 /ui/agents.js')
+  assert.ok(re.test('/ui/view.js'), 'pages.mjs 的白名单没放行 /ui/view.js')
   assert.ok(re.test('/ui/swipe.js'), '顺带确认原有的没被改坏')
+})
+
+/**
+ * ui/view.js 的三件事：引了、发得出去、**没被页面覆盖掉**。
+ *
+ * 前两件跟 agents.js 同理（漏一件就是整段脚本 ReferenceError、白屏）。
+ * 第三件是搬家新引入的风险：view.js 里的函数是顶层 `function` 声明，
+ * 页面里再写一个同名的，**后加载的那份静默赢**。表现不是报错，而是
+ * 「我改了 view.js，界面没反应」——比重名崩溃更难查，因为什么都没坏。
+ *
+ * 所以 home.html 里留下的只有 viewState()：它是个**绑定器**，名字故意
+ * 跟那边不重，只负责把全局装成对象递过去。
+ */
+test('ui/view.js：引了、发得出去、没被页面盖掉', async (t) => {
+  const SHARED_VIEW = 'ui/view.js'
+  const view = read(SHARED_VIEW)
+  const names = [...view.matchAll(/^function\s+([A-Za-z_$][\w$]*)\s*\(/gm)].map((m) => m[1])
+
+  await t.test('确实定义了这几个纯判断', () => {
+    // 一个都不剩的话下面几条会全部空转通过——那种测试比没有更糟
+    assert.deepEqual(names.sort(), [
+      'ago', 'isIdleView', 'quotaStale', 'quotaStaleNote', 'sessionStaleNote',
+    ])
+  })
+
+  await t.test('home.html 引了 /ui/view.js', () => {
+    const s = read('ui/home.html')
+    assert.ok(names.some((n) => new RegExp(`\\b${n}\\s*\\(`).test(s)),
+      'home.html 一个都没用了？那这个文件该重新想想放在哪')
+    assert.match(s, /<script src="\/ui\/view\.js"><\/script>/,
+      'home.html 用了 view.js 里的函数却没引它——整段脚本会 ReferenceError')
+  })
+
+  for (const page of PAGES) {
+    await t.test(`${page} 没有再定义一份`, () => {
+      const s = read(page)
+      const dup = names.filter((n) => new RegExp(`^function\\s+${n}\\s*\\(`, 'm').test(s))
+      assert.deepEqual(dup, [],
+        `${page} 又定义了一份 ${dup.join('、')}——后加载的会静默盖掉 ui/view.js 里那份。\n` +
+        `不报错、不变红，只是你对 view.js 的修改看起来没生效`)
+    })
+  }
 })
 
 test('agents.js 的两张表覆盖了代码里真实存在的枚举', async (t) => {
@@ -226,7 +269,7 @@ test('渲染状态名的地方都查表，不直接输出原值', async (t) => {
 test('同一个文件里没有两个同名的顶层函数', async (t) => {
   const targets = [
     'ui/home.html', 'ui/session.html', 'ui/approval.html', 'ui/settings.html',
-    'ui/agents.js', 'ui/swipe.js',
+    'ui/agents.js', 'ui/swipe.js', 'ui/view.js',
   ]
   for (const f of targets) {
     await t.test(f, () => {
