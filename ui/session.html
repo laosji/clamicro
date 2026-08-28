@@ -152,7 +152,15 @@
   /* 送达时机。**永远显示**，理由见 .bar 开头那段 */
   .hint{font-size:11.5px; line-height:1.5; color:var(--dim); margin:7px 2px 0}
   .hint.warn{color:var(--warn)}
-  .senderr{font-size:12.5px; line-height:1.5; color:var(--warn); margin:7px 2px 0}
+  .barerr{font-size:12.5px; line-height:1.5; color:var(--warn); margin:7px 2px 0}
+  /* 断线横幅。比 note 更响一档（红而不是黄）：note 说的是某个操作的状态，
+     这条说的是**整屏都不再可信**——上面每一个字都是断开之前的样子。 */
+  .offline{
+    font-size:12px; line-height:1.5; color:var(--no);
+    padding:7px 11px; margin-bottom:8px; border-radius:9px;
+    background:color-mix(in srgb,var(--no) 12%,var(--card));
+    border:1px solid color-mix(in srgb,var(--no) 32%,transparent);
+  }
   /* 排队中的消息。收在一行里，点开才铺展——它们是**已经处理完的事**，
      不该常年占着输入框上方那块地方 */
   .qstrip{
@@ -233,10 +241,11 @@
     brow   暂停图标 · 取消图标 · 输入框 · 发送
 -->
 <div class="bar" id="bar"><div class="inner">
+  <div class="offline hidden" id="offline"></div>
   <div class="note hidden" id="note"></div>
   <button class="qstrip hidden" id="qstrip" aria-expanded="false"></button>
   <div class="qlist hidden" id="qlist"></div>
-  <div class="senderr hidden" id="senderr"></div>
+  <div class="barerr hidden" id="barerr"></div>
   <div class="brow">
     <button class="ico" id="btnPause" aria-label="暂停"></button>
     <button class="ico danger" id="btnCancel" aria-label="取消下一步"></button>
@@ -478,7 +487,7 @@ function renderComposer() {
   if (!on) {
     $('qstrip').classList.add('hidden');
     $('qlist').classList.add('hidden');
-    $('senderr').classList.add('hidden');
+    $('barerr').classList.add('hidden');
     return;
   }
 
@@ -570,7 +579,7 @@ async function send() {
    * 直接消失，界面上没有任何痕迹，他只会以为发出去了，然后等一个永远不来的
    * 回应。手机上重打一遍的代价还特别高。
    */
-  let ok = false, hint = '';
+  let ok = false, hint = '', reached = true;
   try {
     const r = await fetch(`/api/sessions/${SID}/say`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -579,21 +588,23 @@ async function send() {
     ok = r.ok;
     if (!ok) hint = (await r.json().catch(() => ({}))).hint || '没能发出去，再试一次。';
   } catch {
+    // 请求压根没到 Mac。这和「到了、但服务端说不行」是两件事，
+    // 靠 catch / !r.ok 两条分支分开——别去嗅错误文案里有没有某个词
+    reached = false;
     hint = '发不出去 —— 和 Mac 的连接断了。你打的字还留着。';
   }
   if (ok) {
     draft = '';
     $('draft').value = '';
-    $('senderr').classList.add('hidden');
+    clearBarError();
+    markOnline();   // 发得出去就是通的，不管 SSE 那条怎么样
     autoGrow();
     await refresh.now();
     return;
   }
   $('sendBtn').disabled = false;
-  const note = $('senderr');
-  note.textContent = hint;
-  note.classList.remove('hidden');
-  sizeBar();
+  if (!reached) markOffline();
+  barError(hint);
 }
 
 $('draft').oninput = (e) => {
@@ -659,25 +670,108 @@ function paintJump() {
  * 先到），不拦的话最后落地的可能是**比已经收到过的还旧**的一份，而屏幕上
  * 看不出任何异样。
  *
- * 拉不到就什么都不做，保留上一帧。这一页目前**没有断线提示**（首页有，
- * 路径行那个光标），所以这里的沉默是有代价的——它是个已知缺口，不是决定。
+ * 拉不到**保留上一帧，但要说出来**。清空页面会让人以为会话没了（它多半
+ * 好好的，只是这台手机连不上）；一声不响地留着旧内容更糟——那是拿断开前
+ * 的样子冒充现在。所以两样都不做，画面留着，上面压一条横幅。
  */
 const refresh = coalesced(async (isStale) => {
   let d;
   try {
     d = await fetch(`/api/sessions/${SID}`).then((r) => r.json());
   } catch {
-    return; // 断了。保留上一帧，别拿旧数据装成新的，也别把页面清空
+    markOffline();
+    return;
   }
   if (isStale()) return;
+  // 取到了就是通的，不管 SSE 那条怎么样
+  markOnline();
   render(d);
 });
 
+/**
+ * 「和 Mac 断了」——**说出来，但不禁用任何东西。**
+ *
+ * 禁用是下一步的诱惑，这里不走。判据本身可能是错的：SSE 那条长连接会被
+ * 代理、移动网络、系统休眠单独掐掉，而普通 HTTP 请求照样通。按一个可能
+ * 错的信号去关掉暂停和发送，等于在服务其实好着的时候把人锁在外面。
+ *
+ * 所以只陈述观察到的事实，动作照旧让人试——`act()` 和 `send()` 各自会如实
+ * 报告失败，草稿也留着。**认不出来就说认不出来，不替人做决定。**
+ *
+ * 抖一下不报警：EventSource 自己会重连，几秒内恢复是常态。超过 5 秒才算
+ * 真断——这个门槛和首页那个光标同源，两处不能各判各的。
+ */
+let offlineSince = null, offlineTimer = null;
+
+function markOffline() {
+  if (offlineSince === null) offlineSince = Date.now();
+  clearTimeout(offlineTimer);
+  const shout = () => {
+    const el = $('offline');
+    // EventSource 每隔几秒重试一次，onerror 就跟着来一次。已经在喊了就别再
+    // 喊——每喊一次都要量一遍底栏高度、重排一次页面
+    if (!el.classList.contains('hidden')) return;
+    el.textContent = '和 Mac 断开了 —— 上面是断开之前的样子，现在的情况不知道';
+    el.classList.remove('hidden');
+    sizeBar();
+  };
+  const waited = Date.now() - offlineSince;
+  if (waited >= 5000) shout();
+  else offlineTimer = setTimeout(shout, 5000 - waited);
+}
+
+function markOnline() {
+  clearTimeout(offlineTimer);
+  offlineTimer = null;
+  if (offlineSince === null) return;
+  offlineSince = null;
+  $('offline').classList.add('hidden');
+  sizeBar();
+}
+
+/** 底栏那行「上一个动作没成功」。发送和暂停/取消共用——都是同一件事。 */
+function barError(msg) {
+  const el = $('barerr');
+  el.textContent = msg;
+  el.classList.remove('hidden');
+  sizeBar();
+}
+function clearBarError() {
+  const el = $('barerr');
+  if (el.classList.contains('hidden')) return;
+  el.classList.add('hidden');
+  sizeBar();
+}
+
+/**
+ * 暂停 / 恢复 / 取消。
+ *
+ * **失败要说出来。** 原来这里是 `.catch(() => {})`——一个压根没到 Mac 的
+ * 暂停，和一个真的生效了的暂停，在屏幕上长得一模一样：按钮弹回来，别的
+ * 什么都不变。而这两件事的后果差得很远，人会以为已经停了然后走开。
+ *
+ * 服务端拒绝（409，能力表说这个后端不支持）也一样要说：那时候请求是通的，
+ * 只是这件事做不了，而沉默会让人以为做成了。
+ */
 async function act(action) {
   $('btnPause').disabled = $('btnCancel').disabled = true;
-  await fetch(`/api/sessions/${SID}/${action}`, { method: 'POST' }).catch(() => {});
+  clearBarError();
+  let err = '';
+  try {
+    const r = await fetch(`/api/sessions/${SID}/${action}`, { method: 'POST' });
+    if (!r.ok) {
+      err = (await r.json().catch(() => ({}))).hint
+        || `没能${action === 'cancel' ? '取消' : action === 'resume' ? '恢复' : '暂停'} —— 服务端拒绝了（${r.status}）`;
+    } else {
+      markOnline();
+    }
+  } catch {
+    err = '没发出去 —— 和 Mac 的连接断了，这一步没有生效';
+    markOffline();
+  }
   await refresh.now();
   $('btnPause').disabled = $('btnCancel').disabled = false;
+  if (err) barError(err);
 }
 
 $('btnPause').onclick = () => act(session?.state === 'Paused' ? 'resume' : 'pause');
@@ -706,6 +800,15 @@ window.addEventListener('resize', onJumpScroll, { passive: true });
 const es = new EventSource('/api/stream');
 es.addEventListener('session', refresh);
 es.addEventListener('event', refresh);
+/*
+ * 这条长连接是主检测路径：不接它的话，只有「正好有人触发了一次拉取」才发现
+ * 断了——而断线时最典型的情形恰恰是什么都不发生，页面就那么静静地停着。
+ *
+ * onerror 不立刻喊：EventSource 自己会重连，几秒内恢复是常态。
+ * markOffline 里那 5 秒门槛管这件事。
+ */
+es.onerror = () => markOffline();
+es.onopen = () => markOnline();
 document.addEventListener('visibilitychange', () => {
   /*
    * 回前台补一次**走 now()**。
