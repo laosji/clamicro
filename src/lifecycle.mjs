@@ -152,8 +152,21 @@ export function shouldExit(sessions, {
    * tunnelAlive，两处都写着「PID 本身从来不足以标识一个进程」）。存下来的
    * pid 在下次开机后可能指向一个毫不相干的进程。
    *
-   * 而且它救不了什么：重启后服务只要收到**一条** statusLine 或 SessionStart
-   * 就重新认识了宿主（见 bin/statusline.sh 的 `owner=`），窗口只有一个回合。
+   * 而且它救不了什么：重启后服务收到一条 statusLine 或 SessionStart 就重新
+   * 认识了宿主（见 bin/statusline.sh 的 `owner=`）。
+   *
+   * **但那两条都不保证会来。** SessionStart 一个会话只发一次，重启前发过的
+   * 不会再发；statusLine 只在 Claude Code 真的渲染状态栏时才跑，**某些环境下
+   * 压根不调**（实测：服务重启后跑了十几分钟、收了一堆 hook，
+   * `statusLineSeenAt` 仍是重启前恢复出来的旧值，owners 一直是 0）。
+   *
+   * 所以重启之后，已经开着的那些会话的宿主**可能永远补不上**——auto-exit
+   * 要等到下一个新会话才重新有依据。这不是缺陷，是这里唯一能接受的失败
+   * 方向：不知道就不退。上面 `known === 0` 那条兜的正是它。
+   *
+   * 想靠「从 socket 反查对端 pid」把它补上——**不做**。这个仓库为
+   * 「PID 本身不足以标识一个进程」栽过两次（service-id.mjs、config.mjs），
+   * 而认错一个 pid 的后果是 owner-alive 永远为真、功能静默失效。
    */
   if (!known) return { exit: false, why: 'no-owner-known' }
   return { exit: true, why: 'all-owners-gone' }
