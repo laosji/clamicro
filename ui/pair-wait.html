@@ -41,6 +41,14 @@
   }
   .glyph.ok{color:var(--ok); background:color-mix(in srgb,var(--ok) 10%,transparent)}
   .glyph.no{color:var(--no); background:color-mix(in srgb,var(--no) 10%,transparent)}
+  /* 产品名。**未登录的页面必须自报家门**——手机上 <title> 是看不见的
+     （Safari 只显示地址栏），所以从二维码或一条转发的链接进来的人，
+     此前完全不知道自己在跟什么打交道。
+     小字、低对比：它是身份，不该跟这一页真正的标题抢。 */
+  .brand{
+    font-size:13px; font-weight:600; letter-spacing:.02em;
+    color:var(--dim); margin:0 0 8px;
+  }
   h1{font-size:20px; margin:0 0 10px}
   p{color:var(--dim); font-size:14.5px; margin:0; max-width:300px}
   .sub{margin-top:10px; font-size:13px; opacity:.8}
@@ -69,6 +77,7 @@
 
 <div id="spin" class="ring"></div>
 <div id="icon" class="glyph hidden"></div>
+<div class="brand">Clamicro</div>
 <h1 id="title">等你在 Mac 上确认</h1>
 <p id="desc">你的 Mac 上弹出了一个确认框。点「允许」，这台手机就配对好了。</p>
 <p class="sub" id="sub"></p>

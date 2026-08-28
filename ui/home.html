@@ -592,6 +592,12 @@
   .afilter button.on{background:var(--run); color:#000}
   /* 被筛掉多少必须说出来，否则收窄过的列表和「就这么多」长得一样 */
   /* skill 计数。低权重、居中、和 .ahidden 一个量级——它是参考信息 */
+  /* 分组名后面的 skill 计数。低对比、小一号：它是这一行的补充，
+     不该跟后端名字抢——名字才是这一行的主语 */
+  .ahead .askill{
+    font-size:11px; color:var(--dim); font-weight:400;
+    margin-left:8px; white-space:nowrap;
+  }
   .skillsum{
     display:flex; gap:8px; justify-content:center; align-items:baseline;
     margin:18px 0 4px; font-size:11.5px; color:var(--dim);
@@ -1154,6 +1160,29 @@ function altAddressHtml() {
  * 找到那个区块才看得见——漏看一条等于一次静默的自动决策。所以审批态
  * 始终读全局 pending，跟这张卡挂在谁名下无关。
  */
+/**
+ * 「另有几个在跑」——**说出是谁**。
+ *
+ * 原来这行是纯计数：`另有 2 个会话在跑`。而计数回答不了人真正在问的那个
+ * 问题：「是我在意的那个吗」。三个会话同时跑的时候，首页显示 proj-3，
+ * 另外两个连名字都不露面——你得切到会话 tab 才知道少的是哪两个。
+ *
+ * 主控台只放一张卡是对的（首页回答的是「要不要现在起身」，那是一个答案，
+ * 而会话 tab 就是那份完整列表）。要补的不是卡片数量，是这一行的信息量。
+ *
+ * 超过三个就收口成「等 N 个」：一行小字塞五个项目名会挤成一坨，
+ * 那时候人本来就该去会话 tab 看。
+ */
+function othersRunning(busy, shown) {
+  const rest = busy.filter((x) => x.session_id !== shown.session_id);
+  if (!rest.length) return '';
+  const names = rest.map((x) => x.session_name || dirOf(x)).filter(Boolean);
+  if (!names.length) return `另有 ${rest.length} 个会话在跑`;
+  return names.length <= 3
+    ? `另有 ${names.map(esc).join('、')} 在跑`
+    : `另有 ${names.slice(0, 2).map(esc).join('、')} 等 ${names.length} 个在跑`;
+}
+
 function statusConsole(only) {
   const off = isDisconnected();
   const mine = only ? sessions.filter((s) => (s.agent || 'claude-code') === only) : sessions;
@@ -1300,7 +1329,7 @@ function statusConsole(only) {
     </div>${activityTicker(s0.session_id)}`;
     meta = s0.control === 'cancelled'
       ? '会在下一个工具调用前终止本轮'
-      : (busy.length > 1 ? `另有 ${busy.length - 1} 个会话在跑` : '');
+      : othersRunning(busy, s0);
   } else if (paused) {
     // 「已请求」和「真停住了」是两回事，见 ui/agents.js 的 stateLabel
     cls = 'is-run'; dotLabel = stateLabel('Paused', paused);
@@ -1348,10 +1377,8 @@ function statusConsole(only) {
        * 一句「为什么没有数字 / 怎么才有」——而且只对**用窗口配额的后端**说，
        * 因为那句话讲的就是 statusLine，跟按 token 计费的后端无关。
        */
-      const cap = capOf({ agent: only });
-      body = (cap.quota === 'window' && !quota)
-        ? `<div style="font-size:12px;color:var(--dim);line-height:1.55">${QUOTA_WHY_TEXT[quotaWhy()]}</div>`
-        : '';
+      // 画这个后端**自己**报的窗口。见 agentGaugeBody
+      body = agentGaugeBody(only, capOf({ agent: only }));
       meta = '';
     } else {
       // 过期提示由 quotaBody 贴在环下面（它得跟着环走），不再单开一条 cmeta
@@ -1488,6 +1515,51 @@ function otherAgentsBody() {
   return rows ? `<div class="qother">${rows}</div>` : '';
 }
 
+/**
+ * 分区里的用量环：**只画这个后端自己报的窗口**。
+ *
+ * 这里原来什么都不画，理由写着「分区模式下不画全局额度：那是 Claude Code
+ * 账户的窗口配额，画进 DSH 的分区里就会出现『该后端不上报用量』和『5h 22%』
+ * 并存」——那个顾虑是对的，但它反对的是**把别人的数字画在这个名字下面**，
+ * 不是反对画环。
+ *
+ * 所以判据换成「谁报的就画谁的」：
+ *   · 用滚动窗口的后端（Claude Code）→ 画它的 5h / 7d
+ *   · 自报窗口的后端（Codex 的 30 天）→ 画 agentLimits 里那几个
+ *   · 只有累计 token 的（DSH）→ **不画**。它确实没有窗口，凑一个环出来
+ *     就是编数字；那个数字已经在分区标题上以「N tok」的形式说过了
+ *
+ * 陈旧提示跟着环走：数字过期时把环压灰、底下补一句，否则一个早已不成立的
+ * 百分比会以「当前值」的样子摆在那儿。
+ */
+/**
+ * 这个后端在卡片里画得出环吗。
+ *
+ * 标题和卡片**必须用同一个判据**：画了环还在标题里重复一遍那两个数字，
+ * 同一组里同一份读数就出现两次（浅色主题下尤其明显，标题那份还带着
+ * 陈旧样式的删除线）。而这正是加环之前没有的问题——那时卡片是空的，
+ * 标题是唯一的去处。
+ */
+function hasGauges(kind, cap) {
+  if (cap.quota === 'window') return !!quota;
+  return (agentLimits?.[kind]?.windows ?? []).length > 0;
+}
+
+function agentGaugeBody(kind, cap) {
+  if (cap.quota === 'window') {
+    // 窗口配额来自 statusLine，而它只有 Claude Code 会调。拿不到时说清为什么
+    if (!quota) return `<div style="font-size:12px;color:var(--dim);line-height:1.55">${QUOTA_WHY_TEXT[quotaWhy()]}</div>`;
+    const g = `<div class="cusage${quotaStale() ? ' stale' : ''}">
+      ${gauge('5h', quota.five_hour?.pct, resetCell(quota.five_hour))}
+      ${gauge('7d', quota.seven_day?.pct, resetCell(quota.seven_day))}
+    </div>`;
+    return quotaStale() ? `${g}<div class="gwhy">${quotaStaleNote()}</div>` : g;
+  }
+  const wins = agentLimits?.[kind]?.windows ?? [];
+  if (!wins.length) return '';
+  return `<div class="cusage">${wins.map((w) => gauge(w.label, w.pct, until(w.resets_at))).join('')}</div>`;
+}
+
 function quotaBody() {
   const others = otherAgentsBody();
   if (!quota) {
@@ -1610,16 +1682,37 @@ const dirOf = (s) => (s.cwd || '').split('/').filter(Boolean).pop() || s.session
 function renderPathBar() {
   const bar = $('pathbar');
   if (!bar) return;
-  const busy = sessions.find((x) => x.state === 'Running' || x.state === 'Waiting Approval');
-  const active = busy || sessions.find((x) => x.state !== 'Idle') || sessions[0];
-  $('pseg').textContent = (active && dirOf(active)) || 'clamicro';
+  /**
+   * 左边是**产品名**，不是某个项目。
+   *
+   * 原来这里挑一个会话的目录名放上去（`busy || 第一个非 Idle || sessions[0]`）。
+   * 一个项目时那是贴心，多个项目时那是**任意挑一个**：三个会话在跑，顶上
+   * 写着 proj-3，而另外两个连名字都不露面——「你在哪」那一格于是在说一件
+   * 只对三分之一情况成立的事。多后端下更明显，三个后端三个项目，顶上一个。
+   *
+   * 项目名本来就写在每张卡片上（那里它有归属），不必再挑一个顶上去。
+   */
+  $('pseg').textContent = 'clamicro';
   $('pseg2').textContent = { home: 'overview', sess: 'sessions', say: 'message' }[tab];
 
   const off = offlineSince !== null && Date.now() - offlineSince > 5000;
   const retry = offlineSince !== null && !off;
   bar.classList.toggle('is-off', off);
   bar.classList.toggle('is-retry', retry);
-  $('conn').textContent = off ? '已断开' : retry ? '重连中' : '本地连接';
+  /**
+   * 右边：连接状态 + 会话数。
+   *
+   * 数量是腾出那一格之后**真正值得放的东西**——它是全局的、随时在变、
+   * 而且首页别处只在分区标题里按后端分开说（「1 个会话」），没有一个总数。
+   *
+   * 断线时不报数：那时候屏幕上所有数字都是旧的，再报一个只会让人以为
+   * 它是当前值。这条和主控台的离线判定同源，两处不能各判各的。
+   */
+  const n = sessions.length;
+  $('conn').textContent = off ? '已断开'
+    : retry ? '重连中'
+    : n ? `本地连接 · ${n} 个会话`
+    : '本地连接';
 }
 
 /**
@@ -1844,10 +1937,16 @@ function renderHome() {
    *
    * 待审批为什么不进分区，见 statusConsole 里的注释。
    *
-   * 单后端时不分区——那时标题只会把顶栏已经说过的话再说一遍。
+   * **单后端也分区。** 原来这里有个「只有一个后端就不分区」的特例，理由写的是
+   * 「标题只会把顶栏已经说过的话再说一遍」——那句话不成立：顶栏说的是
+   * `Clamicro`（产品名）和 `<项目> / overview`，**从来没说过后端是谁、
+   * 它的用量是多少**。于是单后端的人在整个首页上看不到自己在跑哪个模型。
+   *
+   * 一致还有一个更实际的好处：接第二个后端的那一刻，界面结构不变，
+   * 只是多一组。而不是整个换个样子。
    */
   const kinds = [...agentKinds()];
-  if (kinds.length > 1) {
+  if (kinds.length) {
     // 断线 / 待审批是全局态，跟后端无关，只渲染一次——否则会重复进每个后端组
     if (isDisconnected() || pending.length) h += statusConsole();
     for (const k of kinds) {
@@ -1856,8 +1955,8 @@ function renderHome() {
       const use = agentUsage(k, cap, mine);
       h += `<div class="agroup">
         <div class="ahead">
-          <span class="an">${agentLogo(k)}${esc(cap.label || k)}</span>
-          ${use ? `<span class="au${use.stale ? ' stale' : ''}">${use.html}</span>` : ''}
+          <span class="an">${agentLogo(k)}${esc(cap.label || k)}${skillTag(k)}</span>
+          ${use && !hasGauges(k, cap) ? `<span class="au${use.stale ? ' stale' : ''}">${use.html}</span>` : ''}
         </div>
         ${statusConsole(k)}
       </div>`;
@@ -1903,7 +2002,7 @@ function renderHome() {
         </div>
         <div class="head">${esc(a.headline || a.summary)}</div>
         ${a.mismatch ? `<div class="mismatch">⚠️ 这句描述与命令不符，点进去看原文</div>` : ''}
-        <div class="chips">${mixed && a.agent_label ? `<span class="chip agent">${agentLogo(a.agent)}${esc(a.agent_label)}</span>` : ''}${(a.impact||[]).map((i) => `<span class="chip ${i.tone==='danger'?'danger':i.tone==='calm'?'':'warn'}">${esc(i.label)}</span>`).join('')}
+        <div class="chips">${a.agent_label ? `<span class="chip agent">${agentLogo(a.agent)}${esc(a.agent_label)}</span>` : ''}${(a.impact||[]).map((i) => `<span class="chip ${i.tone==='danger'?'danger':i.tone==='calm'?'':'warn'}">${esc(i.label)}</span>`).join('')}
           <a class="chip" href="/ui/a/${a.id}" style="color:var(--run)">${a.choices && a.choices.length ? '去回答 ›' : a.risk.level === 'high' ? '需详情页批准 ›' : '详情 ›'}</a>
         </div>
         <div class="dl" data-exp="${a.expires_at}" data-born="${a.created_at}" data-auto="${a.auto_decision}">
@@ -1913,10 +2012,6 @@ function renderHome() {
   }
 
   renderTopUsage();
-
-  // skill 计数排在**最末尾**：它是参考信息，不是「此刻要你看的东西」。
-  // 同 topusage 那条的取舍——始终有用，但不该和正在发生的事抢位置
-  h += skillLine();
 
   $('view').innerHTML = h;
 
@@ -2099,7 +2194,38 @@ function agentUsage(kind, cap, mine) {
  * 一个没装过任何 skill 的人，不需要在首页天天看见一行「skill 0 · 0」。
  * 但**只要有一档数不出来就得画**——那是故障信号，恰恰不能藏。
  */
-function skillLine() {
+/**
+ * 分组名后面那个 skill 计数。
+ *
+ * ## 只给 Claude Code 那一组
+ *
+ * 数的是 `~/.claude/skills` 和**已启用插件**带的——那是 **Claude Code 的**
+ * skill。挂在 DeepSeek Harness 或 Codex 名下就是把别人的数字写在这个名字
+ * 底下，而那正是分区里的用量环刚修过的那个错（见 agentGaugeBody）。
+ *
+ * DSH 自己是有 skill 的（它的 `agent.inject()` 会注入 skill 内容，
+ * 见 plugins/dsh-bridge/lib/map.js），但我们没有那份数据，也就不能替它说。
+ * 没有比编一个强。
+ *
+ * ## 挂在名字后面而不是页面底部
+ *
+ * 原来它浮在整页最下面，不属于任何东西。挂到分组名后面之后它有了归属：
+ * 这一行本来就是「这个后端是谁、它现在什么样」，skill 是同一句话的一部分。
+ */
+function skillTag(kind) {
+  if (kind !== 'claude-code') return '';
+  const sk = cfg?.skills;
+  if (!sk) return '';
+  const parts = [];
+  if (sk.user === null || sk.user === undefined) parts.push('你的 数不出来');
+  else if (sk.user) parts.push(`你的 ${sk.user}`);
+  if (sk.plugin === null || sk.plugin === undefined) parts.push('插件 数不出来');
+  else if (sk.plugin) parts.push(`插件 ${sk.plugin}`);
+  if (!parts.length) return '';
+  return `<span class="askill">skill ${parts.map(esc).join(' · ')}</span>`;
+}
+
+function skillLineUnused() {
   /**
    * **有事发生时整块不画。**
    *
@@ -2149,6 +2275,8 @@ function renderSessions() {
   const filtered = agentFilter ? sessions.filter((s) => (s.agent || 'claude-code') === agentFilter) : sessions;
   const hiddenCount = sessions.length - filtered.length;
 
+  /* 筛选器**保持只在多后端时出现**：一个只有一个选项的筛选器不是身份标识，
+     是一个没用的控件。后端身份由卡片上的徽标承担，那个现在单后端也画。 */
   const chips = mixed
     ? `<div class="afilter">
         <button data-af="" class="${agentFilter ? '' : 'on'}">全部 ${sessions.length}</button>
@@ -2174,7 +2302,7 @@ function renderSessions() {
       ${sessionStaleNote(s)}
       ${c ? `<div class="meters">${meter('ctx', c.used_pct)}</div>` : ''}
       <div class="chips">
-        ${mixed && cap.label ? `<span class="chip agent">${agentLogo(s.agent)}${esc(cap.label)}</span>` : ''}
+        ${cap.label ? `<span class="chip agent">${agentLogo(s.agent)}${esc(cap.label)}</span>` : ''}
         ${s.model ? `<span class="chip">${esc(s.model)}</span>` : ''}
         ${s.cost_usd != null ? `<span class="chip">$${s.cost_usd.toFixed(4)}</span>` : ''}
         ${cap.quota === 'tokens' && s.tokens ? `<span class="chip">${fmtTokens(s.tokens)} tok</span>` : ''}

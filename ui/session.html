@@ -197,8 +197,17 @@ function render(data) {
      * 前者是**身份**，混在一排状态数字里就看不见了，而恰恰是它决定了
      * 你在这一页能做什么。
      */
+    /*
+     * 徽标要带 logo。首页的卡片和审批页都带（`agentLogo` 在那两处共 7 次调用），
+     * **只有这一页没有**——而 ui/agents.js 存在的全部理由就是让三个页面对同一个
+     * 后端长得一样。git 里查过：这一页历史上一次都没加过，不是被谁删的。
+     *
+     * 后端是**身份**，而这一页正是「这个会话归谁管」最要紧的地方——它决定了
+     * 下面哪些按钮有效。一个只有文字的胶囊在扫视时和别的 chip 分不开，
+     * 而彩色 logo 是唯一不用读字就能认出来的东西。
+     */
     $('agent').innerHTML = cap.label
-      ? `<span class="abadge">${esc(cap.label)}</span>` +
+      ? `<span class="abadge">${agentLogo(s.agent)}${esc(cap.label)}</span>` +
         (s.model ? `<span class="amodel">${esc(s.model)}</span>` : '')
       : '';
     $('agent').classList.toggle('hidden', !cap.label);

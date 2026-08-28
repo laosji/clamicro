@@ -26,6 +26,13 @@
     font:16px/1.6 -apple-system,BlinkMacSystemFont,"PingFang SC","Helvetica Neue",sans-serif;
     padding:calc(48px + env(safe-area-inset-top)) 20px calc(32px + env(safe-area-inset-bottom));
   }
+  /* 产品名。**未登录的页面必须自报家门**——手机上 <title> 是看不见的
+     （Safari 只显示地址栏），所以扫码进来的人此前完全不知道自己在跟什么配对。
+     小字、低对比：它是身份，不该跟这一页真正的标题抢。 */
+  .brand{
+    font-size:13px; font-weight:600; letter-spacing:.02em;
+    color:var(--dim); margin:0 0 8px;
+  }
   h1{font-size:22px; margin:0 0 10px}
   p{color:var(--dim); font-size:14.5px; margin:0 0 22px}
   button{
@@ -68,8 +75,9 @@
 <meta name="apple-mobile-web-app-title" content="Clamicro">
 </head>
 <body>
+<div class="brand">Clamicro</div>
 <h1>需要配对</h1>
-<p>这台设备还没有访问口令。三步，都在一分钟内。</p>
+<p>把这台手机和你 Mac 上的编码 agent 连起来，之后它要执行的操作会送到这里等你批准。这台设备还没有访问口令，三步，都在一分钟内。</p>
 
 <!--
   三步必须**一次说完**。配对现在多了一道 Mac 上的确认框，而扫完码之后手机

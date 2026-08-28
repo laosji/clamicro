@@ -21,6 +21,14 @@
   }
   .wrap{width:100%; max-width:380px}
   .icon{font-size:52px; margin-bottom:16px}
+  /* 产品名。**未登录的页面必须自报家门**——手机上 <title> 是看不见的
+     （Safari 只显示地址栏），所以从二维码或一条转发的链接进来的人，
+     此前完全不知道自己在跟什么打交道。
+     小字、低对比：它是身份，不该跟这一页真正的标题抢。 */
+  .brand{
+    font-size:13px; font-weight:600; letter-spacing:.02em;
+    color:var(--dim); margin:0 0 8px;
+  }
   h1{font-size:22px; font-weight:600; margin:0 0 12px}
   p{color:var(--dim); font-size:15px; margin:0 0 10px}
   p b{color:var(--fg)}
@@ -60,7 +68,8 @@
 
 <div class="wrap">
   <div class="icon">⏳</div>
-  <h1>配对链接已失效</h1>
+  <div class="brand">Clamicro</div>
+<h1>配对链接已失效</h1>
   <p>二维码是<b>一次性</b>的，而且 <b>60 秒</b>后过期。</p>
   <p>这样别人事后翻到截图、录屏或聊天记录里的那张码，也用不了。</p>
 
