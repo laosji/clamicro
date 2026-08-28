@@ -347,6 +347,46 @@ switch (cmd) {
     const alive = listeners(p).length > 0
     console.log(`  服务      ${alive ? c.g('运行中') : c.y('未运行')} ${c.dim(`:${p}`)}`)
 
+    /**
+     * **为什么它还开着 / 什么时候会关。**
+     *
+     * 服务会在所有后端都退出后自己关闭（src/lifecycle.mjs），但那个判定
+     * **决定「不退」时是完全静默的**——只有打算退出才写日志。于是
+     * 「我退出了 Claude Code，服务怎么还在」这个问题在日志里没有答案，
+     * 而「正确地没退」和「卡住了」该做的事完全相反。
+     *
+     * 判据由服务自己算好放在 /healthz 里（只对回环），这里只负责说人话。
+     */
+    if (alive) {
+      const why = {
+        foreground: '前台启动的不会自己退（clamicro start）',
+        'pending-approvals': '有待审批挂着 —— 服务一走那张卡片就永远挂着',
+        'owner-alive': null, // 下面按后端数说，比这个词具体
+        'unknown-owner': '有会话在跑，但不知道它属于哪个宿主（多半是升级前开的）',
+        'no-owner-known': '还没有任何后端上报过 —— 下一次开会话就会认出来',
+        'all-owners-gone': null,
+      }
+      try {
+        const h = await fetch(`http://127.0.0.1:${p}/healthz`, { signal: AbortSignal.timeout(1500) })
+        const lc = (await h.json())?.lifecycle
+        if (lc) {
+          if (!lc.exit) {
+            const note = lc.why === 'owner-alive'
+              ? `${lc.owners} 个后端还开着`
+              : (why[lc.why] ?? lc.why)
+            console.log(`  自动关闭  ${c.dim('不会 ——')} ${note}`)
+          } else {
+            // 两拍才动手（至少十分钟），说清还剩几拍，别让人以为它卡住了
+            const left = Math.max(1, 2 - lc.streak)
+            console.log(`  自动关闭  ${c.y(`没有后端在用了，再确认 ${left} 次就退出`)}` +
+              c.dim(`（巡检 5 分钟一次，约 ${left * 5} 分钟后）`))
+          }
+        }
+      } catch {
+        /* 拿不到就不说 —— 编一个「不会自动关闭」比不说糟 */
+      }
+    }
+
     // 实际监听了哪几个地址。
     //
     // 这一条查了两天才想到要看。「服务运行中」只说明回环起来了，而手机走的是

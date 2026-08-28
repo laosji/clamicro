@@ -862,7 +862,33 @@ async function handler(req, res) {
       return json(res, 200, {
         ok: true,
         stale: detectLanIp() !== config.lanIp,
-        ...(isLoopback(req) ? { service: 'clamicro', pid: process.pid } : {}),
+        /**
+         * `lifecycle` 也只对回环返回，理由同 `service`：它会说出有几个后端
+         * 在用，而 healthz 对局域网是刻意匿名的。
+         *
+         * 为什么要有它：`maybeExit()` **判定「不退」时是完全静默的**——只有
+         * 打算退出才说话。于是「我退出了 Claude Code，服务怎么还在」这个问题
+         * 在界面和日志上都没有答案，只能靠人去猜是「正确地没退」还是「卡住了」。
+         * 而这两件事的处置完全相反。
+         *
+         * 判据本身不重新算一遍：调的就是 maybeExit 用的那个 shouldExit，
+         * 两处各判各的迟早会出现「status 说要退、服务不退」。
+         */
+        ...(isLoopback(req)
+          ? {
+              service: 'clamicro',
+              pid: process.pid,
+              lifecycle: {
+                ...shouldExit(store.sessions(), {
+                  owners: store.owners(),
+                  pendingApprovals: approvals.pending().length,
+                  foreground: process.stdout.isTTY === true,
+                }),
+                owners: store.owners().length,
+                streak: exitStreak,
+              },
+            }
+          : {}),
       })
     }
 
