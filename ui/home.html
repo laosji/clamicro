@@ -615,6 +615,13 @@
     border:1px solid var(--line); margin-bottom:8px; text-decoration:none; color:inherit}
   .hev .hh, .hap .hh{display:flex; align-items:baseline; gap:8px; flex-wrap:wrap}
   .hev .hk{font-size:11.5px; color:var(--dim); flex:0 0 auto}
+  /* 历史里的来源标记。**回头看的时候你没有别的上下文去判断这条是谁干的**
+     ——首页有分区、会话页有徽标，而历史是一条混在一起的流。
+     低对比、不换行：它是限定语，不该跟这一行真正的内容抢 */
+  .hsrc{
+    display:inline-flex; align-items:center; flex:0 0 auto;
+    font-size:11px; color:var(--dim); white-space:nowrap;
+  }
   .hev .hp, .hap .hp{font-size:11.5px; color:var(--dim); overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
   .hev .ht, .hap .ht{font-size:11px; color:var(--dim); margin-left:auto; flex:0 0 auto;
     font-variant-numeric:tabular-nums}
@@ -2468,9 +2475,23 @@ function histLive() {
     const s = sessions.find((x) => x.session_id === sid);
     return s ? (s.session_name || dirOf(s)) : sid.slice(0, 8);
   };
+  /**
+   * 来源只能从**当前**会话表反查——事件本身不带 agent。
+   *
+   * 查不到就不画（会话已经 session-end 掉了）。**不猜**：历史正是你没有
+   * 别的上下文去校验它的地方，在这里画错一个后端比不画更糟。
+   *
+   * 审批那一侧不同：`publicApproval` 带的 `agent` 是**当时记下的**，
+   * 会话没了也还在，所以那边永远画得出来，而且是权威的。
+   */
+  const srcOf = (sid) => {
+    const s = sessions.find((x) => x.session_id === sid);
+    return s?.agent ? `<span class="hsrc">${agentLogo(s.agent)}</span>` : '';
+  };
   const rows = recentEvents.slice().reverse().slice(0, 200).map((e) => `
     <div class="hev" data-t="${esc(e.type)}">
       <div class="hh"><span class="hk">${esc(kindLabel(e.type))}</span>
+        ${srcOf(e.session_id)}
         <span class="hp">${esc(nameOf(e.session_id))}</span>
         <span class="ht">${clock(e.ts)}</span></div>
       ${e.detail ? `<div class="hd">${esc(e.detail)}</div>` : ''}
@@ -2501,6 +2522,7 @@ function histApprovals() {
     const undel = a.delivered === false ? `<span class="hbadge no">未送达</span>` : '';
     return `<a class="hap" href="/ui/a/${a.id}">
       <div class="hh"><span class="hbadge ${st.c}">${esc(st.t)}</span>${undel}
+        ${a.agent ? `<span class="hsrc">${agentLogo(a.agent)}${esc(a.agent_label || a.agent)}</span>` : ''}
         <span class="hp">${esc(a.session_name || (a.cwd || '').split('/').filter(Boolean).pop() || '')}</span>
         <span class="ht">${clock(a.decided_at || a.created_at)}</span></div>
       <div class="hd">${esc(a.headline || a.summary || a.tool_name)}</div>
