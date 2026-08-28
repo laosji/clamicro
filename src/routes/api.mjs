@@ -3,6 +3,7 @@ import { safeEq } from '../auth/token.mjs'
 import { requireDeps } from './deps.mjs'
 import { MAX_APPROVAL_TIMEOUT_MS, MIN_APPROVAL_TIMEOUT_MS } from '../config.mjs'
 import { notifyHealth } from '../notify.mjs'
+import { MAX_APPROVALS as HISTORY_MAX_APPROVALS } from '../history.mjs'
 import { AGENTS, capOf, detectAgents } from '../agents.mjs'
 import { countSkills } from '../skills.mjs'
 import { installedInfo } from '../paths.mjs'
@@ -223,6 +224,44 @@ export function apiRoutes(ctx) {
           .slice(0, 5)
           .map((a) => publicApproval(a)),
       }),
+    },
+
+    /**
+     * 审批历史 —— **已经有结果的那些**。
+     *
+     * ## 为什么单开一条
+     *
+     * 这些数据一直在盘上（history.json 存 300 条，含全部已决策的），
+     * 但**界面上完全够不着**：`/api/approvals` 只回待审批和最近 30 分钟
+     * 超时的 5 条，其余两百多条谁也看不见。
+     *
+     * 而「你不在的时候替你做了哪些决定」正是这个产品的主要价值。自动通过的、
+     * 超时被拒的、在终端里被别处放行的——这些恰恰是你没在场的那些，
+     * 也恰恰是最该能回头查的。
+     *
+     * SSE 那条流补不上：它只推**连着的时候**新建和结束的，重启前的、
+     * 手机没开时的，一条都不会来。
+     *
+     * ## total 必须回
+     *
+     * 截断要说出来。只回 100 条而不说还有多少，读起来就是「一共就这么多」
+     * ——这个仓库对静默截断的态度写在 renderSessions 的 hiddenCount 那里。
+     */
+    {
+      method: 'GET', path: '/api/history', auth: 'token',
+      handler: ({ res, url }) => {
+        const limit = Math.min(200, Math.max(1, Number(url.searchParams.get('limit')) || 60))
+        const settled = approvals.all()
+          .filter((a) => a.status !== 'pending')
+          // decided_at 缺席的（老记录）退回 created_at，别让它们排到最前面
+          .sort((x, y) => (y.decided_at ?? y.created_at) - (x.decided_at ?? x.created_at))
+        json(res, 200, {
+          approvals: settled.slice(0, limit).map((a) => publicApproval(a)),
+          total: settled.length,
+          // 盘上留多少条。界面据它说清「更早的没有了」不是「更早的没发生过」
+          retained: HISTORY_MAX_APPROVALS,
+        })
+      },
     },
 
     // ---- 设置：能在手机网页里改的，就别让人回终端敲命令 ----

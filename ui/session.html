@@ -157,17 +157,8 @@ const SID = location.pathname.split('/').pop();
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 
-const KIND = {
-  'session-start': '会话开始', prompt: '提问', tool: '工具', 'tool-error': '工具失败',
-  'approval-requested': '请求审批', 'permission-prompt': '权限提示', control: '控制',
-  'quota-warn': '额度预警', stop: '完成', error: '出错', idle: '等你回话', skill: '使用 skill',
-  notification: '通知', 'session-end': '会话结束',
-};
-
-function clock(ts) {
-  const d = new Date(ts);
-  return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}:${String(d.getSeconds()).padStart(2,'0')}`;
-}
+/* KIND_LABEL / kindLabel / clock 现在住在 /ui/agents.js —— 历史 tab 也要用。
+   抄两份的下场见那个文件开头：同一条事件在两个页面上叫不同的名字。 */
 
 let session = null, cap = null;
 
@@ -294,7 +285,7 @@ function render(data) {
     $('tl').innerHTML = evs.map((e) => `
       <div class="ev" data-t="${esc(e.type)}">
         <div class="h">
-          <span class="k">${esc(KIND[e.type] || e.type)}</span>
+          <span class="k">${esc(kindLabel(e.type))}</span>
           <span class="t">${clock(e.ts)}</span>
         </div>
         ${e.detail ? `<div class="d">${esc(e.detail)}</div>` : ''}

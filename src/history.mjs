@@ -6,7 +6,7 @@ import { writeAtomic } from './atomic.mjs'
 export const HISTORY_FILE = join(CONFIG_DIR, 'history.json')
 
 // 上限。审批条目比事件重（含命令原文），所以留得少一些。
-const MAX_APPROVALS = 300
+export const MAX_APPROVALS = 300
 const MAX_EVENTS = 3000
 const DEBOUNCE_MS = 800
 

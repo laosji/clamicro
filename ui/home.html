@@ -604,6 +604,27 @@
   }
   .skillsum .lbl{font-family:ui-monospace,Menlo,monospace; opacity:.75}
   .skillsum .n{white-space:nowrap}
+  /* ── 历史 tab ── */
+  .hseg{display:flex; gap:6px; margin:2px 0 14px}
+  .hseg button{
+    flex:1; padding:8px 0; font-size:13px; font-family:inherit;
+    border:none; border-radius:10px; background:var(--monobg); color:var(--dim);
+  }
+  .hseg button.on{background:var(--run); color:#fff; font-weight:600}
+  .hev, .hap{display:block; padding:10px 12px; border-radius:12px; background:var(--card);
+    border:1px solid var(--line); margin-bottom:8px; text-decoration:none; color:inherit}
+  .hev .hh, .hap .hh{display:flex; align-items:baseline; gap:8px; flex-wrap:wrap}
+  .hev .hk{font-size:11.5px; color:var(--dim); flex:0 0 auto}
+  .hev .hp, .hap .hp{font-size:11.5px; color:var(--dim); overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .hev .ht, .hap .ht{font-size:11px; color:var(--dim); margin-left:auto; flex:0 0 auto;
+    font-variant-numeric:tabular-nums}
+  .hev .hd, .hap .hd{font:12.5px/1.5 ui-monospace,Menlo,monospace; margin-top:4px;
+    overflow-wrap:anywhere; color:var(--fg)}
+  /* 结果徽标。三档颜色对应三种结局，扫一眼就能挑出「被拒了」的那些 */
+  .hbadge{font-size:11px; padding:2px 7px; border-radius:20px; flex:0 0 auto}
+  .hbadge.ok{background:var(--monobg); color:var(--ok)}
+  .hbadge.no{background:var(--monobg); color:var(--no)}
+  .hbadge.dim{background:var(--monobg); color:var(--dim)}
   .ahidden{margin-top:14px; font-size:12.5px; color:var(--dim); text-align:center}
   /* 发消息失败的说明。用警告色而不是灰色：它要解释「你的字还在，但没发出去」 */
   .sayerr{margin-top:10px; font-size:12.5px; line-height:1.55; color:var(--warn)}
@@ -792,6 +813,10 @@
     <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M7 9.5l2.5 2.5L7 14.5M12.5 15H17"/></svg>
     会话
   </button>
+  <button id="tabHist" data-tab="hist">
+    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>
+    历史
+  </button>
   <button id="tabSay" data-tab="say">
     <span style="position:relative"><svg viewBox="0 0 24 24"><path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 9.5 9.5 0 0 1-2.8-.4L4 21l1.4-4a8.3 8.3 0 0 1-1.4-4.6A8.4 8.4 0 0 1 12.6 4 8.4 8.4 0 0 1 21 11.5z"/></svg><i class="badge hidden" id="qbadge"></i></span>
     发消息
@@ -840,6 +865,10 @@ function sessionStaleNote(s) {
 
 let tab = sessionStorage.getItem('ccm-tab') || 'home';
 let sessions = [], pending = [], cfg = null, quota = null, inbox = {}, slSeen = null, recentlyExpired = [], recentTools = [], doneTimer = null;
+// 「历史 · 实时」用的全类型事件缓冲。来源是 SSE 的重放 + 实时推送，不另开接口
+let recentEvents = [];
+// 审批历史。进这个 tab 才拉——首页不需要它，而它可能有几百条
+let histData = null, histLoading = false, histView = 'live';
 // agent -> 最后一次上报时间。用来区分「这个后端没有会话」和「这个后端不上报了」
 let agentsSeen = {};
 /** agent -> 首次上报时间。首页分区的顺序按它排，见 agentKinds */
@@ -1693,7 +1722,7 @@ function renderPathBar() {
    * 项目名本来就写在每张卡片上（那里它有归属），不必再挑一个顶上去。
    */
   $('pseg').textContent = 'clamicro';
-  $('pseg2').textContent = { home: 'overview', sess: 'sessions', say: 'message' }[tab];
+  $('pseg2').textContent = { home: 'overview', sess: 'sessions', hist: 'history', say: 'message' }[tab];
 
   const off = offlineSince !== null && Date.now() - offlineSince > 5000;
   const retry = offlineSince !== null && !off;
@@ -2216,13 +2245,20 @@ function skillTag(kind) {
   if (kind !== 'claude-code') return '';
   const sk = cfg?.skills;
   if (!sk) return '';
+  /*
+   * 措辞是「**你的 skill 4**」，不是「skill 你的 4」——后者把量词甩在最前面，
+   * 读起来是「skill、你的、4」三个碎片，而不是一句话。
+   *
+   * 两档都带上 skill 这个词，不省。省掉之后「插件 30」会被读成「30 个插件」
+   * ——而实际是 1 个插件带来的 30 个 skill。差一个词，数字的意思就全变了。
+   */
   const parts = [];
-  if (sk.user === null || sk.user === undefined) parts.push('你的 数不出来');
-  else if (sk.user) parts.push(`你的 ${sk.user}`);
-  if (sk.plugin === null || sk.plugin === undefined) parts.push('插件 数不出来');
-  else if (sk.plugin) parts.push(`插件 ${sk.plugin}`);
+  if (sk.user === null || sk.user === undefined) parts.push('你的 skill 数不出来');
+  else if (sk.user) parts.push(`你的 skill ${sk.user}`);
+  if (sk.plugin === null || sk.plugin === undefined) parts.push('插件 skill 数不出来');
+  else if (sk.plugin) parts.push(`插件 skill ${sk.plugin}`);
   if (!parts.length) return '';
-  return `<span class="askill">skill ${parts.map(esc).join(' · ')}</span>`;
+  return `<span class="askill">${parts.map(esc).join(' · ')}</span>`;
 }
 
 function skillLineUnused() {
@@ -2413,6 +2449,103 @@ function attachListSwipes() {
 
 let sayTarget = null, draft = '';
 
+/**
+ * 历史 tab。两个子视图，共用一个页面。
+ *
+ * ## 为什么这两件事放一起
+ *
+ * 它们回答的是同一个问题：**你不在的时候发生了什么。** 一个是「刚刚」
+ * （事件流），一个是「过去这些天」（审批结果）。分成两个 tab 会让人记不住
+ * 哪个在哪儿；挤成一列又会互相淹没——事件几秒一条，审批一天几条。
+ *
+ * ## 审批历史此前完全够不着
+ *
+ * 数据一直在盘上（history.json 存 300 条，含全部已决策的），但
+ * `/api/approvals` 只回待审批和最近 30 分钟超时的 5 条，其余两百多条
+ * 谁也看不见。而**自动通过的、超时被拒的、在终端里被别处放行的**，
+ * 恰恰是你没在场的那些，也恰恰是最该能回头查的。
+ */
+const HIST_STATUS = {
+  allowed: { t: '已批准', c: 'ok' },
+  auto_allowed: { t: '自动通过', c: 'dim' },
+  answered: { t: '已回答', c: 'ok' },
+  denied: { t: '已拒绝', c: 'no' },
+  expired: { t: '超时拒绝', c: 'no' },
+  superseded: { t: '在别处放行', c: 'dim' },
+  abandoned: { t: '已放弃', c: 'dim' },
+};
+
+function renderHistory() {
+  const seg = `<div class="hseg">
+    <button data-hv="live" class="${histView === 'live' ? 'on' : ''}">实时</button>
+    <button data-hv="appr" class="${histView === 'appr' ? 'on' : ''}">审批</button>
+  </div>`;
+  $('view').innerHTML = seg + (histView === 'live' ? histLive() : histApprovals());
+  for (const b of document.querySelectorAll('.hseg button')) {
+    b.onclick = () => { histView = b.dataset.hv; $('view').scrollTop = 0; render(); };
+  }
+}
+
+/**
+ * 实时：跨会话的事件流，**新的在最上面**。
+ *
+ * 会话详情页那条时间线是单个会话的；这里回答的是「这台机器上此刻在发生
+ * 什么」——多后端多会话时，那个问题在别处没有答案。
+ *
+ * 每条带项目名：不带的话三个会话的事件混在一起就分不出谁是谁。
+ */
+function histLive() {
+  if (!recentEvents.length) {
+    return `<div class="empty"><b>还没有事件</b>会话一动就会出现在这里</div>`;
+  }
+  const nameOf = (sid) => {
+    const s = sessions.find((x) => x.session_id === sid);
+    return s ? (s.session_name || dirOf(s)) : sid.slice(0, 8);
+  };
+  const rows = recentEvents.slice().reverse().slice(0, 200).map((e) => `
+    <div class="hev" data-t="${esc(e.type)}">
+      <div class="hh"><span class="hk">${esc(kindLabel(e.type))}</span>
+        <span class="hp">${esc(nameOf(e.session_id))}</span>
+        <span class="ht">${clock(e.ts)}</span></div>
+      ${e.detail ? `<div class="hd">${esc(e.detail)}</div>` : ''}
+    </div>`).join('');
+  // 缓冲上限要说出来。静默截断读起来就是「一共就这么多」
+  const more = recentEvents.length > 200
+    ? `<div class="ahidden">只显示最近 200 条，更早的去会话时间线里看</div>` : '';
+  return rows + more;
+}
+
+/** 审批历史：已经有结果的那些。数据来自 /api/history，进这个视图才拉 */
+function histApprovals() {
+  if (!histData && !histLoading) {
+    histLoading = true;
+    fetch('/api/history').then((r) => r.json()).then((d) => {
+      histData = d; histLoading = false; if (tab === 'hist') render();
+    }).catch(() => { histLoading = false; });
+  }
+  if (!histData) return `<div class="empty"><b>正在取历史…</b></div>`;
+  const list = histData.approvals || [];
+  if (!list.length) {
+    return `<div class="empty"><b>还没有处理过的审批</b>批准或拒绝过的操作会留在这里</div>`;
+  }
+  const rows = list.map((a) => {
+    const st = HIST_STATUS[a.status] || { t: a.status, c: 'dim' };
+    // delivered === false = 人做了决定但没送到执行点。**必须说**，
+    // 否则这条记录在替一个从没生效的决定作证
+    const undel = a.delivered === false ? `<span class="hbadge no">未送达</span>` : '';
+    return `<a class="hap" href="/ui/a/${a.id}">
+      <div class="hh"><span class="hbadge ${st.c}">${esc(st.t)}</span>${undel}
+        <span class="hp">${esc(a.session_name || (a.cwd || '').split('/').filter(Boolean).pop() || '')}</span>
+        <span class="ht">${clock(a.decided_at || a.created_at)}</span></div>
+      <div class="hd">${esc(a.headline || a.summary || a.tool_name)}</div>
+    </a>`;
+  }).join('');
+  const more = histData.total > list.length
+    ? `<div class="ahidden">共 ${histData.total} 条，只显示最近 ${list.length} 条 · 服务端保留 ${histData.retained} 条</div>`
+    : '';
+  return rows + more;
+}
+
 function renderSay() {
   /**
    * 只列**能收消息**的会话。
@@ -2499,7 +2632,7 @@ function renderSay() {
 function render() {
   // 首页标题用产品名而不是「概览」：这是你打开时看到的第一个词，
   // 「概览」描述的是这一屏的功能，而你已经在看这一屏了——它不提供信息。
-  $('title').textContent = { home: 'Clamicro', sess: '会话', say: '发消息' }[tab];
+  $('title').textContent = { home: 'Clamicro', sess: '会话', hist: '历史', say: '发消息' }[tab];
   renderPathBar();
   for (const b of document.querySelectorAll('nav button')) b.classList.toggle('on', b.dataset.tab === tab);
   $('badge').textContent = pending.length;
@@ -2508,7 +2641,7 @@ function render() {
   $('qbadge').textContent = qn;
   $('qbadge').classList.toggle('hidden', !qn);
   try {
-    ;({ home: renderHome, sess: renderSessions, say: renderSay }[tab])();
+    ;({ home: renderHome, sess: renderSessions, hist: renderHistory, say: renderSay }[tab])();
   } catch (err) {
     // 渲染抛异常时，$('view') 会保留上一个 tab 的内容——界面看起来
     // 「首页高亮却显示着发消息的内容」，极难排查。宁可显式报错。
@@ -2655,7 +2788,9 @@ function scheduleRender() {
   renderPending = true;
   requestAnimationFrame(() => {
     renderPending = false;
-    if (tab === 'home') render();
+    // 首页的履历轨道和历史 tab 的实时流都吃这条。写死 'home' 的那一版让
+    // 历史 tab 一直停在首屏那一刻的内容——事件在缓冲里，屏幕上没有
+    if (tab === 'home' || tab === 'hist') render();
   });
 }
 
@@ -2737,6 +2872,19 @@ function connect() {
   es.addEventListener('event', (m) => {
     try {
       const e = JSON.parse(m.data);
+      /**
+       * 全类型留一份给「历史 · 实时」用。
+       *
+       * 不必新开接口：SSE 连上时服务端会把历史事件**全量重放**
+       * （/api/stream 的 `store.events(lastId)`，首次连 lastId=0），
+       * 所以这个缓冲一加载就是满的，刷新也一样。
+       *
+       * 300 条：服务端内存里也才 2000，而这个视图回答的是「刚刚发生了什么」，
+       * 再往前该去某个会话的时间线里看。
+       */
+      recentEvents.push(e);
+      if (recentEvents.length > 300) recentEvents.splice(0, recentEvents.length - 300);
+      if (tab === 'hist') scheduleRender();
       if (e.type !== 'tool' && e.type !== 'tool-error') return;
       // 命令常常是多行的（heredoc、带换行的脚本），压成一行再截断——
       // 否则单行的履历轨道会被撑破

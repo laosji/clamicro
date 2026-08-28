@@ -65,3 +65,21 @@ const stateLabel = (s, session) => {
   return STATE_LABEL[s] ?? s
 };
 const subStateLabel = (ss) => SUBSTATE_LABEL[ss] ?? ss;
+
+/* 事件类型的中文名。时间线（session.html）和历史 tab（home.html）共用。
+   抄两份的下场见本文件开头那段——同一条事件在两个页面上叫不同的名字。 */
+const KIND_LABEL = {
+  'session-start': '会话开始', prompt: '提问', tool: '工具', 'tool-error': '工具失败',
+  'approval-requested': '请求审批', 'permission-prompt': '权限提示', control: '控制',
+  'quota-warn': '额度预警', stop: '完成', error: '出错', idle: '等你回话',
+  notification: '通知', 'session-end': '会话结束', skill: '使用 skill',
+};
+const kindLabel = (t) => KIND_LABEL[t] ?? t;
+
+/* 时:分:秒。两个页面都要按这个格式显示事件时间，格式不一致会让人以为
+   是两套时钟。 */
+const clock = (ts) => {
+  const d = new Date(ts);
+  const p = (n) => String(n).padStart(2, '0');
+  return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+};

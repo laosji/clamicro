@@ -33,7 +33,7 @@ const SHARED = 'ui/agents.js'
 
 test('共享的对照表只在 ui/agents.js 里定义一次', async (t) => {
   const shared = read(SHARED)
-  for (const name of ['AGENT_LOGOS', 'STATE_LABEL', 'SUBSTATE_LABEL']) {
+  for (const name of ['AGENT_LOGOS', 'STATE_LABEL', 'SUBSTATE_LABEL', 'KIND_LABEL']) {
     await t.test(`${name} 在 ${SHARED} 里`, () => {
       assert.match(shared, new RegExp(`const ${name}\\s*=`), `${SHARED} 应该定义 ${name}`)
     })
@@ -49,7 +49,7 @@ test('共享的对照表只在 ui/agents.js 里定义一次', async (t) => {
 test('用到共享函数的页面都引了 /ui/agents.js', async (t) => {
   for (const page of PAGES) {
     const s = read(page)
-    const uses = /\b(agentLogo|stateLabel|subStateLabel)\s*\(/.test(s)
+    const uses = /\b(agentLogo|stateLabel|subStateLabel|kindLabel|clock)\s*\(/.test(s)
     await t.test(`${page}`, () => {
       // 这条测试的价值全在这里：漏了 script 标签的表现是页面**整段脚本报错**
       // （ReferenceError），而不是少一个图标——首页会直接白屏

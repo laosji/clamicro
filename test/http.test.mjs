@@ -412,3 +412,65 @@ test('安装器给的入口不含凭证、也不会过期', async (t) => {
     assert.match(src, /手机打开/, '入口应当是「手机打开这个网址」')
   })
 })
+
+/**
+ * 审批历史。
+ *
+ * 这些数据一直在盘上（history.json 存 300 条，含全部已决策的），但界面上
+ * **完全够不着**——`/api/approvals` 只回待审批和最近 30 分钟超时的 5 条。
+ * 而「你不在的时候替你做了哪些决定」正是这个产品的主要价值：自动通过的、
+ * 超时被拒的、在终端里被别处放行的，恰恰是你没在场的那些。
+ */
+test('/api/history 只回已经有结果的', async (t) => {
+  const mk = async () => (await (await S.post('/api/selftest/approval', {})).json())
+  const a = await mk()
+  const b = await mk()
+  await S.post(`/api/approvals/${a.id}/decide?k=${encodeURIComponent(a.key)}`, { decision: 'allow' })
+
+  await t.test('待审批的不进历史', async () => {
+    const d = await (await S.get('/api/history')).json()
+    const ids = d.approvals.map((x) => x.id)
+    assert.ok(ids.includes(a.id), '已决策的应该在')
+    assert.ok(!ids.includes(b.id), '还挂着的那条不该出现在「历史」里')
+  })
+
+  await t.test('带结果和决策人', async () => {
+    const d = await (await S.get('/api/history')).json()
+    const hit = d.approvals.find((x) => x.id === a.id)
+    assert.equal(hit.status, 'allowed')
+    assert.equal(hit.decided_by, 'phone')
+  })
+
+  await t.test('截断要说出来 —— total 和 retained 都得回', async () => {
+    // 只回 N 条而不说还有多少，读起来就是「一共就这么多」
+    const d = await (await S.get('/api/history?limit=1')).json()
+    assert.equal(d.approvals.length, 1)
+    assert.ok(d.total >= 1, 'total 必须是全部条数，不是这次返回的条数')
+    assert.equal(typeof d.retained, 'number', '盘上保留多少条也要说，否则「更早的没有了」会被读成「没发生过」')
+  })
+
+  await t.test('limit：认得的夹在上限内，认不得的走默认值', async () => {
+    // 上限 200 是防「一次把三百条命令原文全推到手机上」，不是业务规则
+    for (const q of ['9999', '-1']) {
+      const d = await (await S.get(`/api/history?limit=${q}`)).json()
+      assert.ok(d.approvals.length <= 200, `limit=${q} 没夹住`)
+    }
+    // 0 / 空 / 非数字都当没写，走默认——而不是当成「要 0 条」
+    for (const q of ['0', '', 'abc']) {
+      const d = await (await S.get(`/api/history?limit=${q}`)).json()
+      assert.ok(d.approvals.length > 0, `limit=${q} 被当成了「要 0 条」`)
+    }
+  })
+
+  await t.test('要 token —— 里面是命令原文', async () => {
+    assert.equal((await S.get('/api/history', { raw: true })).status, 401)
+  })
+
+  await t.test('不夹带凭证', async () => {
+    const body = await (await S.get('/api/history')).text()
+    assert.ok(!body.includes(S.token), '响应里出现了访问令牌')
+    // publicApproval 本来就不输出 key，这里再钉一次：历史会被反复翻，
+    // 每条都带一把能决策的钥匙就等于把它们摊开
+    assert.ok(!/"key"\s*:/.test(body), '历史条目不该带 per-approval key')
+  })
+})
