@@ -122,13 +122,26 @@ history.bind(() => ({
     )
   }
 }
-inbox.on('change', (sid) => {
+/**
+ * 队列长度、开关、挂起状态——三样都要推给手机。
+ *
+ * 尤其是 `hold-start`：那一刻回合已经结束、Stop 正挂着，**此刻发出去就立刻
+ * 送达**，而这是整个「等我回话」里唯一值得说的一刻。不推的话手机上要等下
+ * 一次刷新才知道，而挂起只有 90 秒。
+ */
+const pushSession = (sid) => {
   const s = store.session(sid)
-  if (s) {
-    s.queued = inbox.list(sid).length
-    broadcast('session', s)
-  }
-})
+  if (!s) return
+  s.queued = inbox.list(sid).length
+  s.handoff_armed = inbox.isArmed(sid)
+  s.handoff_holding = inbox.isHolding(sid)
+  s.handoff_since = inbox.holdingSince(sid)
+  broadcast('session', s)
+}
+inbox.on('change', pushSession)
+inbox.on('armed', pushSession)
+inbox.on('hold-start', pushSession)
+inbox.on('hold-end', pushSession)
 
 control.on('change', (sid, st) => {
   const s = store.session(sid)
@@ -368,6 +381,33 @@ async function notifyApproval(ap, label) {
     tint: ap.risk.level === 'high' ? 'danger' : 'warn',
     subtitle,
     body,
+  })
+}
+
+/**
+ * 「它在等你回话」——挂住 Stop 的那一刻推一条。
+ *
+ * **没有这条，整个功能是用不了的。** 挂起走的是提前返回那条路，不经过
+ * `store.applyHook('stop', …)`，也就拿不到平时那条「已完成」推送。结果是：
+ * 打开开关反而让你少收到一条通知，然后你盯着手机等一个不会来的提示，
+ * 90 秒后它自己放行了——而你什么都没看见。
+ *
+ * 写明秒数，因为这条通知**有时效**：过了就只能回终端敲了。
+ */
+async function notifyHold(sessionId) {
+  const s = store.get(sessionId)
+  const label = s?.session_name || (s?.cwd || '').split('/').filter(Boolean).pop() || '会话'
+  await notify({
+    title: 'Clamicro',
+    icon: '💬',
+    tint: 'warn',
+    compact: true,
+    short: '等你回话',
+    subtitle: `${label} 在等你回话`,
+    body: `${Math.round(Inbox.HOLD_MS / 1000)} 秒内在手机上回，它就接着跑`,
+    url: `${config.baseUrl}/ui/s/${sessionId}`,
+    level: 'time-sensitive',
+    group: 'clamicro',
   })
 }
 
@@ -789,7 +829,7 @@ const auth = auth0
  */
 const codexTail = createCodexTail({ store, notify, config })
 const handleHooks = hookRoutes({
-  config, store, approvals, control, inbox, history, notify, notifyApproval, codexTail,
+  config, store, approvals, control, inbox, history, notify, notifyApproval, notifyHold, codexTail,
 })
 const handlePages = pageRoutes({
   config, approvals, notify, auth, publicApproval, HERE,

@@ -150,8 +150,25 @@
   /* 空着的时候压灰而不是藏起来：位置一直在那儿，你才知道打完字往哪按 */
   .send:disabled{opacity:.3; cursor:default}
   /* 送达时机。**永远显示**，理由见 .bar 开头那段 */
-  .hint{font-size:11.5px; line-height:1.5; color:var(--dim); margin:7px 2px 0}
+  .hintrow{display:flex; align-items:flex-start; gap:10px; margin:7px 2px 0}
+  .hint{font-size:11.5px; line-height:1.5; color:var(--dim); flex:1 1 auto; min-width:0}
   .hint.warn{color:var(--warn)}
+  .hint.live{color:var(--ok)}
+  /* 「等我回话」开关。挨着那行送达提示——它改的正是那行字说的事 */
+  .hoff{
+    flex:0 0 auto; cursor:pointer; white-space:nowrap;
+    padding:5px 10px; border-radius:20px;
+    border:1px solid var(--line); background:none; color:var(--dim);
+    font:11.5px -apple-system,"PingFang SC",sans-serif;
+  }
+  .hoff[aria-pressed="true"]{
+    color:var(--ok); border-color:color-mix(in srgb,var(--ok) 45%,transparent);
+    background:color-mix(in srgb,var(--ok) 10%,transparent);
+  }
+  /* 真挂住的时候脉动一下：它只有 90 秒，静态的绿看不出「此刻正在发生」 */
+  .hoff.holding{animation:hbeat 1.4s ease-in-out infinite}
+  @keyframes hbeat{0%,100%{opacity:1}50%{opacity:.55}}
+  @media (prefers-reduced-motion:reduce){ .hoff.holding{animation:none} }
   .barerr{font-size:12.5px; line-height:1.5; color:var(--warn); margin:7px 2px 0}
   /* 断线横幅。比 note 更响一档（红而不是黄）：note 说的是某个操作的状态，
      这条说的是**整屏都不再可信**——上面每一个字都是断开之前的样子。 */
@@ -257,7 +274,10 @@
       </button>
     </div>
   </div>
-  <div class="hint hidden" id="hint"></div>
+  <div class="hintrow hidden" id="hintrow">
+    <div class="hint" id="hint"></div>
+    <button class="hoff" id="btnHoff" aria-pressed="false">等我回话</button>
+  </div>
 </div></div>
 
 <script src="/ui/agents.js"></script>
@@ -270,7 +290,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({'&':'&amp;','<':'
 /* KIND_LABEL / kindLabel / clock 现在住在 /ui/agents.js —— 历史 tab 也要用。
    抄两份的下场见那个文件开头：同一条事件在两个页面上叫不同的名字。 */
 
-let session = null, cap = null, draft = '', queued = [];
+let session = null, cap = null, draft = '', queued = [], handoff = null;
 
 function render(data) {
   session = data.session;
@@ -410,7 +430,9 @@ function render(data) {
   $('skills').classList.toggle('hidden', !skills.length);
 
   queued = data.queued || [];
+  handoff = data.handoff || null;
   renderComposer();
+  pumpHandoff();
 
   const evs = (data.events || []).slice().reverse();
   if (evs.length) {
@@ -483,7 +505,7 @@ const IC = {
 function renderComposer() {
   const on = !!cap?.inbox;
   $('field').classList.toggle('hidden', !on);
-  $('hint').classList.toggle('hidden', !on);
+  $('hintrow').classList.toggle('hidden', !on);
   if (!on) {
     $('qstrip').classList.add('hidden');
     $('qlist').classList.add('hidden');
@@ -510,12 +532,7 @@ function renderComposer() {
    * 现在 textarea 是写死在 HTML 里的，render 只改会变的那几样文字，
    * 一个都不含焦点。
    */
-  const idle = session && ['Done', 'Idle', 'Waiting Input'].includes(session.state);
-  const hint = $('hint');
-  hint.textContent = idle
-    ? '会话已经停了 · 要等你在终端再发起一轮，这条才会进入对话'
-    : '不会立刻送达 · 跑完当前这一轮后进入对话';
-  hint.classList.toggle('warn', !!idle);
+  renderHandoff();
 
   // 队列收成一行，展开状态由用户说了算——刷新不该把他展开的东西合回去
   const q = $('qstrip'), list = $('qlist');
@@ -533,6 +550,100 @@ function renderComposer() {
     };
   }
 }
+
+/**
+ * 「等我回话」——那行送达提示 + 右边那个开关。
+ *
+ * ## 它解决的是哪一刻
+ *
+ * 它在终端里等你打字的那一刻，**服务手上没有任何能回的请求**：Stop 早就
+ * 回过 `{}` 了，之后那条 `Notification: idle_prompt` 是单向的。所以那时你在
+ * 手机上打的字没有东西可以搭载，只能躺到你回终端敲一下。
+ *
+ * 开关做的事是**提前一步**：趁这一轮还没结束就说好「结束时挂住等我」，
+ * 于是 Stop 到了不立刻放行，挂 90 秒等你（src/inbox.mjs 的 hold）。
+ *
+ * ## 三档文案说的是三件不同的事
+ *
+ *   关着、在跑    这条会排队，跑完这一轮进对话       —— 老样子
+ *   开着、在跑    跑完这一轮会挂住等你               —— 承诺发生在未来
+ *   开着、正挂着  现在发就立刻接着跑，还剩 N 秒      —— 唯一「立刻」成立的时刻
+ *
+ * ## 最要紧的是第四档
+ *
+ * **会话已经停了的时候打开它，对眼下这一次没有用。** 那一轮的 Stop 已经
+ * 放行了，挂不住一个已经走掉的请求；开关要到**下一轮跑完**才起作用。
+ *
+ * 这一档不说清楚，这个功能就是在骗人：你正因为「它在等你回话」而打开开关，
+ * 而那恰恰是它帮不上忙的那一刻。所以这一档单独一句话，而且是警告色。
+ */
+function renderHandoff() {
+  const hint = $('hint'), btn = $('btnHoff');
+  const h = handoff || {};
+  const idle = session && ['Done', 'Idle', 'Waiting Input'].includes(session.state);
+  const secs = Math.round((h.holdMs ?? 90000) / 1000);
+
+  btn.setAttribute('aria-pressed', h.armed ? 'true' : 'false');
+  btn.classList.toggle('holding', !!h.holding);
+  btn.textContent = h.holding ? '正在等你' : '等我回话';
+
+  let text, tone = '';
+  if (h.holding) {
+    // 唯一一档「立刻」是真的。倒数用服务端给的开始时间算，不是自己编的
+    const left = h.since ? Math.max(0, secs - Math.round((Date.now() - h.since) / 1000)) : null;
+    text = `正在等你 · 现在发就立刻接着跑${left === null ? '' : `（还有 ${left} 秒）`}`;
+    tone = 'live';
+  } else if (h.armed && idle) {
+    // 这一档是这个功能唯一会骗人的地方，见上面那段
+    text = `已开，但这一轮已经停了 —— 挂不住一个已经走掉的请求，要下一轮跑完才会等你`;
+    tone = 'warn';
+  } else if (h.armed) {
+    text = `跑完这一轮会挂住 ${secs} 秒等你 · 那时候发就立刻接着跑`;
+  } else if (idle) {
+    text = '会话已经停了 · 要等你在终端再发起一轮，这条才会进入对话';
+    tone = 'warn';
+  } else {
+    text = '不会立刻送达 · 跑完当前这一轮后进入对话';
+  }
+  hint.textContent = text;
+  hint.classList.toggle('warn', tone === 'warn');
+  hint.classList.toggle('live', tone === 'live');
+}
+
+/**
+ * 挂着的时候每秒重画一次那行倒数。
+ *
+ * 只在真挂着时开表：90 秒是唯一需要秒级精度的一段，别的时候一秒一次重排
+ * 纯属白烧电——而这一页多半开在手机上。
+ */
+let hoffTick = null;
+function pumpHandoff() {
+  const need = !!handoff?.holding;
+  if (need && !hoffTick) hoffTick = setInterval(renderHandoff, 1000);
+  if (!need && hoffTick) { clearInterval(hoffTick); hoffTick = null; }
+}
+
+$('btnHoff').onclick = async () => {
+  const next = !(handoff?.armed);
+  $('btnHoff').disabled = true;
+  clearBarError();
+  try {
+    const r = await fetch(`/api/sessions/${SID}/handoff`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ on: next }),
+    });
+    if (!r.ok) {
+      barError((await r.json().catch(() => ({}))).hint || '这个开关没打开，服务端拒绝了');
+    } else {
+      markOnline();
+    }
+  } catch {
+    barError('没发出去 —— 和 Mac 的连接断了，开关没有生效');
+    markOffline();
+  }
+  $('btnHoff').disabled = false;
+  await refresh.now();
+};
 
 $('qstrip').onclick = () => {
   const q = $('qstrip');

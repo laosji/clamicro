@@ -110,8 +110,8 @@ let warnedMatchDrift = false
 const warnedNoApprove = new Set()
 
 export function hookRoutes(ctx) {
-  requireDeps('hookRoutes', ctx, ['config', 'store', 'approvals', 'control', 'inbox', 'history', 'notify', 'notifyApproval', 'codexTail'])
-  const { config, store, approvals, control, inbox, history, notify, notifyApproval, codexTail } = ctx
+  requireDeps('hookRoutes', ctx, ['config', 'store', 'approvals', 'control', 'inbox', 'history', 'notify', 'notifyApproval', 'notifyHold', 'codexTail'])
+  const { config, store, approvals, control, inbox, history, notify, notifyApproval, notifyHold: alertHold, codexTail } = ctx
 
   return async function handleHooks(req, res, url, path) {
     // ---- 核心：阻塞式审批 ----
@@ -404,7 +404,39 @@ export function hookRoutes(ctx) {
          *
          * 拦住的话，消息**留在队列里**，手机上看得见。留着比消失好。
          */
-        const pending = inbox.drain(payload.session_id)
+        let pending = inbox.drain(payload.session_id)
+
+        /**
+         * 队列空、但人打开了「等我回话」——**把这次 Stop 挂住**，别急着回。
+         *
+         * 这是「它在等你回话时能不能从手机回一句」唯一的落点。放行之后
+         * Claude Code 就停在终端的提示符上了，而那之后再没有任何 hook 会
+         * 触发（`Notification: idle_prompt` 是单向的，它不等回包）——你在
+         * 手机上打的字将没有任何东西可以搭载。
+         *
+         * 挂起最多 90 秒（Inbox.HOLD_MS），期间手机上发出的消息会就地送达；
+         * 没等到就照常放行，会话正常停下，和没有这个功能时一模一样。
+         */
+        if (!pending && inbox.isArmed(payload.session_id)) {
+          console.log(`[inbox] 会话 ${payload.session_id.slice(0, 8)} 挂住 Stop，等手机回话`)
+          if (alertHold) alertHold(payload.session_id).catch(() => {})
+          pending = await inbox.hold(payload.session_id)
+        }
+
+        /*
+         * `!res.destroyed` **要在 await 之后再看一次**。
+         *
+         * 上面那次检查发生在挂起之前，而挂起可以持续 90 秒——这中间对面被
+         * Ctrl-C、终端被关掉都是常事。drain 已经是破坏性的（队列清空、记一笔
+         * 「已注入」），再往一个死掉的响应上写，结果就是消息没了而手机上
+         * 显示已送达。这正是原来那段注释在防的事，只是现在多了一段等待。
+         */
+        if (pending && res.destroyed) {
+          console.log(`[inbox] 会话 ${payload.session_id.slice(0, 8)} 等到了回话，但连接已断——消息退回队列`)
+          inbox.requeue(payload.session_id, pending)
+          return true
+        }
+
         if (pending) {
           store.noteInbox(payload.session_id, pending)
           console.log(`[inbox] 会话 ${payload.session_id.slice(0, 8)} 注入 ${pending.count} 条消息`)

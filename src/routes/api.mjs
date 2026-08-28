@@ -7,6 +7,7 @@ import { MAX_APPROVALS as HISTORY_MAX_APPROVALS } from '../history.mjs'
 import { AGENTS, capOf, detectAgents } from '../agents.mjs'
 import { countSkills } from '../skills.mjs'
 import { installedInfo } from '../paths.mjs'
+import { Inbox } from '../inbox.mjs'
 
 /**
  * 审批结束后，那条深链 `?k=` 还能用多久。
@@ -116,6 +117,19 @@ export function apiRoutes(ctx) {
           cap: capOf(session?.agent),
           events: store.events(0, sid),
           queued: inbox.list(sid),
+          /*
+           * 「等我回话」的两档状态。**必须分开给**：
+           *   armed   开关开着，但这一轮还在跑
+           *   holding 回合已经结束，Stop 正挂着，此刻发出去就立刻送达
+           * 合成一个布尔的话，界面就说不出「现在发它就立刻接着跑」——
+           * 而那正是这个功能唯一值得说的一刻。
+           */
+          handoff: {
+            armed: inbox.isArmed(sid),
+            holding: inbox.isHolding(sid),
+            since: inbox.holdingSince(sid),
+            holdMs: Inbox.HOLD_MS,
+          },
         })
       },
     },
@@ -200,7 +214,43 @@ export function apiRoutes(ctx) {
             hint: '这个会话已经排了很多条还没送达。消息只在它跑完下一轮时才注入——先去终端里让它跑一轮，或者删掉几条。',
           })
         }
-        json(res, 200, { ok: true, message: msg, queued: inbox.list(sid).length })
+        /*
+         * 正挂在 Stop 上就**就地送达**，别等下一轮。
+         *
+         * 这是「等我回话」那个开关的全部意义：Stop 被挂住了，这条消息现在
+         * 就能作为 decision:block 回过去，对话立刻接着跑，你不用碰键盘。
+         * 没挂着的话这一步什么都不做，照旧排队。
+         */
+        const now = inbox.deliverIfHolding(sid)
+        json(res, 200, { ok: true, message: msg, queued: inbox.list(sid).length, delivered: now })
+      },
+    },
+
+    /**
+     * 「等我回话」的开关。
+     *
+     * 开着的时候，这个会话下一次 Stop 会被挂住最多 90 秒等你在手机上打字
+     * （见 src/inbox.mjs 的类注释）。**代价是那段时间终端不把提示符还给你**
+     * ——所以它必须由人显式打开，不能靠猜。
+     *
+     * 能力判据和发消息同源：注入靠的就是 Stop 的 decision:block，
+     * 不支持注入的后端挂住 Stop 只会白堵着终端，什么也送不进去。
+     */
+    {
+      method: 'POST', path: /^\/api\/sessions\/([\w-]+)\/handoff$/, auth: 'token',
+      handler: async ({ req, res, params: [sid] }) => {
+        const { on } = await readBody(req)
+        const cap = capOf(store.sessions().find((x) => x.session_id === sid)?.agent)
+        if (!cap.inbox) {
+          return json(res, 409, {
+            error: 'unsupported',
+            agent: cap.label,
+            hint: `${cap.label ?? '这个后端'}不支持从手机注入消息，挂住它只会白堵着你的终端。`,
+          })
+        }
+        const armed = inbox.arm(sid, on !== false)
+        console.log(`[inbox] 会话 ${sid.slice(0, 8)} 等我回话 → ${armed ? '开' : '关'}`)
+        json(res, 200, { ok: true, armed, holdMs: Inbox.HOLD_MS })
       },
     },
     {
