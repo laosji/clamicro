@@ -46,11 +46,27 @@ import { join } from 'node:path'
 
 /** 一个目录下有几个直接子目录带 SKILL.md。不递归——skill 就是一层。 */
 function countSkillDirs(dir) {
+  /**
+   * **「目录不存在」和「读不动」是两回事。**
+   *
+   * 这两种原来都回 null——注释里甚至把它们并列写着，却给了同一个值。
+   * 后果是：任何一个**还没装过 skill 的人**（`~/.claude/skills` 压根不存在，
+   * 那是全新安装的常态）首页上会永远挂着一句「你的 skill 数不出来」。
+   * 那读起来像故障，而事实只是「你还没装过」。
+   *
+   *   目录不存在   → 你一个都没装 → **0**，正常
+   *   存在但读不动 → 真的数不出来 → null，界面照实说
+   *
+   * 这正是这个文件顶上那条「0 和数不出来必须分得开」，而我写的时候把它并了。
+   * 分得开的方向也要对：**把「没装」说成「数不出来」，和把「数不出来」说成
+   * 「0」一样是撒谎**，只是方向相反。
+   */
+  if (!existsSync(dir)) return 0
   let entries
   try {
     entries = readdirSync(dir, { withFileTypes: true })
   } catch {
-    return null // 目录不在 / 没权限：数不出来，**不是 0**
+    return null // 存在却读不动（权限）：这才是真的数不出来
   }
   let n = 0
   for (const e of entries) {

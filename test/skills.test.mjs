@@ -57,10 +57,23 @@ test('用户级：判据是 SKILL.md 在不在，不是目录数', async (t) => 
     assert.equal(count().user, 1)
   })
 
-  await t.test('目录整个不存在 → 数不出来（null），不是 0', () => {
-    // 0 的意思是「你一个都没装」，null 的意思是「我没看到那个目录」。
-    // 都显示成 0 的话，一次路径变更会安静地表现成「你的 skill 全没了」
-    assert.equal(count().user, null)
+  /**
+   * **「目录不存在」和「读不动」是两回事，而这两个都不是同一个答案。**
+   *
+   * 这条断言原来写的是「目录不存在 → null」。而 `~/.claude/skills` 不存在
+   * 正是**全新安装的常态**——于是任何一个还没装过 skill 的人，首页上会永远
+   * 挂着一句「你的 skill 数不出来」。那读起来像故障，事实只是「你还没装过」。
+   *
+   * 把「没装」说成「数不出来」，和把「数不出来」说成「0」一样是撒谎，
+   * 只是方向相反。
+   */
+  await t.test('目录不存在 → 0（你一个都没装），不是「数不出来」', () => {
+    assert.equal(count().user, 0)
+  })
+
+  await t.test('目录存在但是空的 → 也是 0', () => {
+    mkdirSync(join(HOME, '.claude', 'skills'), { recursive: true })
+    assert.equal(count().user, 0)
   })
 })
 
