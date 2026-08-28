@@ -92,6 +92,37 @@
   }
   .empty{color:var(--dim); font-size:14px; text-align:center; padding:44px 20px}
 
+  /* ── 发消息。整块从「发消息」tab 搬过来的 ──
+     搬的理由不是更顺手：那个 tab 干的第一件事是「先挑一个会话」，
+     而你多半刚从某个会话页过来，那里有完整上下文（它在干什么、时间线、
+     暂停/取消）。挑选这一步是把你刚有的上下文丢掉再让你重建。 */
+  .say{margin-top:22px; border-top:1px solid var(--line); padding-top:18px}
+  .say h2{font-size:13px; color:var(--dim); font-weight:600; margin:0 0 10px}
+  .say textarea{
+    width:100%; min-height:96px; padding:13px; border-radius:12px; resize:vertical;
+    border:1px solid var(--line); background:var(--card); color:var(--fg);
+    font:15px/1.55 -apple-system,"PingFang SC",sans-serif;
+  }
+  .say textarea:focus{outline:none; border-color:color-mix(in srgb,var(--run) 50%,transparent)}
+  .say .send{
+    width:100%; margin-top:10px; padding:14px; border-radius:12px; cursor:pointer;
+    border:1.5px solid color-mix(in srgb,var(--run) 45%,transparent);
+    background:var(--card); color:var(--run);
+    font:600 15px -apple-system,"PingFang SC",sans-serif;
+  }
+  .say .send:disabled{opacity:.45}
+  .sayerr{margin-top:10px; font-size:12.5px; line-height:1.55; color:var(--warn)}
+  .saynote{margin-top:12px; font-size:12px; line-height:1.6; color:var(--dim)}
+  .qitem{
+    display:flex; gap:10px; align-items:flex-start;
+    background:var(--card); border:1px solid var(--line); border-radius:12px;
+    padding:11px 13px; margin-bottom:8px;
+  }
+  .qitem p{margin:0; flex:1; font-size:13.5px; line-height:1.5; overflow-wrap:anywhere; white-space:pre-wrap}
+  .qitem button{
+    flex:0 0 auto; border:none; background:none; color:var(--no);
+    font-size:13px; cursor:pointer; padding:2px 4px;
+  }
   footer{
     position:fixed; left:0; right:0; bottom:0; display:flex; gap:10px;
     padding:12px 16px calc(12px + env(safe-area-inset-bottom));
@@ -143,7 +174,7 @@
   <div class="skills hidden" id="skills"></div>
 </header>
 
-<main><div class="tl" id="tl"></div></main>
+<main><div class="tl" id="tl"></div><div class="say hidden" id="say"></div></main>
 
 <div class="note hidden" id="note"></div>
 <footer>
@@ -160,7 +191,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({'&':'&amp;','<':'
 /* KIND_LABEL / kindLabel / clock 现在住在 /ui/agents.js —— 历史 tab 也要用。
    抄两份的下场见那个文件开头：同一条事件在两个页面上叫不同的名字。 */
 
-let session = null, cap = null;
+let session = null, cap = null, draft = '', queued = [];
 
 function render(data) {
   session = data.session;
@@ -280,6 +311,9 @@ function render(data) {
     : '';
   $('skills').classList.toggle('hidden', !skills.length);
 
+  queued = data.queued || [];
+  renderSay();
+
   const evs = (data.events || []).slice().reverse();
   if (evs.length) {
     $('tl').innerHTML = evs.map((e) => `
@@ -292,6 +326,82 @@ function render(data) {
       </div>`).join('');
   } else if (session) {
     $('tl').innerHTML = '<div class="empty">还没有事件</div>';
+  }
+}
+
+/**
+ * 从手机往这个会话发消息。
+ *
+ * ## 为什么在这一页，而不是一个独立的 tab
+ *
+ * 原来它是导航里的「发消息」tab，而那个 tab 干的第一件事是
+ * **「发给哪个会话」——先让你挑一个**。可你多半刚从某个会话页过来，
+ * 那里有完整上下文（它在干什么、时间线、暂停/取消按钮都在）。
+ * 挑选那一步是把你刚有的上下文丢掉，再让你在一排项目名里重建它。
+ *
+ * 顺带：`cap.inbox` 只有 Claude Code 为真，所以那个 tab 对纯 Codex /
+ * 纯 DSH 用户永远是空的，白占一格导航。
+ *
+ * ## 不支持的后端**整块不画**
+ *
+ * 注入靠 Stop hook 回 `{decision:'block'}`，那是 Claude Code 的特有原语
+ * （见 src/routes/hooks.mjs）。别的后端没有等价物，画出来只会让人打完字
+ * 点发送、然后永远等不到——**发出去的消息比灰掉的按钮更像成功**。
+ * 服务端那一侧也会 409（src/routes/api.mjs 的 say），两处同一判据。
+ */
+function renderSay() {
+  const box = $('say');
+  if (!cap?.inbox) { box.classList.add('hidden'); box.innerHTML = ''; return; }
+  box.classList.remove('hidden');
+
+  const idle = session && ['Done', 'Idle', 'Waiting Input'].includes(session.state);
+  box.innerHTML = `
+    <h2>发消息</h2>
+    <textarea id="draft" placeholder="想让它改做什么？&#10;例如：先别动数据库，改成只读一遍现有 schema">${esc(draft)}</textarea>
+    <button class="send" id="sendBtn">加入队列</button>
+    <div class="sayerr hidden" id="sayerr"></div>
+    <div class="saynote">
+      消息不会立刻送达。hooks 是单向的，唯一的注入点是「这一轮结束时」——
+      它会在这个会话跑完当前这一轮后进入对话。
+      ${idle ? '<br><br>⚠️ 这个会话现在是空闲的，已经停过了。消息要等到你在终端里再发起一轮、那一轮结束时才会送达。' : ''}
+    </div>
+    ${queued.length ? `<h2 style="margin-top:18px">队列中（${queued.length}）</h2>` + queued.map((m) => `
+      <div class="qitem"><p>${esc(m.text)}</p><button data-del="${esc(m.id)}">删除</button></div>`).join('') : ''}
+  `;
+
+  $('draft').oninput = (e) => { draft = e.target.value; };
+  $('sendBtn').onclick = async () => {
+    const text = $('draft').value.trim();
+    if (!text) return;
+    $('sendBtn').disabled = true;
+    /**
+     * **只有真的排上队了才清空草稿。**
+     *
+     * 原来无论成败都清：网络断了、服务重启了、队列满了——用户刚打完的一段话
+     * 直接消失，界面上没有任何痕迹，他只会以为发出去了，然后等一个永远不来的
+     * 回应。手机上重打一遍的代价还特别高。
+     */
+    let ok = false, hint = '';
+    try {
+      const r = await fetch(`/api/sessions/${SID}/say`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text }),
+      });
+      ok = r.ok;
+      if (!ok) hint = (await r.json().catch(() => ({}))).hint || '没能加入队列，再试一次。';
+    } catch {
+      hint = '发不出去 —— 和 Mac 的连接断了。你打的字还留着。';
+    }
+    $('sendBtn').disabled = false;
+    if (ok) { draft = ''; await refresh(); return; }
+    const note = $('sayerr');
+    if (note) { note.textContent = hint; note.classList.remove('hidden'); }
+  };
+  for (const b of box.querySelectorAll('[data-del]')) {
+    b.onclick = async () => {
+      await fetch(`/api/sessions/${SID}/say/${b.dataset.del}`, { method: 'DELETE' }).catch(() => {});
+      await refresh();
+    };
   }
 }
 

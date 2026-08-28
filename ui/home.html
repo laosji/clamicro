@@ -627,7 +627,6 @@
   .hbadge.dim{background:var(--monobg); color:var(--dim)}
   .ahidden{margin-top:14px; font-size:12.5px; color:var(--dim); text-align:center}
   /* 发消息失败的说明。用警告色而不是灰色：它要解释「你的字还在，但没发出去」 */
-  .sayerr{margin-top:10px; font-size:12.5px; line-height:1.55; color:var(--warn)}
   .chip.warn{color:var(--warn)}
   .chip.danger{color:var(--no); font-weight:600; background:color-mix(in srgb,var(--no) 14%,transparent)}
   .head{font-size:15px; margin-top:9px; line-height:1.45; overflow-wrap:anywhere}
@@ -674,35 +673,6 @@
   .hidden{display:none !important}
 
   /* 发消息 */
-  textarea{
-    width:100%; min-height:120px; padding:14px; border-radius:12px; resize:vertical;
-    border:1px solid var(--line); background:var(--card); color:var(--fg);
-    font:15px/1.55 -apple-system,"PingFang SC",sans-serif;
-  }
-  textarea:focus{outline:none; border-color:color-mix(in srgb,var(--run) 50%,transparent)}
-  .send{
-    width:100%; margin-top:10px; padding:15px; border-radius:12px; cursor:pointer;
-    border:1.5px solid color-mix(in srgb,var(--run) 45%,transparent);
-    background:var(--card); color:var(--run);
-    font:600 16px -apple-system,"PingFang SC",sans-serif;
-  }
-  .send:disabled{opacity:.45}
-  .pick{display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px}
-  .pick button{
-    padding:8px 13px; border-radius:20px; cursor:pointer; font-size:13px;
-    border:1.5px solid var(--line); background:var(--card); color:var(--dim);
-  }
-  .pick button.on{border-color:color-mix(in srgb,var(--run) 50%,transparent); color:var(--run); font-weight:600}
-  .qitem{
-    display:flex; gap:10px; align-items:flex-start;
-    background:var(--card); border:1px solid var(--line); border-radius:12px;
-    padding:12px 14px; margin-bottom:8px;
-  }
-  .qitem p{margin:0; flex:1; font-size:14px; line-height:1.5; overflow-wrap:anywhere; white-space:pre-wrap}
-  .qitem button{
-    flex:0 0 auto; border:none; background:none; color:var(--no);
-    font-size:13px; cursor:pointer; padding:2px 4px;
-  }
   .note{
     font-size:12.5px; line-height:1.6; color:var(--warn); margin:10px 2px 0;
     padding:10px 12px; border-radius:10px;
@@ -817,10 +787,6 @@
     <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>
     历史
   </button>
-  <button id="tabSay" data-tab="say">
-    <span style="position:relative"><svg viewBox="0 0 24 24"><path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 9.5 9.5 0 0 1-2.8-.4L4 21l1.4-4a8.3 8.3 0 0 1-1.4-4.6A8.4 8.4 0 0 1 12.6 4 8.4 8.4 0 0 1 21 11.5z"/></svg><i class="badge hidden" id="qbadge"></i></span>
-    发消息
-  </button>
 </nav>
 
 <script src="/ui/agents.js"></script>
@@ -864,7 +830,7 @@ function sessionStaleNote(s) {
    所以 CSS 类仍用原文，只有**显示文本**走这张表。home.html 和 session.html 各一份，改时同步。 */
 
 let tab = sessionStorage.getItem('ccm-tab') || 'home';
-let sessions = [], pending = [], cfg = null, quota = null, inbox = {}, slSeen = null, recentlyExpired = [], recentTools = [], doneTimer = null;
+let sessions = [], pending = [], cfg = null, quota = null, slSeen = null, recentlyExpired = [], recentTools = [], doneTimer = null;
 // 「历史 · 实时」用的全类型事件缓冲。来源是 SSE 的重放 + 实时推送，不另开接口
 let recentEvents = [];
 // 审批历史。进这个 tab 才拉——首页不需要它，而它可能有几百条
@@ -1722,7 +1688,7 @@ function renderPathBar() {
    * 项目名本来就写在每张卡片上（那里它有归属），不必再挑一个顶上去。
    */
   $('pseg').textContent = 'clamicro';
-  $('pseg2').textContent = { home: 'overview', sess: 'sessions', hist: 'history', say: 'message' }[tab];
+  $('pseg2').textContent = { home: 'overview', sess: 'sessions', hist: 'history' }[tab];
 
   const off = offlineSince !== null && Date.now() - offlineSince > 5000;
   const retry = offlineSince !== null && !off;
@@ -2340,6 +2306,7 @@ function renderSessions() {
       <div class="chips">
         ${cap.label ? `<span class="chip agent">${agentLogo(s.agent)}${esc(cap.label)}</span>` : ''}
         ${s.model ? `<span class="chip">${esc(s.model)}</span>` : ''}
+        ${s.queued ? `<span class="chip" style="color:var(--run)">${s.queued} 条待送达</span>` : ''}
         ${s.cost_usd != null ? `<span class="chip">$${s.cost_usd.toFixed(4)}</span>` : ''}
         ${cap.quota === 'tokens' && s.tokens ? `<span class="chip">${fmtTokens(s.tokens)} tok</span>` : ''}
         <span class="chip" style="color:var(--run)">时间线 ›</span>
@@ -2447,7 +2414,6 @@ function attachListSwipes() {
   }
 }
 
-let sayTarget = null, draft = '';
 
 /**
  * 历史 tab。两个子视图，共用一个页面。
@@ -2546,102 +2512,16 @@ function histApprovals() {
   return rows + more;
 }
 
-function renderSay() {
-  /**
-   * 只列**能收消息**的会话。
-   *
-   * 注入靠的是 Stop hook 返回 decision:block，那是 Claude Code 的特有原语
-   * （见 src/routes/hooks.mjs）。别的后端没有等价物，列出来只会让人打完字
-   * 点了发送、然后永远等不到——发出去的消息比灰掉的按钮更像成功。
-   */
-  const sendable = sessions.filter((s) => capOf(s).inbox);
-  const live = sendable.filter((s) => s.state !== 'Done');
-  const pool = live.length ? live : sendable;
-  if (!pool.length) {
-    // 有会话但都不支持接收，跟一个会话都没有是两回事，得分开说
-    const blocked = sessions.length - sendable.length;
-    $('view').innerHTML = blocked
-      ? `<div class="empty"><b>没有会话可发送</b>当前 ${blocked} 个会话所属的后端不支持从手机注入消息</div>`
-      : '<div class="empty"><b>没有会话可发送</b>先在 Mac 上开一个会话</div>';
-    return;
-  }
-  if (!pool.find((s) => s.session_id === sayTarget)) sayTarget = pool[0].session_id;
-  const target = pool.find((s) => s.session_id === sayTarget);
-  const q = (inbox[sayTarget] || []);
-
-  $('view').innerHTML = `
-    <h2>发给哪个会话</h2>
-    <div class="pick">${pool.map((s) => `
-      <button data-sid="${s.session_id}" class="${s.session_id === sayTarget ? 'on' : ''}">${esc(s.session_name || dirOf(s))}</button>`).join('')}
-    </div>
-    <textarea id="draft" placeholder="想让它改做什么？&#10;例如：先别动数据库，改成只读一遍现有 schema">${esc(draft)}</textarea>
-    <button class="send" id="sendBtn">加入队列</button>
-    <!-- 发送失败时说清原因，且草稿不清空。见 sendBtn 的 onclick -->
-    <div class="sayerr hidden" id="sayerr"></div>
-    <div class="note">
-      消息不会立刻送达。hooks 是单向的，唯一的注入点是「这一轮结束时」——
-      所以它会在 <b>${esc(target.session_name || dirOf(target))}</b> 跑完当前这一轮后进入对话。
-      ${target.state === 'Done' || target.state === 'Idle' || target.state === 'Waiting Input'
-        ? '<br><br>⚠️ 这个会话现在是空闲的，已经停过了。消息要等到你在终端里再发起一轮、那一轮结束时才会送达。'
-        : ''}
-    </div>
-    ${q.length ? `<h2>队列中（${q.length}）</h2>` + q.map((m) => `
-      <div class="qitem"><p>${esc(m.text)}</p><button data-del="${m.id}">删除</button></div>`).join('') : ''}
-  `;
-
-  for (const b of document.querySelectorAll('.pick button')) {
-    b.onclick = () => { sayTarget = b.dataset.sid; render(); };
-  }
-  $('draft').oninput = (e) => { draft = e.target.value; };
-  $('sendBtn').onclick = async () => {
-    const text = $('draft').value.trim();
-    if (!text) return;
-    $('sendBtn').disabled = true;
-    /**
-     * **只有真的排上队了才清空草稿。**
-     *
-     * 原来无论成败都 `draft = ''`：网络断了、服务重启了、队列满了——
-     * 用户刚打完的一段话直接消失，界面上没有任何痕迹，他只会以为发出去了，
-     * 然后等一个永远不来的回应。手机上重打一遍的代价还特别高。
-     */
-    let ok = false, hint = '';
-    try {
-      const r = await fetch(`/api/sessions/${sayTarget}/say`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text }),
-      });
-      ok = r.ok;
-      if (!ok) hint = (await r.json().catch(() => ({}))).hint || '没能加入队列，再试一次。';
-    } catch {
-      hint = '发不出去 —— 和 Mac 的连接断了。你打的字还留着。';
-    }
-    $('sendBtn').disabled = false;
-    if (ok) { draft = ''; await refresh(); return; }
-    // 草稿原样留着，把原因说清楚
-    const note = document.getElementById('sayerr');
-    if (note) { note.textContent = hint; note.classList.remove('hidden'); }
-  };
-  for (const b of document.querySelectorAll('[data-del]')) {
-    b.onclick = async () => {
-      await fetch(`/api/sessions/${sayTarget}/say/${b.dataset.del}`, { method: 'DELETE' }).catch(() => {});
-      await refresh();
-    };
-  }
-}
-
 function render() {
   // 首页标题用产品名而不是「概览」：这是你打开时看到的第一个词，
   // 「概览」描述的是这一屏的功能，而你已经在看这一屏了——它不提供信息。
-  $('title').textContent = { home: 'Clamicro', sess: '会话', hist: '历史', say: '发消息' }[tab];
+  $('title').textContent = { home: 'Clamicro', sess: '会话', hist: '历史' }[tab];
   renderPathBar();
   for (const b of document.querySelectorAll('nav button')) b.classList.toggle('on', b.dataset.tab === tab);
   $('badge').textContent = pending.length;
   $('badge').classList.toggle('hidden', !pending.length);
-  const qn = Object.values(inbox).reduce((a, v) => a + v.length, 0);
-  $('qbadge').textContent = qn;
-  $('qbadge').classList.toggle('hidden', !qn);
   try {
-    ;({ home: renderHome, sess: renderSessions, hist: renderHistory, say: renderSay }[tab])();
+    ;({ home: renderHome, sess: renderSessions, hist: renderHistory }[tab])();
   } catch (err) {
     // 渲染抛异常时，$('view') 会保留上一个 tab 的内容——界面看起来
     // 「首页高亮却显示着发消息的内容」，极难排查。宁可显式报错。
@@ -2706,11 +2586,16 @@ async function fetchJson(url) {
 }
 
 async function refresh() {
-  const [s, a, c, i] = await Promise.all([
+  /*
+   * 不再拉 /api/inbox。「还有几条没送达」现在由会话对象自己带
+   * （server.mjs 的 inbox.on('change') 会写 s.queued 并推送），
+   * 而队列内容只有会话详情页要用，那边从 /api/sessions/:id 拿。
+   * 每次刷新少一个来回。
+   */
+  const [s, a, c] = await Promise.all([
     fetchJson('/api/sessions'),
     fetchJson('/api/approvals'),
     fetchJson('/api/config'),
-    fetchJson('/api/inbox'),
   ]);
 
   /**
@@ -2762,7 +2647,6 @@ async function refresh() {
       if (urls.length) localStorage.setItem('ccm-alt-urls', JSON.stringify([...new Set(urls)]));
     } catch { /* 存不下就算了 */ }
   }
-  if (i) inbox = i.inbox || {};
 
   // 无论如何都要画一次。这是这个函数最重要的一条不变式
   render();
