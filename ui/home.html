@@ -1301,7 +1301,7 @@ function statusConsole(only) {
     body = `<div class="crun">
       <span class="cf">${esc(dirOf(paused))}</span>
     </div>`;
-    // 暂停中又点了取消：标题已经变成「取消中」，这行也得跟着说取消，
+    // 暂停中又点了取消：标题已经变成「将阻止下一步」，这行也得跟着说取消，
     // 否则一张卡上两句话讲的是两件事
     meta = paused.control === 'cancelled'
       ? '将阻止下一次工具操作 · 当前这一步仍会跑完'
