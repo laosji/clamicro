@@ -126,6 +126,48 @@ switch、同一个状态机、同一套通知。差别**只在传输**。
 变了，最坏结果是回到「状态不更新」，不会把别人的会话搞坏。代价要说清楚：
 **rollout 是 Codex 的内部格式，没有版本承诺**，所以认不得的字段一律当没看见。
 
+#### 那条没走的路：app-server 的控制面（2026-08-28 决定不走）
+
+上面那段说的是「为什么读文件」。这里记**另一半**：app-server 那条路能给什么，
+以及为什么明知道它更好，仍然不走。
+
+事实是查证过的，不是印象。`codex app-server generate-json-schema --out <dir>`
+（codex-cli 0.150.0-alpha.8）导出 292 个 schema 文件，`ClientRequest` 里
+**95 个方法**，其中三个正是我们缺的：
+
+| 方法 | 它能做什么 |
+|---|---|
+| `turn/start` | 发起一轮 |
+| `turn/interrupt` | **中断正在跑的那一轮**，随后发 `turn/completed`（`interrupted`）；文档明说不会终止后台终端 |
+| `turn/steer` | **往当前这一轮里插话**。参数 `{threadId, expectedTurnId, input[]}`，其中 `expectedTurnId` 是「必须匹配当前活动轮次」的强制前置条件 |
+
+也就是说：
+
+- 「立即中断本轮」——**hooks 做不到**（`PreToolUse` 只在工具执行前，拦不住
+  一个不调工具的回合），而 app-server 有现成的
+- 「从手机发消息」——我们现在是靠 `Stop` hook 回 `{decision:'block'}` **模拟**的，
+  只能等这一轮结束才送达；`turn/steer` 是真的中途插话
+
+**仍然不走。** 理由不是「做不到」，是**爆炸半径**：
+
+- app-server 是一条有状态的双向连接，依赖的那个 daemon **和桌面 ChatGPT 共用**。
+  今天最坏情况是「状态不更新」；接上之后，我们的 bug 可能中断**用户正在用的
+  桌面会话**
+- 这条链路的失败无法限定在 clamicro 自己身上，而这个产品的全部前提是
+  「它不该把别人的会话搞坏」
+
+所以 Codex 侧的能力矩阵保持现状：只镜像，不控制。**这不是「以后再说」，
+是一个知道代价之后做的选择**——重新讨论它时，要讨论的是上面那条爆炸半径，
+不是「协议支不支持」（支持，已验证）。
+
+同理不做的还有两条：
+
+- **`process.kill(owner_pid)`**：Codex 的 app-server、DSH 的主进程是所有会话
+  共用的，杀一个 pid 等于杀掉那个后端的全部会话（见 src/lifecycle.mjs 里对
+  owner_pid 形状的说明）
+- **把服务日志推到手机**：里面有 cwd、命令原文、令牌前缀。即使抹一遍，
+  那也是在扩大数据面，而它换来的只是「排查方便一点」
+
 ### 2.3 `/statusline` —— Claude Code only
 
 不是 hook，是独立端点（[bin/statusline.sh](../bin/statusline.sh) →
