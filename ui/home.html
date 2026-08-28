@@ -799,6 +799,7 @@
 <script src="/ui/agents.js"></script>
 <script src="/ui/swipe.js"></script>
 <script src="/ui/view.js"></script>
+<script src="/ui/sched.js"></script>
 <script>
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -2257,7 +2258,7 @@ async function submit(id, decision) {
       body: JSON.stringify({ decision }),
     });
   } catch { /* 下一次轮询/SSE 会纠正 */ }
-  refresh();
+  refresh.now();
 }
 
 function cancelUndo(id) {
@@ -2521,7 +2522,20 @@ async function fetchJson(url) {
   }
 }
 
-async function refresh() {
+/**
+ * 拉三个接口，画一次。
+ *
+ * 外面包了 `coalesced`（ui/sched.js）。这一页原来把 `session` / `approval`
+ * 直接接到 refresh 上，而对面每调用一次工具就推一条 `session`——实测
+ * **20 次工具调用 = 60 个请求**（每条事件三个接口）。这一页早就为重绘写过
+ * 合并（`scheduleRender`，理由是「中间那些帧没人看得见」），只是没往前挪
+ * 一步管到请求；而同一句话对网络更成立：中间那些响应不但没人看，还每个
+ * 都要过网，在手机上还是走 Wi-Fi。
+ *
+ * `isStale()` 是另一半：并发的响应会乱序回来，不拦的话最后落地的可能是
+ * 比已经收到过的还旧的一份——页面看着在正常刷新，内容是过期的。
+ */
+const refresh = coalesced(async (isStale) => {
   /*
    * 不再拉 /api/inbox。「还有几条没送达」现在由会话对象自己带
    * （server.mjs 的 inbox.on('change') 会写 s.queued 并推送），
@@ -2533,6 +2547,13 @@ async function refresh() {
     fetchJson('/api/approvals'),
     fetchJson('/api/config'),
   ]);
+
+  /*
+   * 检查点放在**取完之后、往屏幕上写之前**。放在最前面等于没放（那时候
+   * 本来就没人比你新），放在 render() 之后就更晚了——旧数据已经写进
+   * sessions / quota 那几个全局，下一次重绘照样把它画出来。
+   */
+  if (isStale()) return;
 
   /**
    * 会话是主数据，它拉不到就等于什么都不知道——这时候**必须显式说出来**，
@@ -2586,7 +2607,7 @@ async function refresh() {
 
   // 无论如何都要画一次。这是这个函数最重要的一条不变式
   render();
-}
+});
 
 // SSE 实时更新；切后台会断，回前台先全量刷新再重连（计划附录 A.4）
 //
@@ -2602,17 +2623,11 @@ let offlineSince = null;
  * 事件是成批到的（SSE 重放、一轮里连续几个工具调用），逐条重绘既卡又没意义
  * ——中间那些帧没人看得见。
  */
-let renderPending = false;
-function scheduleRender() {
-  if (renderPending) return;
-  renderPending = true;
-  requestAnimationFrame(() => {
-    renderPending = false;
-    // 首页的履历轨道和历史 tab 的实时流都吃这条。写死 'home' 的那一版让
-    // 历史 tab 一直停在首屏那一刻的内容——事件在缓冲里，屏幕上没有
-    if (tab === 'home' || tab === 'hist') render();
-  });
-}
+const scheduleRender = coalesced(() => {
+  // 首页的履历轨道和历史 tab 的实时流都吃这条。写死 'home' 的那一版让
+  // 历史 tab 一直停在首屏那一刻的内容——事件在缓冲里，屏幕上没有
+  if (tab === 'home' || tab === 'hist') render();
+});
 
 /**
  * 重连状态。
@@ -2646,7 +2661,7 @@ function reconnect(manual) {
   autoRetryAt = 0;
   try { es?.close(); } catch { /* 已经死了 */ }
   es = null;
-  refresh();   // 轮询和 SSE 是两条独立的路，先用轮询探一次
+  refresh.now();   // 轮询和 SSE 是两条独立的路，先用轮询探一次
   connect();
   render();
 }
@@ -2665,7 +2680,7 @@ function scheduleAutoRetry() {
 function connect() {
   es = new EventSource('/api/stream');
   es.onopen = () => {
-    if (offlineSince !== null) { offlineSince = null; refresh(); }
+    if (offlineSince !== null) { offlineSince = null; refresh.now(); }
     // 连上了就把退避清零：下一次断线该从 3 秒重新数，而不是接着上一次的 30 秒
     clearTimeout(autoRetryTimer); autoRetryTimer = null; autoRetryAt = 0; autoRetryDelay = 0;
     // 连接状态只由路径行那个光标表示。标题前面原来还有一个小圆点，
@@ -2723,7 +2738,14 @@ function connect() {
 }
 
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible') refresh();
+  /*
+   * 回前台补一次**走 now()**。
+   *
+   * 合并版排的是 rAF，而 rAF 在后台标签页是挂起的——「补上错过的那些」这件事
+   * 本身就发生在刚从挂起里出来的那一刻，让它去等一帧等于把补课托付给刚醒的
+   * 那个机制。这一次也没什么好合并的：一次可见性变化只有一次。
+   */
+  if (document.visibilityState === 'visible') refresh.now();
 });
 
 /**
@@ -2743,7 +2765,9 @@ setInterval(() => { if (tab === 'home') render(); }, 30000); // 让「N 分后�
 setInterval(() => { if (tab === 'home') tickDeadlines(); }, 1000);
 
 render();
-refresh().then(connect).catch(() => {
+// 首屏走 now()：要拿它的 promise 接 connect 和失败提示，
+// 而合并版返回的是 undefined。何况这一次也没什么好合并的
+refresh.now().then(connect).catch(() => {
   // 首屏就没拿到数据。页面本身是服务发的，所以「发得出页面、取不到数据」
   // 多半是这中间网络变了（息屏、切网、从后台恢复），和断线态是同一件事，
   // 用同一套病因说明，别再给一句只说症状的话。

@@ -252,6 +252,7 @@
 </div></div>
 
 <script src="/ui/agents.js"></script>
+<script src="/ui/sched.js"></script>
 <script>
 const SID = location.pathname.split('/').pop();
 const $ = (id) => document.getElementById(id);
@@ -519,7 +520,7 @@ function renderComposer() {
   for (const b of list.querySelectorAll('[data-del]')) {
     b.onclick = async () => {
       await fetch(`/api/sessions/${SID}/say/${b.dataset.del}`, { method: 'DELETE' }).catch(() => {});
-      await refresh();
+      await refresh.now();
     };
   }
 }
@@ -585,7 +586,7 @@ async function send() {
     $('draft').value = '';
     $('senderr').classList.add('hidden');
     autoGrow();
-    await refresh();
+    await refresh.now();
     return;
   }
   $('sendBtn').disabled = false;
@@ -647,15 +648,35 @@ function paintJump() {
   btn.onclick = () => { main.scrollTop = 0; paintJump(); };
 }
 
-async function refresh() {
-  const d = await fetch(`/api/sessions/${SID}`).then((r) => r.json());
+/**
+ * 拉一次会话详情画一次。
+ *
+ * 外面包了 `coalesced`（ui/sched.js）：SSE 一连上会把历史事件全量重放，
+ * 而这里原来是**一条事件一个请求**——85 条事件的会话开一次页面实测 105 个
+ * `/api/sessions/:id`，每个拉完整负载、每个重画整条时间线。
+ *
+ * `isStale()` 那一下是另一半：并发的响应会乱序回来（实测第 14 个比第 4 个
+ * 先到），不拦的话最后落地的可能是**比已经收到过的还旧**的一份，而屏幕上
+ * 看不出任何异样。
+ *
+ * 拉不到就什么都不做，保留上一帧。这一页目前**没有断线提示**（首页有，
+ * 路径行那个光标），所以这里的沉默是有代价的——它是个已知缺口，不是决定。
+ */
+const refresh = coalesced(async (isStale) => {
+  let d;
+  try {
+    d = await fetch(`/api/sessions/${SID}`).then((r) => r.json());
+  } catch {
+    return; // 断了。保留上一帧，别拿旧数据装成新的，也别把页面清空
+  }
+  if (isStale()) return;
   render(d);
-}
+});
 
 async function act(action) {
   $('btnPause').disabled = $('btnCancel').disabled = true;
   await fetch(`/api/sessions/${SID}/${action}`, { method: 'POST' }).catch(() => {});
-  await refresh();
+  await refresh.now();
   $('btnPause').disabled = $('btnCancel').disabled = false;
 }
 
@@ -686,10 +707,18 @@ const es = new EventSource('/api/stream');
 es.addEventListener('session', refresh);
 es.addEventListener('event', refresh);
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible') refresh();
+  /*
+   * 回前台补一次**走 now()**。
+   *
+   * 合并版排的是 rAF，而 rAF 在后台标签页是挂起的——「补上错过的那些」这件事
+   * 本身就发生在刚从挂起里出来的那一刻，让它去等一帧等于把补课托付给刚醒的
+   * 那个机制。这一次也没什么好合并的：一次可见性变化只有一次。
+   */
+  if (document.visibilityState === 'visible') refresh.now();
 });
 
-refresh();
+// 首屏走 now()：合并省的是重复，不该省掉唯一的那一次
+refresh.now();
 </script>
 </body>
 </html>
