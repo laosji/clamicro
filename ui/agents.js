@@ -60,7 +60,15 @@ const stateLabel = (s, session) => {
     // （src/control.mjs 有意如此），所以一个自己跑完的回合结束后，标记
     // 还在，而这时候写「取消中」是假的——那一轮已经结束了，谁也没取消它。
     && (session.state === 'Running' || session.state === 'Paused')
-  if (cancelling) return '取消中'
+  /*
+   * **不能写「取消中」。** 那三个字承诺的是「正在停」，而实际发生的是
+   * 「已经排好，等下一次工具调用时拦掉」——中间可能隔着很久，而且如果
+   * 这一轮压根不再调工具，它**根本不会发生**（架构文档 §5：单靠 PreToolUse
+   * 拦不住一个不调工具的回合）。
+   *
+   * 承诺一件做不到的事，比不承诺糟得多：用户会盯着屏幕等它停下来。
+   */
+  if (cancelling) return '将阻止下一步'
   if (s === 'Paused' && session && !session.held) return '暂停中'
   return STATE_LABEL[s] ?? s
 };

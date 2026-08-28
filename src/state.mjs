@@ -510,6 +510,16 @@ export class Store extends EventEmitter {
           ...(typeof payload.usage_reported === 'boolean' ? { usage_reported: payload.usage_reported } : {}),
         })
         this.#log(id, 'stop', msg)
+        /**
+         * 回合结束了。**没被消费掉的「取消下一步」就地作废**——由 control
+         * 那边接这个事件（见 server.mjs）。
+         *
+         * 发事件而不是让 control 自己去猜：stop / stop-failure / turn-end
+         * 三条路都汇到这里（turn-end 会 return 到 stop 分支），接一处就全覆盖了。
+         * 让 control 去订阅 store 的 session 事件则要它自己判「这算不算结束」，
+         * 那是把一个已经知道的事实重新推导一遍。
+         */
+        this.emit('turn-end', id)
         if (notifyConfig.onStop && elapsed >= notifyConfig.minTurnMs) {
           notify = {
             title: 'Clamicro',
@@ -547,6 +557,7 @@ export class Store extends EventEmitter {
           ...(typeof payload.usage_reported === 'boolean' ? { usage_reported: payload.usage_reported } : {}),
         })
         this.#log(id, 'error', msg)
+        this.emit('turn-end', id) // 出错也是结束，同样要作废（见 stop 分支）
         if (notifyConfig.onError) {
           notify = { title: 'Clamicro', icon: '✕', tint: 'danger', subtitle: `${label} 出错`, body: msg }
         }
@@ -567,8 +578,10 @@ export class Store extends EventEmitter {
   noteControl(sessionId, action) {
     if (!sessionId) return
     const s = this.session(sessionId)
-    const label = { pause: '已请求暂停', resume: '已恢复', cancel: '已请求取消',
-                    cancelled: '已取消本轮', resumed: '已恢复' }[action] ?? action
+    // 「已取消本轮」是结果，而 cancel 只是**请求**——两者要用不同的词，
+    // 否则时间线上看不出「点了」和「真的拦下了」的区别
+    const label = { pause: '已请求暂停', resume: '已恢复', cancel: '已请求阻止下一步',
+                    cancelled: '已拦下本轮', resumed: '已恢复' }[action] ?? action
     this.#log(sessionId, 'control', label)
     if (action === 'pause') this.#touch(s, { state: STATE.PAUSED })
     else if (action === 'resume' || action === 'resumed') {

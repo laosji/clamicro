@@ -1323,7 +1323,7 @@ function statusConsole(only) {
       <span class="tdots"><i></i><i></i><i></i></span>
     </div>${activityTicker(s0.session_id)}`;
     meta = s0.control === 'cancelled'
-      ? '会在下一个工具调用前终止本轮'
+      ? '将阻止下一次工具操作 · 当前这一步仍会跑完'
       : othersRunning(busy, s0);
   } else if (paused) {
     // 「已请求」和「真停住了」是两回事，见 ui/agents.js 的 stateLabel
@@ -1334,7 +1334,7 @@ function statusConsole(only) {
     // 暂停中又点了取消：标题已经变成「取消中」，这行也得跟着说取消，
     // 否则一张卡上两句话讲的是两件事
     meta = paused.control === 'cancelled'
-      ? '会在下一个工具调用前终止本轮'
+      ? '将阻止下一次工具操作 · 当前这一步仍会跑完'
       : (paused.held ? '已停在一个工具调用前' : '会在下一个工具调用前停住');
   } else if (waiting) {
     /**

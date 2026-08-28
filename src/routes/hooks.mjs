@@ -365,7 +365,10 @@ export function hookRoutes(ctx) {
       // 只能在下一个工具调用前把它挂住。
       if (event === 'pre-tool-use' && payload.session_id) {
         store.applyHook(event, payload, config.notify)
-        const gated = await control.gate(payload.session_id)
+        // 传这一轮的标识：上一轮遗留的取消不该动这一轮的第一条命令
+        const gated = await control.gate(payload.session_id, {
+          turnKey: store.session(payload.session_id)?.turn_started_at ?? null,
+        })
         if (gated) {
           store.noteControl(payload.session_id, gated.continue === false ? 'cancelled' : 'resumed')
           json(res, 200, gated)

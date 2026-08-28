@@ -24,8 +24,33 @@ export const CONTROL = {
 // 自己结掉」，越过去会被当成非阻塞错误、工具照常执行。
 const MAX_HOLD_MS = SELF_DEADLINE_MS
 
+/**
+ * 一个「已请求取消」最多留多久。
+ *
+ * 光有 turnKey 还不够：服务在会话中途启动时 turn_started_at 是 null，
+ * 那时候两边都是 null，比出来「同一轮」——于是又会跨回合。TTL 是那种情况
+ * 下的兜底。
+ *
+ * 45 秒：够覆盖「点完取消，等它跑完手头这一步」（那一步通常几秒到十几秒），
+ * 又短到过期时你还记得自己点过。再长就变成一个你早就忘了的定时炸弹。
+ */
+export const CANCEL_TTL_MS = 45_000
+
 export class ControlStore extends EventEmitter {
   #state = new Map() // sessionId -> 'none' | 'paused' | 'cancelled'
+  /**
+   * 已经点了取消、但还没撞上拦截点的那些。sessionId -> { turnKey, at }
+   *
+   * **必须带作用域，不能只是一个布尔。** 原来 CANCELLED 只是 #state 里的一个
+   * 值，没有挂起者时就一直留着「让下一个拦截点来消费」——而下一个拦截点可能
+   * 是**下一轮的第一条命令**。表现是「我上次点的取消，把这次的第一条命令干掉
+   * 了」，架构文档 §6.2.1 记着这件事。
+   *
+   * turnKey 用 `turn_started_at`：三个后端都有（user-prompt-submit / turn-start
+   * 时写），不需要任何新字段，而且「这一轮」的定义天然就是它。Codex 的
+   * turn_id 更精确，但它只在 rollout 那条路上有，换不来跨后端的一致。
+   */
+  #armed = new Map()
   #waiters = new Map() // sessionId -> Set<{resolve, timer}>
 
   get(sessionId) {
@@ -58,38 +83,86 @@ export class ControlStore extends EventEmitter {
     return { ok: true, state: CONTROL.NONE }
   }
 
-  cancel(sessionId) {
+  /**
+   * 「阻止下一项工具操作」。**它不是「立即中断」**，两者的差别必须一路说到界面上。
+   *
+   * @param opts.turnKey 这一轮的标识（会话的 `turn_started_at`）。**没被当场消费
+   *   掉的取消，只对这一轮有效**——原来它会一直留着等下一个拦截点，而下一个
+   *   拦截点可能是下一轮的第一条命令（架构文档 §6.2.1 记的就是这个）。
+   * @param opts.now 注入时钟，测试用
+   */
+  cancel(sessionId, { turnKey = null, now = Date.now() } = {}) {
     this.#state.set(sessionId, CONTROL.CANCELLED)
     this.emit('change', sessionId, CONTROL.CANCELLED)
     // 如果此刻正有工具调用挂在拦截点上，取消就地被消费掉了，
     // 状态必须复位——否则下一个工具调用会被连带取消。
-    // 没有挂起者时才保留 CANCELLED，让下一个拦截点来消费它。
     // #release 返回的是 waiter 个数，这里要的是「有没有被消费」。
     // 名字是 consumed，调用方也当布尔用——别让类型和名字对不上。
     const consumed = this.#release(sessionId, { action: 'cancel' }) > 0
     if (consumed) {
       this.#state.set(sessionId, CONTROL.NONE)
       this.emit('change', sessionId, CONTROL.NONE)
+      this.#armed.delete(sessionId)
+    } else {
+      // 没有挂起者：留一个**带作用域**的标记，让这一轮的下一个拦截点来消费
+      this.#armed.set(sessionId, { turnKey, at: now })
     }
     return { ok: true, state: consumed ? CONTROL.NONE : CONTROL.CANCELLED, consumed }
+  }
+
+  /**
+   * 这一轮结束了 —— 没被消费掉的取消就地作废。
+   *
+   * turnKey 那道判据已经能挡住绝大多数跨回合，但服务在会话中途启动时
+   * `turn_started_at` 是 null，两边都是 null 就比成了「同一轮」。这条是那种
+   * 情况下的第二道，由 store 的 `turn-end` 事件驱动（hooks 和 codex-tail
+   * 两条路都会经过它，所以只需要接一处）。
+   */
+  clearCancel(sessionId, why = 'turn-end') {
+    if (!this.#armed.has(sessionId)) return false
+    this.#armed.delete(sessionId)
+    if (this.get(sessionId) === CONTROL.CANCELLED) {
+      this.#state.set(sessionId, CONTROL.NONE)
+      this.emit('change', sessionId, CONTROL.NONE)
+    }
+    this.emit('cancel-cleared', sessionId, why)
+    return true
   }
 
   /** 会话结束时清干净，别留下悬挂的 waiter */
   forget(sessionId) {
     this.#release(sessionId, { action: 'resume' })
     this.#state.delete(sessionId)
+    this.#armed.delete(sessionId)
   }
 
   /**
    * PreToolUse 调这个。返回 null 表示放行；
    * 返回对象则是要回给 Claude Code 的 hook 输出。
    */
-  async gate(sessionId) {
+  async gate(sessionId, { turnKey = null, now = Date.now() } = {}) {
     const st = this.get(sessionId)
 
     if (st === CONTROL.CANCELLED) {
-      this.#state.set(sessionId, CONTROL.NONE) // 只取消这一轮
+      /**
+       * **只消费属于这一轮、且还没过期的那个。**
+       *
+       * armed 里没有记录 = 取消是刚刚点的、当场就被挂起者消费了，这里照旧生效。
+       * 有记录但轮次对不上或已过期 = 那是上一轮留下的，**必须放行**——
+       * 「我上次点的取消把这次的第一条命令干掉了」正是要修的那个。
+       */
+      const armed = this.#armed.get(sessionId)
+      const stale = armed && (
+        (armed.turnKey !== null && turnKey !== null && armed.turnKey !== turnKey) ||
+        now - armed.at > CANCEL_TTL_MS
+      )
+      this.#armed.delete(sessionId)
+      this.#state.set(sessionId, CONTROL.NONE)
       this.emit('change', sessionId, CONTROL.NONE)
+      if (stale) {
+        this.emit('cancel-cleared', sessionId, 'stale')
+        return null // 上一轮的遗留，不该动这一轮的第一条命令
+      }
       return { continue: false, stopReason: '已从手机取消' }
     }
     if (st !== CONTROL.PAUSED) return null

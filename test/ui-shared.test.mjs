@@ -118,12 +118,22 @@ test('agents.js 的两张表覆盖了代码里真实存在的枚举', async (t) 
     }
   })
 
-  await t.test('已请求取消，在它落地之前也要说出来', () => {
-    // 取消从点下到生效之间隔着一个拦截点。这一段不说话的话，界面看起来
-    // 就是「点了没反应」——而它其实已经生效了，只是还没到时候
+  await t.test('已请求阻止下一步，在它落地之前也要说出来', () => {
+    /**
+     * 取消从点下到生效之间隔着一个拦截点。这一段不说话的话，界面看起来
+     * 就是「点了没反应」。
+     *
+     * **但不能说「取消中」**——这条断言原来钉的就是那三个字。它承诺
+     * 「正在停」，而实际发生的是「已排好，等下一次工具调用时拦掉」：
+     * 中间可能隔很久，而且**如果这一轮不再调工具，它根本不会发生**
+     * （架构文档 §5）。承诺一件做不到的事比不承诺糟——用户会盯着屏幕
+     * 等它停下来。名字和断言一起改掉。
+     */
     const run = { state: 'Running', control: 'cancelled' }
-    assert.equal(win.stateLabel('Running', run), '取消中')
-    assert.equal(win.stateLabel('Paused', { state: 'Paused', control: 'cancelled' }), '取消中')
+    assert.equal(win.stateLabel('Running', run), '将阻止下一步')
+    assert.equal(win.stateLabel('Paused', { state: 'Paused', control: 'cancelled' }), '将阻止下一步')
+    // 「中」字不许再出现：它是「正在进行」的意思，而这里什么都还没进行
+    assert.doesNotMatch(win.stateLabel('Running', run), /取消中/)
 
     // 但回合自己跑完之后不许再说：标记还留着（留给下一个拦截点），
     // 而那一轮已经没人取消得了了

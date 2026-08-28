@@ -148,7 +148,15 @@ export function apiRoutes(ctx) {
             })
           }
         }
-        const out = control[action](sid)
+        /**
+         * cancel 要带**这一轮的标识**，否则没被当场消费掉的取消会留到下一轮，
+         * 把下一轮的第一条命令干掉（架构文档 §6.2.1）。pause / resume 不需要
+         * ——它们本来就是「直到你再点一次」的语义。
+         */
+        const cur = store.sessions().find((x) => x.session_id === sid)
+        const out = action === 'cancel'
+          ? control.cancel(sid, { turnKey: cur?.turn_started_at ?? null })
+          : control[action](sid)
         store.noteControl(sid, action)
         console.log(`[control] 会话 ${sid.slice(0, 8)} → ${action}`)
         json(res, 200, { ...out, held: control.isHeld(sid) })

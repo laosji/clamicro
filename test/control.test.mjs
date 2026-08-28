@@ -11,7 +11,7 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { ControlStore, CONTROL } from '../src/control.mjs'
+import { ControlStore, CONTROL, CANCEL_TTL_MS } from '../src/control.mjs'
 
 const tick = (ms = 30) => new Promise((r) => setTimeout(r, ms))
 
@@ -183,4 +183,75 @@ test('超时自己放行之后 held 也要落回 false', async () => {
 
   assert.deepEqual(seen, [true, false])
   assert.equal(c.isHeld('s'), false)
+})
+
+/**
+ * **没被消费掉的取消只对这一轮有效。**
+ *
+ * 这是架构文档 §6.2.1 记的那个：「armed cancel 会跨回合」——取消请求没被
+ * 消费掉的话会留到**下一轮的第一个工具调用**上，表现是「我上次点的取消，
+ * 把这次的第一条命令干掉了」。那时的结论是「改它要动控制面的语义，
+ * 没在这一轮做」。现在做了。
+ *
+ * turnKey 用会话的 `turn_started_at`：三个后端都有，不需要新字段，
+ * 而且「这一轮」的定义天然就是它。
+ */
+test('取消只作用于点它的那一轮', async (t) => {
+  await t.test('同一轮的下一个工具调用 —— 拦下', async () => {
+    const c = new ControlStore()
+    c.cancel('x', { turnKey: 1000 })
+    const g = await c.gate('x', { turnKey: 1000 })
+    assert.equal(g?.continue, false)
+  })
+
+  await t.test('**下一轮**的第一个工具调用 —— 放行', async () => {
+    const c = new ControlStore()
+    c.cancel('x', { turnKey: 1000 })          // 这一轮点的取消，没被消费
+    const g = await c.gate('x', { turnKey: 2000 }) // 新一轮开始了
+    assert.equal(g, null, '上一轮的取消干掉了这一轮的第一条命令')
+  })
+
+  await t.test('过期的取消不再生效', async () => {
+    const c = new ControlStore()
+    c.cancel('x', { turnKey: 1000, now: 0 })
+    const g = await c.gate('x', { turnKey: 1000, now: CANCEL_TTL_MS + 1 })
+    assert.equal(g, null, 'TTL 过了还在拦')
+  })
+
+  await t.test('没过期就还在', async () => {
+    const c = new ControlStore()
+    c.cancel('x', { turnKey: 1000, now: 0 })
+    const g = await c.gate('x', { turnKey: 1000, now: CANCEL_TTL_MS - 1 })
+    assert.equal(g?.continue, false)
+  })
+
+  /**
+   * 服务在会话中途启动时 `turn_started_at` 是 null，两边都是 null 就比成了
+   * 「同一轮」。所以还得有第二道：回合结束时显式作废（server.mjs 接
+   * store 的 turn-end 事件）。
+   */
+  await t.test('轮次未知（服务中途启动）→ 仍然拦，但回合结束就作废', async () => {
+    const c = new ControlStore()
+    c.cancel('x', { turnKey: null })
+    assert.equal(c.clearCancel('x', 'turn-end'), true, '应该有东西可清')
+    const g = await c.gate('x', { turnKey: null })
+    assert.equal(g, null, '回合都结束了还在拦')
+  })
+
+  await t.test('当场被挂起者消费掉的，不留 armed 标记', async () => {
+    const c = new ControlStore()
+    c.pause('x')
+    const gate = c.gate('x', { turnKey: 1000 })   // 挂住
+    await new Promise((r) => setTimeout(r, 10))
+    const out = c.cancel('x', { turnKey: 1000 })
+    assert.equal(out.consumed, true)
+    assert.equal((await gate)?.continue, false, '挂着的那条要被取消掉')
+    // 消费掉了就不该再留下什么，下一条命令照常跑
+    assert.equal(await c.gate('x', { turnKey: 1000 }), null, '消费过还留着标记')
+  })
+
+  await t.test('clearCancel 对没有 armed 的会话是 no-op', () => {
+    const c = new ControlStore()
+    assert.equal(c.clearCancel('x'), false)
+  })
 })

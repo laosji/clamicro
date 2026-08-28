@@ -179,7 +179,7 @@
 <div class="note hidden" id="note"></div>
 <footer>
   <button id="btnPause">暂停</button>
-  <button class="danger" id="btnCancel">取消本轮</button>
+  <button class="danger" id="btnCancel">取消下一步</button>
 </footer>
 
 <script src="/ui/agents.js"></script>
@@ -265,7 +265,12 @@ function render(data) {
     let note = '';
     // 取消排在最前：暂停中再点取消是常见操作，这时该说的是取消那句
     if (s.control === 'cancelled' && (s.state === 'Running' || s.state === 'Paused')) {
-      note = '已请求取消 — 会在下一个工具调用前终止本轮，当前这一步仍会跑完';
+      /*
+       * 说清楚它承诺什么、不承诺什么。「已取消」是假话：这一步照跑，
+       * 而且如果这一轮不再调工具，它根本不会触发。
+       */
+      note = '已就绪：将阻止本轮下一次工具操作。当前这一步仍会跑完；'
+        + '若这一轮不再调用工具，则不会触发（45 秒后自动作废）';
     } else if (paused && cap.pause) note = s.held
       ? '已停住 — 正卡在一个工具调用前，点恢复继续'
       : '已请求暂停 — 会在下一个工具调用前停住，当前这一步仍会跑完';

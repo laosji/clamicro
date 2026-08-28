@@ -155,6 +155,18 @@ control.on('held', (sid) => {
   }
 })
 
+/**
+ * 回合结束 → 作废没被消费掉的「取消下一步」。
+ *
+ * turnKey 那道判据挡住绝大多数跨回合，但服务在会话中途启动时
+ * turn_started_at 是 null，两边都是 null 就比成了「同一轮」。这条是第二道。
+ */
+store.on('turn-end', (sid) => {
+  if (control.clearCancel(sid, 'turn-end')) {
+    console.log(`[control] 会话 ${sid.slice(0, 8)} 这一轮结束了，未消费的「取消下一步」已作废`)
+  }
+})
+
 approvals.on('created', () => history.touch())
 approvals.on('settled', () => history.touch())
 store.on('event', () => history.touch())

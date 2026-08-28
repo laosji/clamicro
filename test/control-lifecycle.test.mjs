@@ -85,7 +85,7 @@ test('取消从「已请求」到「已生效」', async (t) => {
     const s = await s2()
     assert.equal(s.state, 'Running', 'cancel 跟 pause 相反，不立刻改状态')
     assert.equal(s.control, 'cancelled',
-      '这个字段就是「已请求、还没落地」——界面据它显示「取消中」')
+      '这个字段就是「已请求、还没落地」——界面据它显示「将阻止下一步」')
   })
 
   await t.test('下一个拦截点消费掉它', async () => {
