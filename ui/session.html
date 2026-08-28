@@ -32,8 +32,6 @@
   /* 桌面上限宽居中，否则时间线一行横跨整个屏幕没法读。
      限宽加在容器上，不要加在子元素上。 */
   header, main{width:100%; max-width:592px; margin-left:auto; margin-right:auto}
-  footer{justify-content:center}
-  footer button{max-width:290px}
   .nav{display:flex; align-items:center; gap:10px; margin-bottom:8px}
   /* 返回是图标，跟设置页一致。44×44 触摸目标，负 margin 吃掉多出来的部分
      让它视觉上仍贴着左边缘与标题对齐 */
@@ -58,7 +56,7 @@
   .chips{display:flex; gap:6px; flex-wrap:wrap; margin-top:9px}
   .chip{font-size:11.5px; padding:3px 8px; border-radius:20px; background:var(--monobg); color:var(--dim)}
 
-  main{flex:1 1 auto; overflow-y:auto; overflow-x:hidden; overscroll-behavior:contain; padding:14px 16px calc(90px + env(safe-area-inset-bottom))}
+  main{flex:1 1 auto; overflow-y:auto; overflow-x:hidden; overscroll-behavior:contain; padding:14px 16px var(--barh,150px)}
 
   /* 时间线：左侧一条轴，每个事件一个节点 */
   .tl{position:relative; padding-left:24px}
@@ -96,53 +94,102 @@
      搬的理由不是更顺手：那个 tab 干的第一件事是「先挑一个会话」，
      而你多半刚从某个会话页过来，那里有完整上下文（它在干什么、时间线、
      暂停/取消）。挑选这一步是把你刚有的上下文丢掉再让你重建。 */
-  .say{margin-top:22px; border-top:1px solid var(--line); padding-top:18px}
-  .say h2{font-size:13px; color:var(--dim); font-weight:600; margin:0 0 10px}
-  .say textarea{
-    width:100%; min-height:96px; padding:13px; border-radius:12px; resize:vertical;
-    border:1px solid var(--line); background:var(--card); color:var(--fg);
-    font:15px/1.55 -apple-system,"PingFang SC",sans-serif;
+  /* ── 底部那条 = 输入框 + 两个图标 ─────────────────────────────
+     原来这里是「暂停 / 取消下一步」两个通栏按钮，而发消息在时间线**下面**，
+     十几屏之外。结果是：这一页最显眼的两个东西都是「让它停」，而「跟它说
+     一句话」得先翻到底才知道存在。
+
+     改成常驻输入框之后，三件事一次到位：能说话这件事不用被发现；
+     刚读到的那条日志就在正上方；两个控制退成图标，不再和输入框抢地方。
+
+     **但它不是聊天框，这一点不能靠版式遮过去。** 注入的唯一时机是
+     Stop hook（这一轮结束时），会话空着时更是要等你在终端再发起一轮。
+     所以输入框底下钉着一行小字说什么时候到——聊天的形状会让人默认
+     「发了就到」，那一行是把这个默认拆掉的唯一东西，任何时候都不能省。 */
+  .bar{
+    position:fixed; left:0; right:0; bottom:0; z-index:3;
+    background:var(--card); border-top:1px solid var(--line);
+    padding:9px 16px calc(9px + env(safe-area-inset-bottom));
   }
-  .say textarea:focus{outline:none; border-color:color-mix(in srgb,var(--run) 50%,transparent)}
-  .say .send{
-    width:100%; margin-top:10px; padding:14px; border-radius:12px; cursor:pointer;
-    border:1.5px solid color-mix(in srgb,var(--run) 45%,transparent);
-    background:var(--card); color:var(--run);
-    font:600 15px -apple-system,"PingFang SC",sans-serif;
+  .bar .inner{width:100%; max-width:592px; margin:0 auto}
+  .brow{display:flex; align-items:flex-end; gap:8px}
+  /* 图标按钮：44×44 触摸目标，图形本身只有 22px。
+     图标没有名字，读屏软件全靠 aria-label——省了它这两个键就是无名的 */
+  .ico{
+    flex:0 0 auto; width:44px; height:44px; padding:0; cursor:pointer;
+    display:flex; align-items:center; justify-content:center;
+    border:none; background:none; color:var(--calm);
   }
-  .say .send:disabled{opacity:.45}
-  .sayerr{margin-top:10px; font-size:12.5px; line-height:1.55; color:var(--warn)}
-  .saynote{margin-top:12px; font-size:12px; line-height:1.6; color:var(--dim)}
+  .ico svg{width:22px; height:22px; display:block}
+  .ico.on{color:var(--ok)}          /* 暂停中 → 恢复，变成可以「放行」的绿 */
+  .ico.danger{color:var(--no)}
+  .ico:disabled{opacity:.35}
+  /* 输入框那一格。边框画在外壳上而不是 textarea 上，
+     这样光标进去时整格一起亮，跟里面的发送键是同一个控件 */
+  .field{
+    flex:1 1 auto; display:flex; align-items:flex-end; gap:4px;
+    border:1px solid var(--line); border-radius:22px; background:var(--bg);
+    padding:4px 4px 4px 15px; min-width:0;
+  }
+  .field:focus-within{border-color:color-mix(in srgb,var(--run) 55%,transparent)}
+  .field textarea{
+    flex:1 1 auto; min-width:0; border:none; background:none; outline:none;
+    resize:none; color:var(--fg); padding:9px 0; max-height:120px;
+    font:15px/1.45 -apple-system,BlinkMacSystemFont,"PingFang SC","Helvetica Neue",sans-serif;
+  }
+  .field textarea::placeholder{color:var(--dim)}
+  /* 发送键。圆形实心 —— 这一条底栏上唯一一个实心控件，
+     因为它是唯一一个「往前推进」的动作，另外两个都是「让它停」 */
+  .send{
+    flex:0 0 auto; width:34px; height:34px; margin-bottom:1px; padding:0;
+    border:none; border-radius:50%; cursor:pointer;
+    display:flex; align-items:center; justify-content:center;
+    background:var(--run); color:var(--card);
+  }
+  .send svg{width:18px; height:18px; display:block}
+  /* 空着的时候压灰而不是藏起来：位置一直在那儿，你才知道打完字往哪按 */
+  .send:disabled{opacity:.3; cursor:default}
+  /* 送达时机。**永远显示**，理由见 .bar 开头那段 */
+  .hint{font-size:11.5px; line-height:1.5; color:var(--dim); margin:7px 2px 0}
+  .hint.warn{color:var(--warn)}
+  .senderr{font-size:12.5px; line-height:1.5; color:var(--warn); margin:7px 2px 0}
+  /* 排队中的消息。收在一行里，点开才铺展——它们是**已经处理完的事**，
+     不该常年占着输入框上方那块地方 */
+  .qstrip{
+    display:flex; align-items:center; gap:6px; cursor:pointer;
+    font-size:12px; color:var(--dim); padding:6px 2px; margin-bottom:2px;
+    background:none; border:none; width:100%; text-align:left;
+  }
+  .qstrip svg{width:12px; height:12px; transition:transform .15s}
+  .qstrip[aria-expanded="true"] svg{transform:rotate(90deg)}
+  .qlist{max-height:168px; overflow-y:auto; margin-bottom:6px}
   .qitem{
     display:flex; gap:10px; align-items:flex-start;
-    background:var(--card); border:1px solid var(--line); border-radius:12px;
-    padding:11px 13px; margin-bottom:8px;
+    background:var(--bg); border:1px solid var(--line); border-radius:10px;
+    padding:9px 11px; margin-bottom:6px;
   }
-  .qitem p{margin:0; flex:1; font-size:13.5px; line-height:1.5; overflow-wrap:anywhere; white-space:pre-wrap}
+  .qitem p{margin:0; flex:1; font-size:13px; line-height:1.45; overflow-wrap:anywhere; white-space:pre-wrap}
   .qitem button{
     flex:0 0 auto; border:none; background:none; color:var(--no);
-    font-size:13px; cursor:pointer; padding:2px 4px;
+    font-size:12.5px; cursor:pointer; padding:2px 4px;
   }
-  footer{
-    position:fixed; left:0; right:0; bottom:0; display:flex; gap:10px;
-    padding:12px 16px calc(12px + env(safe-area-inset-bottom));
-    border-top:1px solid var(--line); background:var(--card);
+  /* 回到最新。时间线是新的在上，长会话里翻下去之后没有别的路回顶 */
+  .jump{
+    position:fixed; right:16px; z-index:2; cursor:pointer;
+    display:flex; align-items:center; gap:6px;
+    padding:9px 14px; border-radius:20px;
+    border:1.5px solid color-mix(in srgb,var(--run) 40%,transparent);
+    background:var(--card); color:var(--run);
+    font:600 13px -apple-system,"PingFang SC",sans-serif;
+    box-shadow:0 4px 14px rgba(0,0,0,.16);
   }
-  footer button{
-    flex:1; padding:14px 0; border-radius:12px; cursor:pointer;
-    font:600 15px -apple-system,"PingFang SC",sans-serif;
-    background:var(--card); border:1.5px solid var(--line); color:var(--fg);
-  }
-  footer .danger{color:var(--no); border-color:color-mix(in srgb,var(--no) 32%,transparent)}
-  footer .go{color:var(--ok); border-color:color-mix(in srgb,var(--ok) 40%,transparent)}
-  footer button:disabled{opacity:.4}
-  /* 底栏是 fixed 的，提示必须一起脱离普通流，否则会被挡在后面看不见 */
+  .jump svg{width:14px; height:14px; display:block}
+  /* 暂停 / 取消的状态说明。图标没有名字，这一行就是它们此刻在说什么 —— 
+     从「贴在底栏上方的浮层」改成底栏里的一行，跟着那两个图标一起走 */
   .note{
-    position:fixed; left:0; right:0; z-index:1;
-    bottom:calc(70px + env(safe-area-inset-bottom));
-    font-size:12px; line-height:1.5; color:var(--warn); text-align:center;
-    padding:9px 16px; margin:0 16px; border-radius:10px;
-    background:var(--warnbg,color-mix(in srgb,var(--warn) 12%,var(--card)));
+    font-size:12px; line-height:1.5; color:var(--warn);
+    padding:7px 11px; margin-bottom:8px; border-radius:9px;
+    background:color-mix(in srgb,var(--warn) 12%,var(--card));
     border:1px solid color-mix(in srgb,var(--warn) 30%,transparent);
   }
   .hidden{display:none !important}
@@ -174,13 +221,35 @@
   <div class="skills hidden" id="skills"></div>
 </header>
 
-<main><div class="tl" id="tl"></div><div class="say hidden" id="say"></div></main>
+<main><div class="tl" id="tl"></div></main>
 
-<div class="note hidden" id="note"></div>
-<footer>
-  <button id="btnPause">暂停</button>
-  <button class="danger" id="btnCancel">取消下一步</button>
-</footer>
+<!-- 回到最新。放在 main 外面：它是**固定**的，跟着时间线滚就没意义了 -->
+<button class="jump hidden" id="jump"></button>
+
+<!--
+  底栏。三样东西按「此刻要不要」显示，整条从不消失：
+    note   暂停 / 取消此刻在说什么（图标没有名字，全靠这一行）
+    队列   已排队但还没送达的消息，收成一行
+    brow   暂停图标 · 取消图标 · 输入框 · 发送
+-->
+<div class="bar" id="bar"><div class="inner">
+  <div class="note hidden" id="note"></div>
+  <button class="qstrip hidden" id="qstrip" aria-expanded="false"></button>
+  <div class="qlist hidden" id="qlist"></div>
+  <div class="senderr hidden" id="senderr"></div>
+  <div class="brow">
+    <button class="ico" id="btnPause" aria-label="暂停"></button>
+    <button class="ico danger" id="btnCancel" aria-label="取消下一步"></button>
+    <div class="field hidden" id="field">
+      <textarea id="draft" rows="1" placeholder="跟它说一句…"></textarea>
+      <button class="send" id="sendBtn" aria-label="发送" disabled>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+      </button>
+    </div>
+  </div>
+  <div class="hint hidden" id="hint"></div>
+</div></div>
 
 <script src="/ui/agents.js"></script>
 <script>
@@ -258,9 +327,18 @@ function render(data) {
     $('btnPause').classList.toggle('hidden', !cap.pause);
     $('btnCancel').classList.toggle('hidden', !cap.cancel);
 
+    /*
+     * 暂停键**同时是恢复键**：图形换成播放三角、颜色转绿，aria-label 一起改。
+     * 图标没有文字，一个不换形状的按钮在两种状态下长得一模一样——
+     * 而这两种状态下按它的后果正好相反。
+     */
     const paused = s.state === 'Paused';
-    $('btnPause').textContent = paused ? '恢复' : '暂停';
-    $('btnPause').className = (paused ? 'go' : '') + (cap.pause ? '' : ' hidden');
+    $('btnPause').innerHTML = paused ? IC.play : IC.pause;
+    $('btnPause').setAttribute('aria-label', paused ? '恢复' : '暂停');
+    $('btnPause').title = paused ? '恢复' : '暂停';
+    $('btnPause').className = 'ico' + (paused ? ' on' : '') + (cap.pause ? '' : ' hidden');
+    $('btnCancel').innerHTML = IC.stop;
+    $('btnCancel').title = '取消下一步';
     // Claude Code 没有运行时暂停原语，说清楚才不会以为点了没反应
     let note = '';
     // 取消排在最前：暂停中再点取消是常见操作，这时该说的是取消那句
@@ -280,6 +358,11 @@ function render(data) {
     else if (!cap.pause && !cap.cancel) note = cap.approve
       ? `${cap.label || '这个后端'}不支持从手机暂停或取消，只能审批。`
       : `${cap.label || '这个后端'}目前只把状态镜像到手机，暂停、取消、审批都还不支持。`;
+    /*
+     * 这一行是那两个图标此刻**在说什么**。原来它只在暂停/取消进行中出现；
+     * 现在按钮上没有字了，「这个后端不支持暂停」那一档就更要留着——
+     * 否则一个灰掉的无名图标是解释不了自己的。
+     */
     $('note').textContent = note;
     $('note').classList.toggle('hidden', !note);
   }
@@ -317,7 +400,7 @@ function render(data) {
   $('skills').classList.toggle('hidden', !skills.length);
 
   queued = data.queued || [];
-  renderSay();
+  renderComposer();
 
   const evs = (data.events || []).slice().reverse();
   if (evs.length) {
@@ -332,10 +415,25 @@ function render(data) {
   } else if (session) {
     $('tl').innerHTML = '<div class="empty">还没有事件</div>';
   }
+
+  // 底栏的高度这一刻可能刚变（note 出现、队列多了一条、空闲那句折成两行），
+  // 而 main 的底部留白全靠它 —— 量早了，时间线最后几行会被盖住
+  sizeBar();
 }
 
+/* ── 图标 ──
+   暂停/取消从通栏文字按钮变成了图标。图标没有名字，所以每一个都带
+   aria-label，状态说明还在底栏第一行用文字说它此刻在做什么。 */
+const IC = {
+  pause: '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1.4"/><rect x="14" y="5" width="4" height="14" rx="1.4"/></svg>',
+  play: '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.2v13.6L19 12z"/></svg>',
+  stop: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M5.8 5.8l12.4 12.4"/></svg>',
+  up: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg>',
+  caret: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg>',
+};
+
 /**
- * 从手机往这个会话发消息。
+ * 底栏：输入框 + 两个图标。
  *
  * ## 为什么在这一页，而不是一个独立的 tab
  *
@@ -344,70 +442,209 @@ function render(data) {
  * 那里有完整上下文（它在干什么、时间线、暂停/取消按钮都在）。
  * 挑选那一步是把你刚有的上下文丢掉，再让你在一排项目名里重建它。
  *
- * 顺带：`cap.inbox` 只有 Claude Code 为真，所以那个 tab 对纯 Codex /
- * 纯 DSH 用户永远是空的，白占一格导航。
+ * ## 为什么从时间线底下搬到常驻底栏
  *
- * ## 不支持的后端**整块不画**
+ * 搬进这一页之后它仍在时间线**下面**——先看完发生了什么再回话，顺序是对的。
+ * 但代价是长会话里它在十几屏之外，而屏幕上常驻可见的只有「暂停」「取消」
+ * 两个通栏按钮。于是这一页最显眼的两件事都是**让它停**，而「跟它说一句」
+ * 得先翻到底才知道存在。
  *
- * 注入靠 Stop hook 回 `{decision:'block'}`，那是 Claude Code 的特有原语
- * （见 src/routes/hooks.mjs）。别的后端没有等价物，画出来只会让人打完字
- * 点发送、然后永远等不到——**发出去的消息比灰掉的按钮更像成功**。
- * 服务端那一侧也会 409（src/routes/api.mjs 的 say），两处同一判据。
+ * 常驻输入框把「能说话」这件事从「需要被发现」变成「一直在那儿」，
+ * 而你刚读到的那条日志就在它正上方——原本要靠滚动维持的上下文，现在是版式
+ * 给的。两个控制退成图标，不再和它抢地方。
+ *
+ * ## 它长得像聊天框，但**不是**聊天框
+ *
+ * 注入的唯一时机是 Stop hook（这一轮结束时，见 src/routes/hooks.mjs）。
+ * 会话空着的时候更远：得等你在终端里再发起一轮。
+ *
+ * 聊天的形状自带一个承诺——**打完字按下去，对面就收到了**。这里不成立，
+ * 而版式越像，那个承诺越结实。所以输入框底下钉着一行小字说什么时候到，
+ * 空闲时换成更响的一句。**那一行任何时候都不能省**：它是这个形状唯一
+ * 拆得掉自带承诺的东西。
+ *
+ * ## 不支持的后端**整格不画**
+ *
+ * 注入靠 Stop hook 回 `{decision:'block'}`，那是 Claude Code 的特有原语。
+ * 别的后端没有等价物，画出来只会让人打完字点发送、然后永远等不到——
+ * **发出去的消息比灰掉的按钮更像成功**。服务端那一侧也会 409
+ * （src/routes/api.mjs 的 say），两处同一判据。
  */
-function renderSay() {
-  const box = $('say');
-  if (!cap?.inbox) { box.classList.add('hidden'); box.innerHTML = ''; return; }
-  box.classList.remove('hidden');
+function renderComposer() {
+  const on = !!cap?.inbox;
+  $('field').classList.toggle('hidden', !on);
+  $('hint').classList.toggle('hidden', !on);
+  if (!on) {
+    $('qstrip').classList.add('hidden');
+    $('qlist').classList.add('hidden');
+    $('senderr').classList.add('hidden');
+    return;
+  }
 
+  /**
+   * **输入框只建一次，之后永不重建。**
+   *
+   * 这一整块原来每次 render() 都 `innerHTML = ...` 重刷，而 render() 是由
+   * SSE 驱动的——`session` 和 `event` 两个事件都直接调 refresh()。也就是说
+   * **对面每调用一次工具，你正在打字的那个 textarea 就被删掉重建一次**。
+   *
+   * 实测（一条 PreToolUse 打进来的前后）：
+   *
+   *     activeElement  draft → BODY
+   *     selectionStart 5 → 0
+   *
+   * 文字本身没丢（`draft` 那个全局兜住了），但**光标跳回开头**，接着敲的字
+   * 插在句首；手机上还会顺带收起键盘。而这一页的用法恰恰是「一边看它在干
+   * 什么一边打字」——事件越密，被打断得越狠，正好是最需要说话的时候。
+   *
+   * 现在 textarea 是写死在 HTML 里的，render 只改会变的那几样文字，
+   * 一个都不含焦点。
+   */
   const idle = session && ['Done', 'Idle', 'Waiting Input'].includes(session.state);
-  box.innerHTML = `
-    <h2>发消息</h2>
-    <textarea id="draft" placeholder="想让它改做什么？&#10;例如：先别动数据库，改成只读一遍现有 schema">${esc(draft)}</textarea>
-    <button class="send" id="sendBtn">加入队列</button>
-    <div class="sayerr hidden" id="sayerr"></div>
-    <div class="saynote">
-      消息不会立刻送达。hooks 是单向的，唯一的注入点是「这一轮结束时」——
-      它会在这个会话跑完当前这一轮后进入对话。
-      ${idle ? '<br><br>⚠️ 这个会话现在是空闲的，已经停过了。消息要等到你在终端里再发起一轮、那一轮结束时才会送达。' : ''}
-    </div>
-    ${queued.length ? `<h2 style="margin-top:18px">队列中（${queued.length}）</h2>` + queued.map((m) => `
-      <div class="qitem"><p>${esc(m.text)}</p><button data-del="${esc(m.id)}">删除</button></div>`).join('') : ''}
-  `;
+  const hint = $('hint');
+  hint.textContent = idle
+    ? '会话已经停了 · 要等你在终端再发起一轮，这条才会进入对话'
+    : '不会立刻送达 · 跑完当前这一轮后进入对话';
+  hint.classList.toggle('warn', !!idle);
 
-  $('draft').oninput = (e) => { draft = e.target.value; };
-  $('sendBtn').onclick = async () => {
-    const text = $('draft').value.trim();
-    if (!text) return;
-    $('sendBtn').disabled = true;
-    /**
-     * **只有真的排上队了才清空草稿。**
-     *
-     * 原来无论成败都清：网络断了、服务重启了、队列满了——用户刚打完的一段话
-     * 直接消失，界面上没有任何痕迹，他只会以为发出去了，然后等一个永远不来的
-     * 回应。手机上重打一遍的代价还特别高。
-     */
-    let ok = false, hint = '';
-    try {
-      const r = await fetch(`/api/sessions/${SID}/say`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text }),
-      });
-      ok = r.ok;
-      if (!ok) hint = (await r.json().catch(() => ({}))).hint || '没能加入队列，再试一次。';
-    } catch {
-      hint = '发不出去 —— 和 Mac 的连接断了。你打的字还留着。';
-    }
-    $('sendBtn').disabled = false;
-    if (ok) { draft = ''; await refresh(); return; }
-    const note = $('sayerr');
-    if (note) { note.textContent = hint; note.classList.remove('hidden'); }
-  };
-  for (const b of box.querySelectorAll('[data-del]')) {
+  // 队列收成一行，展开状态由用户说了算——刷新不该把他展开的东西合回去
+  const q = $('qstrip'), list = $('qlist');
+  q.classList.toggle('hidden', !queued.length);
+  if (!queued.length) { list.classList.add('hidden'); list.innerHTML = ''; return; }
+  q.innerHTML = `${IC.caret}排队中 ${queued.length} 条`;
+  const open = q.getAttribute('aria-expanded') === 'true';
+  list.classList.toggle('hidden', !open);
+  list.innerHTML = queued.map((m) => `
+    <div class="qitem"><p>${esc(m.text)}</p><button data-del="${esc(m.id)}">删除</button></div>`).join('');
+  for (const b of list.querySelectorAll('[data-del]')) {
     b.onclick = async () => {
       await fetch(`/api/sessions/${SID}/say/${b.dataset.del}`, { method: 'DELETE' }).catch(() => {});
       await refresh();
     };
   }
+}
+
+$('qstrip').onclick = () => {
+  const q = $('qstrip');
+  q.setAttribute('aria-expanded', q.getAttribute('aria-expanded') === 'true' ? 'false' : 'true');
+  renderComposer();
+  sizeBar();
+};
+
+/**
+ * 输入框跟着内容长高，到 120px 封顶。
+ *
+ * 先 `height=auto` 再读 scrollHeight：不清零的话它只会越长越高，删字不回缩
+ * ——scrollHeight 永远不小于当前高度。
+ */
+function autoGrow() {
+  const t = $('draft');
+  t.style.height = 'auto';
+  t.style.height = `${Math.min(t.scrollHeight, 120)}px`;
+  sizeBar();
+}
+
+/**
+ * 底栏是 fixed 的，会盖住时间线的最后几行 —— 所以把它的**实测高度**交给
+ * main 当底部留白。
+ *
+ * 不写死常数：这条栏的高度会变（输入框长高、队列展开、note 出现、
+ * 空闲那句话折成两行）。写死的那一刻它就只在某一种状态下是对的，
+ * 而其余状态下你永远读不到时间线最后那一条。
+ */
+function sizeBar() {
+  const h = $('bar').offsetHeight;
+  document.documentElement.style.setProperty('--barh', `${h + 14}px`);
+  paintJump();
+}
+
+async function send() {
+  const text = $('draft').value.trim();
+  if (!text) return;
+  $('sendBtn').disabled = true;
+  /**
+   * **只有真的排上队了才清空草稿。**
+   *
+   * 原来无论成败都清：网络断了、服务重启了、队列满了——用户刚打完的一段话
+   * 直接消失，界面上没有任何痕迹，他只会以为发出去了，然后等一个永远不来的
+   * 回应。手机上重打一遍的代价还特别高。
+   */
+  let ok = false, hint = '';
+  try {
+    const r = await fetch(`/api/sessions/${SID}/say`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    });
+    ok = r.ok;
+    if (!ok) hint = (await r.json().catch(() => ({}))).hint || '没能发出去，再试一次。';
+  } catch {
+    hint = '发不出去 —— 和 Mac 的连接断了。你打的字还留着。';
+  }
+  if (ok) {
+    draft = '';
+    $('draft').value = '';
+    $('senderr').classList.add('hidden');
+    autoGrow();
+    await refresh();
+    return;
+  }
+  $('sendBtn').disabled = false;
+  const note = $('senderr');
+  note.textContent = hint;
+  note.classList.remove('hidden');
+  sizeBar();
+}
+
+$('draft').oninput = (e) => {
+  draft = e.target.value;
+  $('sendBtn').disabled = !draft.trim();
+  autoGrow();
+};
+$('sendBtn').onclick = send;
+
+/**
+ * 回车怎么算，**看你在什么设备上**。
+ *
+ * 桌面上回车发送是聊天框的通行做法，换行走 Shift+Enter。手机上反过来：
+ * 那颗键就是软键盘的换行键，把它抢走意味着**多行消息几乎打不出来**，
+ * 而这一页要打的恰恰是「先别动数据库，改成……」这种成段的话。
+ *
+ * 按指针粗细分，不按屏幕宽度——外接键盘的平板、窄窗口的桌面，
+ * 宽度都会判错，而「有没有精确指针」正是「有没有实体键盘」的近似。
+ */
+const coarse = window.matchMedia?.('(pointer: coarse)').matches;
+$('draft').onkeydown = (e) => {
+  if (e.key !== 'Enter') return;
+  const metaSend = e.metaKey || e.ctrlKey;   // 两种设备上都发送
+  if (metaSend || (!coarse && !e.shiftKey)) { e.preventDefault(); send(); }
+};
+
+/**
+ * 「回到最新」。
+ *
+ * 只剩一个方向了：输入框现在常驻在底栏里，没有「跳到发消息」这回事。
+ * 时间线是新的在上，翻下去之后回顶只能靠它。
+ *
+ * 短会话（一屏装得下）不画——一个点了屏幕纹丝不动的按钮，比没有更让人
+ * 犯嘀咕。
+ */
+function paintJump() {
+  const btn = $('jump'), main = document.querySelector('main');
+  const show = main.scrollTop > 60;
+  btn.classList.toggle('hidden', !show);
+  if (!show) return;
+  btn.innerHTML = `${IC.up}最新`;
+  btn.setAttribute('aria-label', '回到最新的事件');
+  // 底栏高度是变的（输入框长高、队列展开、note 出现），量出来再让
+  btn.style.bottom = `calc(${$('bar').offsetHeight + 12}px + env(safe-area-inset-bottom))`;
+  /*
+   * **直接跳，不做平滑滚动。** `behavior:'smooth'` 不是到处都灵——
+   * iOS Safari 15.4 之前整个调用被忽略，点了原地不动；本机这个浏览器也
+   * 复现了（smooth 版 scrollTop 一动不动，赋值版立刻到 0）。这一页主要
+   * 跑在手机上，赌不起。何况这是「跳」不是「滚」，按它的人已经决定
+   * 不看中间那段了。
+   */
+  btn.onclick = () => { main.scrollTop = 0; paintJump(); };
 }
 
 async function refresh() {
@@ -428,6 +665,22 @@ $('btnCancel').onclick = () => {
   const note = cap?.cancelNote ? `\n\n${cap.cancelNote}` : '';
   if (confirm(`取消当前这一轮？${note}`)) act('cancel');
 };
+
+/**
+ * 滚动时重算胶囊的方向。
+ *
+ * rAF 合并：滚动事件一帧能来好几条，而 paintJump 里有 getBoundingClientRect
+ * ——那是会触发重排的读操作，逐条跑等于在滚动最忙的时候给自己加戏。
+ */
+let jumpTick = false;
+const onJumpScroll = () => {
+  if (jumpTick) return;
+  jumpTick = true;
+  requestAnimationFrame(() => { jumpTick = false; paintJump(); });
+};
+document.querySelector('main').addEventListener('scroll', onJumpScroll, { passive: true });
+// 转屏、手机键盘弹起收起——都会改变「输入框在不在视野里」的答案
+window.addEventListener('resize', onJumpScroll, { passive: true });
 
 const es = new EventSource('/api/stream');
 es.addEventListener('session', refresh);
