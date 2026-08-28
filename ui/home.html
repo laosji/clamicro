@@ -807,7 +807,23 @@ const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({'&':'&amp;','<':'
  * 所以这里也只说观察到的事实。真死了的和真在跑的，用户自己一眼能分辨——
  * 他知道自己有没有在跑长命令，我们不知道。
  */
-function staleNote(s) {
+/*
+ * 名字里带 session 不是啰嗦。**这个函数曾经整个是死代码**：它原来也叫
+ * `staleNote`，而 1500 行开外还有一个同名的 `staleNote()`（讲额度新鲜度）。
+ * 同一个文件里两个同名函数声明，**后声明的赢**——于是会话卡片上那句
+ * `staleNote(s)` 调的是额度那个，参数被静默丢掉。
+ *
+ * 三个后果，全是实测出来的：
+ *   1. 这句「很久没动静」从来没在界面上出现过，而服务端的 stale_since
+ *      一直好好地在算（还有测试钉着）
+ *   2. 每张会话卡片改成显示额度那句「新开一个 Claude Code 会话就会刷新」
+ *      ——在 DSH / Codex 的卡片上那是**假话**
+ *   3. 额度那个要读 `quota.at`，而 quota 只有 statusLine 会写。于是
+ *      **纯 DSH / 纯 Codex 的用户一打开会话 tab 就是「页面渲染出错」**
+ *
+ * 重名不会报错，也不会有任何测试变红。test/ui-shared.test.mjs 现在扫这件事。
+ */
+function sessionStaleNote(s) {
   if (!s.stale_since) return '';
   const mins = Math.round((Date.now() - s.stale_since) / 60000);
   const howLong = mins >= 60 ? `${Math.round(mins / 60)} 小时` : `${mins} 分钟`;
@@ -1500,7 +1516,7 @@ function quotaBody() {
    * 下面这句话仍然要有，而且要跟在环后面：环回答「有多少」，它回答
    * 「这数儿还能不能信、怎么才能看到新的」。
    */
-  if (quotaStale()) return `${gauges}<div class="gwhy">${staleNote()}</div>${others}`;
+  if (quotaStale()) return `${gauges}<div class="gwhy">${quotaStaleNote()}</div>${others}`;
   return gauges + others;
 }
 
@@ -1520,7 +1536,9 @@ function quotaBody() {
  * 两件事各一次，没有第二遍。「就会」而不是「才会」：前者说的是「这么点事
  * 就够了」，后者听起来像在拦你。
  */
-function staleNote() {
+/* 讲的是**额度读数**有多旧，跟某个会话无关——所以不接参数，名字也要说出来。
+   跟 sessionStaleNote 重过名，见那里那段。 */
+function quotaStaleNote() {
   const how = quotaWhy() === 'hooks-only'
     // `claude` 放句中不放句末：它是一段不可断行的等宽字，摆在最后会被整个
     // 甩到第二行独占一行，一句两行的小字于是长得像两句
@@ -1534,7 +1552,7 @@ function staleNote() {
  *
  * statusLine 在活跃会话里每次响应都上报，秒级新鲜；超过 10 分钟没动静就说明
  * 没有会话在报。**这时候把旧数字当当前值展示是在骗人**，所以环压灰、
- * 底下补一句 staleNote()——判据只有这一处，界面各部分不能各判各的。
+ * 底下补一句 quotaStaleNote()——判据只有这一处，界面各部分不能各判各的。
  */
 function quotaStale() {
   return !!quota && Date.now() - quota.at > 600_000;
@@ -2153,7 +2171,7 @@ function renderSessions() {
         <span class="state ${esc(s.state).replace(/\s/g,'-')}">${esc(stateLabel(s.state, s))}${s.sub_state ? ' · ' + esc(subStateLabel(s.sub_state)) : ''}</span>
       </div>
       <div class="path">${esc(s.cwd || '')}</div>
-      ${staleNote(s)}
+      ${sessionStaleNote(s)}
       ${c ? `<div class="meters">${meter('ctx', c.used_pct)}</div>` : ''}
       <div class="chips">
         ${mixed && cap.label ? `<span class="chip agent">${agentLogo(s.agent)}${esc(cap.label)}</span>` : ''}

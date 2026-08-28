@@ -188,3 +188,51 @@ test('渲染状态名的地方都查表，不直接输出原值', async (t) => {
     })
   }
 })
+
+/**
+ * **同一个文件里不能有两个同名的顶层函数。**
+ *
+ * 这条是用一次线上崩溃换来的。`ui/home.html` 里曾经有两个 `staleNote`：
+ *
+ *   810 行  staleNote(s)   per-session，说「这个会话很久没动静了」
+ *   1523 行 staleNote()    全局，说「额度读数有多旧」
+ *
+ * JS 里**后声明的赢**。于是：
+ *
+ *   1. 会话卡片上那句 `staleNote(s)` 调的是额度那个，参数被静默丢掉
+ *   2. per-session 那条消息**从来没在界面上出现过**，而服务端的 stale_since
+ *      一直好好地在算，还有测试钉着——UI 那一半被重名掐掉了
+ *   3. 每张卡片改成显示「新开一个 Claude Code 会话就会刷新」，而那句话在
+ *      DSH / Codex 的卡片上是假的
+ *   4. 额度那个要读 `quota.at`，而 quota 只有 statusLine 会写。于是
+ *      **纯 DSH / 纯 Codex 用户一打开会话 tab 就是「页面渲染出错」**
+ *
+ * 四个后果，零个报错，零条测试变红。重名不是语法错误，静态检查也不看
+ * HTML 里的内联脚本。所以只能在这里扫。
+ *
+ * 只看**顶格**声明：缩进的是嵌套在别的函数里的，不同作用域，合法
+ * （ui/swipe.js 里就有三对这样的 paint / reset / release）。
+ */
+test('同一个文件里没有两个同名的顶层函数', async (t) => {
+  const targets = [
+    'ui/home.html', 'ui/session.html', 'ui/approval.html', 'ui/settings.html',
+    'ui/agents.js', 'ui/swipe.js',
+  ]
+  for (const f of targets) {
+    await t.test(f, () => {
+      const src = read(f)
+      const seen = new Map()
+      const re = /^(?:export\s+)?function\s+([A-Za-z_$][\w$]*)\s*\(/gm
+      let m
+      while ((m = re.exec(src))) {
+        const line = src.slice(0, m.index).split('\n').length
+        seen.set(m[1], [...(seen.get(m[1]) ?? []), line])
+      }
+      const dup = [...seen].filter(([, ls]) => ls.length > 1)
+        .map(([n, ls]) => `${n}（行 ${ls.join(', ')}）`)
+      assert.deepEqual(dup, [],
+        `${f} 里有同名的顶层函数：${dup.join('、')}\n` +
+        `后声明的会静默覆盖前面那个——不报错、不变红，只是有一个功能从此不工作`)
+    })
+  }
+})
