@@ -12,7 +12,7 @@ Stop babysitting the terminal. When Claude Code needs permission, your Mac notif
 
 | Running | Something needs you | The decision |
 |:--:|:--:|:--:|
-| <img src="https://raw.githubusercontent.com/laosji/clamicro/main/docs/images/home-running.png" width="230" alt="Home screen while Claude Code is working: a breathing status console and a scrolling list of recent tool calls"> | <img src="https://raw.githubusercontent.com/laosji/clamicro/main/docs/images/home-pending.png" width="230" alt="Home screen with a pending approval at the top and a second one listed below"> | <img src="https://raw.githubusercontent.com/laosji/clamicro/main/docs/images/approval-detail.png" width="230" alt="Approval detail: risk level, impact, the command in full, and a drag-to-decide bar pinned to the bottom"> |
+| <img src="https://raw.githubusercontent.com/laosji/clamicro/main/docs/images/home-running.png" width="230" alt="Home screen while three agents work: Claude Code, Codex and DeepSeek Harness each get their own group, with the running session and its latest tool calls under it"> | <img src="https://raw.githubusercontent.com/laosji/clamicro/main/docs/images/home-pending.png" width="230" alt="Home screen with a high-risk git push --force pinned at the top counting down three minutes, and the per-backend sessions below"> | <img src="https://raw.githubusercontent.com/laosji/clamicro/main/docs/images/approval-detail.png" width="230" alt="Approval detail: risk level, impact, the command in full, and a drag-to-decide bar pinned to the bottom"> |
 
 *The screenshots are the real UI, not mockups. The notch capsule is a screen capture from a Mac.*
 

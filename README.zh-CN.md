@@ -12,7 +12,7 @@
 
 | 运行中 | 有事等你 | 做决定 |
 |:--:|:--:|:--:|
-| <img src="https://raw.githubusercontent.com/laosji/clamicro/main/docs/images/home-running.png" width="230" alt="运行中的首页：呼吸的状态主控台，下面滚动着最近几次工具调用"> | <img src="https://raw.githubusercontent.com/laosji/clamicro/main/docs/images/home-pending.png" width="230" alt="有待审批时的首页：主控台在最上面，下面列着剩下的"> | <img src="https://raw.githubusercontent.com/laosji/clamicro/main/docs/images/approval-detail.png" width="230" alt="审批详情：风险等级、影响面、命令原文，决策条钉在底部"> |
+| <img src="https://raw.githubusercontent.com/laosji/clamicro/main/docs/images/home-running.png" width="230" alt="运行中的首页：Claude Code、Codex、DeepSeek Harness 各占一组，每组下面是正在跑的会话和最近几次工具调用"> | <img src="https://raw.githubusercontent.com/laosji/clamicro/main/docs/images/home-pending.png" width="230" alt="有待审批时的首页：一条高风险的 git push --force 顶在最上面，倒数着三分钟，下面是各后端的会话"> | <img src="https://raw.githubusercontent.com/laosji/clamicro/main/docs/images/approval-detail.png" width="230" alt="审批详情：风险等级、影响面、命令原文，决策条钉在底部"> |
 
 *截图是真实界面，不是效果图。刘海那张是 Mac 上实拍的屏幕截图。*
 
