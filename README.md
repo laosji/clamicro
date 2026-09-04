@@ -45,18 +45,21 @@ npx clamicro install
 
 Three steps:
 
-1. **In the terminal** — checks your environment, shows exactly what it will change in `~/.claude/settings.json`, waits for your confirmation, backs up and writes, asks whether to trust the current network, starts the service, and prints **a URL** (not a QR code — see below).
+1. **In the terminal** — checks your environment, shows exactly what it will change in `~/.claude/settings.json`, waits for your confirmation, backs up and writes, asks whether to trust the current network, starts the service, and prints **a URL, plus a QR code of that URL** (with `qrencode` installed). The QR carries no credential — see below.
 2. **Open that URL on your phone**, on the same Wi-Fi. You get a pairing page. Tap "Show QR on the Mac"; the QR appears **on the Mac's screen only**. Scan it with your phone's camera.
 3. **Confirm on the Mac.** A dialog asks whether to let this device in, and shows where the request came from. Nothing is issued until you press Allow.
 
 Then walk through the built-in demo: it creates a fake approval so you can swipe one for real before anything real is at stake. That round-trip *is* the acceptance test.
 
-> **Why a URL and not a QR code in the terminal?** A QR in the terminal has to carry a credential,
-> and a terminal is a place things get *kept* — scrollback, screen recordings, screen sharing, the
-> phone camera of whoever is sitting next to you. Earlier versions printed a permanent master token
-> there; the version after that printed a 60-second pairing ticket, which was safe but usually
-> **expired before you got your phone out**. A URL carries nothing and never expires. The credential
-> is minted only after you tap the button, and it only ever appears on the Mac's screen.
+> **Why no *credential* in the terminal?** A terminal is a place things get *kept* — scrollback,
+> screen recordings, screen sharing, the phone camera of whoever is sitting next to you. Earlier
+> versions printed a permanent master token there; the version after that printed a 60-second
+> pairing ticket, which was safe but usually **expired before you got your phone out**.
+>
+> What's printed now is the plain LAN URL — and, since it carries nothing, a QR code *of that URL*,
+> so you don't have to type an IP and port on a phone keyboard. Anything scrollback or a bystander's
+> camera gets from that QR is exactly what they'd get from the line of text under it. The credential
+> is minted only after you tap the button on the phone, and it only ever appears on the Mac's screen.
 
 It works immediately after install: when approval is needed your Mac shows a notification and plays a sound, the terminal status line shows `⏳ N pending`, and the web UI is reachable from your phone.
 
@@ -148,19 +151,30 @@ noticing, quietly showing you a wrong number.
 
 ### Attaching DSH
 
-`npx clamicro install` detects `~/.dsh` and offers to wire it up: it installs the bridge
-plugin plus an optional pixel cat that sits on the DSH web UI (tapping it opens the phone
-dashboard, or the pairing QR if you haven't paired yet).
+```bash
+npx clamicro connect dsh
+```
 
-It writes into **someone else's config** (`~/.dsh/profiles`), so it always asks first and
-`--yes` will not answer for you. Uninstall removes it again. For the manual route and the
-bridge's three hard constraints, see [`plugins/`](./plugins/).
+It installs the bridge plugin plus an optional pixel cat that sits on the DSH web UI
+(tapping it opens the phone dashboard, or the pairing QR if you haven't paired yet).
+
+**`install` detects DSH but never wires it up on its own** — it just prints that command.
+This writes into **someone else's config** (`~/.dsh/profiles`), so the question has to be
+asked somewhere you can actually answer it; by the time `install` reaches that point it has
+already sent you off to your phone, and its stdin is closed. Once connected, re-running
+`install` does refresh the plugin files silently — that introduces no new change of scope.
+Uninstall removes it again. For the manual route and the bridge's three hard constraints,
+see [`plugins/`](./plugins/).
 
 ### Attaching Codex
 
-`npx clamicro install` also detects `~/.codex/config.toml` and asks. It appends a
-sentinel-delimited block of hooks to that file; uninstall removes exactly that block
-and touches nothing outside it.
+```bash
+npx clamicro connect codex
+```
+
+It appends a sentinel-delimited block of hooks to `~/.codex/config.toml`; uninstall removes
+exactly that block and touches nothing outside it. Same rule as DSH: `install` only tells you
+the command exists.
 
 **One manual step remains**: open Codex once and accept its "trust these hooks?"
 prompt. Until you do, Codex **skips the hooks silently** — no error, no warning,
@@ -349,6 +363,8 @@ npx clamicro install      # install / upgrade
 npx clamicro uninstall    # uninstall
 npx clamicro qr           # print the login QR code
 npx clamicro status       # service, network, version
+npx clamicro doctor       # a redacted, pasteable report of where install got stuck
+npx clamicro connect dsh  # wire up another backend (connect dsh | connect codex)
 npx clamicro config       # every effective setting, labelled by where it came from
 npx clamicro trust        # trust the current network
 npx clamicro untrust      # revoke trust (untrust <id-prefix> | untrust all)

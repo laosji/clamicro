@@ -10,7 +10,7 @@
 npx clamicro install
 ```
 
-The terminal asks you three things:
+The terminal asks you two things:
 
 **Should it edit `~/.claude/settings.json`?**
 
@@ -26,21 +26,37 @@ That's all it asks. **There is no start-at-login option** — the service follow
 
 (Earlier versions registered a LaunchAgent. Upgrading from those removes it automatically — nothing to do by hand.)
 
-A QR code is printed at the end.
+**If DSH or Codex is detected, install only mentions it — it does not wire it up.** That writes into another product's own config file, so it gets its own command, run by you: `npx clamicro connect dsh` or `npx clamicro connect codex`.
+
+At the end it prints **a URL**, plus a QR code of that URL (if `qrencode` is installed). That QR carries no credential — it is the same thing as the line of text under it, and only saves you typing an IP and port on a phone keyboard.
 
 ---
 
 ## 2. First run — finish the loop or it isn't installed
 
-Scan the QR with your phone camera; the browser opens the home screen.
+**1. Open that URL on your phone**, on the same Wi-Fi as the Mac. Scanning the QR in the terminal is the quickest way.
 
-You only log in once — the token becomes a cookie, valid for a year. After that just open the address directly.
+What opens is the **pairing page**, not the home screen — this phone holds no credential yet.
 
-**Two things worth doing right away:**
+**2. Tap "Show QR on the Mac".**
 
-**Add to Home Screen.** Safari share menu → Add to Home Screen. It becomes an icon with no address bar, close to an app.
+The QR appears **on the Mac's screen only**, never on the phone page. Scan it with your phone's **Camera app**, pointed at the Mac.
 
-**Run the acceptance test.** Settings → "Send a test approval" at the bottom. It creates a fake pending approval for you to decide on — **approving or rejecting does not execute anything**. Completing that round-trip proves the whole chain works.
+(The pairing page can't scan: plain HTTP isn't a secure context, so `navigator.mediaDevices` is simply `undefined` in iOS Safari. The native camera is the only route — and the better one; it opens a Safari tab straight away.)
+
+**3. Back on the Mac, press "Allow" in the dialog.**
+
+It shows which device is asking and where the request came from. Nothing is issued until you press Allow — **seeing the QR is not enough**.
+
+**4. Once paired, the phone lands on the onboarding screen**, which has exactly one thing on it: **Send a test approval**.
+
+Tap it and decide one on your phone — **approving or rejecting does not execute anything**. Completing that round-trip proves the whole chain works. That *is* the acceptance test.
+
+---
+
+The login is stored as a cookie, valid for **30 days**; scan again when it expires. After that just open the address directly.
+
+**One thing worth doing right away: Add to Home Screen.** Safari share menu → Add to Home Screen. It becomes an icon with no address bar, close to an app.
 
 ---
 

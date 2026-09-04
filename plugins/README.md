@@ -6,16 +6,22 @@
 
 | 插件 | 作用 | 默认 |
 |---|---|---|
-| [`dsh-bridge`](dsh-bridge/) | 把 DSH 的会话状态和审批请求桥接到手机 | 状态镜像开；审批插件里默认关，但 `npx clamicro install` 接 DSH 时会替你写上 `approve: true` |
+| [`dsh-bridge`](dsh-bridge/) | 把 DSH 的会话状态和审批请求桥接到手机 | 状态镜像开；审批插件里默认关，但 `npx clamicro connect dsh` 会替你写上 `approve: true` |
 | [`dsh-pet-cat`](dsh-pet-cat/) | Web UI 上的像素猫；点一下打开手机看板 / 配对二维码 | 联动开 |
 
 两个可以单独装，装一个也能用。
 
 ## 装
 
-> **多数情况下你不用读这一节。** `npx clamicro install` 探测到 `~/.dsh` 会问一句，
-> 同意后插件目录和下面这段配置都是自动写的，卸载时一并摘除。
-> 下面是手动接法，以及 install 认不出你的 `cordis.patch.yml` 格式时要贴的内容。
+> **多数情况下你不用读这一节。** 跑一句 `npx clamicro connect dsh`，
+> 插件目录和下面这段配置都是自动写的，卸载时一并摘除。
+>
+> `install` 只在探测到 `~/.dsh` 时提一句，**不会自己接**——它写的是 DSH 自己的
+> 配置文件，那一问得问在你答得回去的地方（`install` 走到那一步时已经把你打发去
+> 掏手机了，stdin 也已经关掉）。接过之后重跑 `install` 会静默重接一遍，让插件
+> 文件跟上新版本。
+>
+> 下面是手动接法，以及 connect 认不出你的 `cordis.patch.yml` 格式时要贴的内容。
 
 它们**不在 npm 上单独发包**，所以 `dsh plugin add` 拉不到——手动装就是从 clamicro
 包里把目录拷到 profile 的 `node_modules`，目录名要用插件名（不是源目录名）：

@@ -1,0 +1,63 @@
+name: Install / can't connect
+description: You ran the installer but your phone can't reach it, or something in the setup didn't finish
+title: "[install] "
+labels: ["install"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Getting from `npx clamicro install` to your first approval takes seven steps.
+        There is no telemetry in this tool, so **the only way I learn where people get
+        stuck is this form**.
+
+        中文提问完全可以，不用翻译。
+
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Output of `npx clamicro doctor`
+      description: |
+        Run it and paste the whole block, starting from `### clamicro doctor`.
+        It contains no token, no home directory path, no SSID, no device names, and
+        only the network part of your LAN IP — the redaction rules are in
+        `src/doctor.mjs` if you want to check before pasting.
+      placeholder: |
+        ### clamicro doctor
+
+        **看起来卡在第 3 步：当前网络没被信任，服务只绑回环**
+        ...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: step
+    attributes:
+      label: Where did it stop?
+      description: If `doctor` already named a step, just repeat it here.
+      options:
+        - "1 — Environment check (Node / curl)"
+        - "2 — Writing hooks into ~/.claude/settings.json"
+        - "3 — Trusting the network / no LAN address"
+        - "4 — Starting the service / it only bound loopback"
+        - "5 — Opening the URL on the phone"
+        - "6 — Scanning the QR / pressing Allow on the Mac"
+        - "7 — The demo approval, or no events ever arrive"
+        - "Not sure"
+    validations:
+      required: true
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What did you see?
+      description: |
+        The exact message, or what the screen showed. "Nothing happened" is a useful
+        answer too — say where nothing happened.
+    validations:
+      required: true
+
+  - type: input
+    id: phone
+    attributes:
+      label: Phone and iOS version
+      placeholder: "iPhone 14, iOS 18.2"

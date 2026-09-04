@@ -1,0 +1,60 @@
+name: Something behaves wrong
+description: It's installed and paired, but something doesn't do what it says
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The bug class this project cares about most is **"the interface says one thing
+        and the truth is another"** — a button that reports success while nothing
+        happened, a number that is stale without saying so. If that's what you hit,
+        say so plainly; it gets priority.
+
+        中文提问完全可以，不用翻译。
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect instead?
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce
+      description: Even a rough sequence helps. If it happened once and never again, say that.
+      placeholder: |
+        1. ...
+        2. ...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: backend
+    attributes:
+      label: Which backend
+      options:
+        - Claude Code
+        - Codex
+        - DeepSeek Harness (DSH)
+        - More than one
+        - Not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Output of `npx clamicro doctor` (optional but helps a lot)
+      description: |
+        Redacted by design — no token, no home path, no SSID, no device names.
+        Rules are in `src/doctor.mjs`.
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Anything from `npx clamicro logs` (optional)
+      description: Please skim it before pasting — the log is not redacted, it can contain command text.
+      render: text
