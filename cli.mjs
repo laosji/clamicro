@@ -33,9 +33,11 @@ function usage() {
   ${c.b('uninstall')}    卸载：只摘掉自己加的东西，配置保留
   ${c.b('qr')}           打印登录二维码（换手机 / 重新登录时用）${c.dim('  ← 加 --no-cat 去掉那只猫')}
   ${c.b('status')}       服务、网络、待审批的当前状态
+  ${c.b('doctor')}       装不上 / 连不上时跑它${c.dim('  ← 输出一段可直接贴进 issue 的现场，已脱敏')}
   ${c.b('config')}       摊开当前生效的完整配置${c.dim('  ← 每项标出来自默认值还是你改过')}
   ${c.b('start')}        前台启动服务（调试用；平时由 SessionStart hook 自动拉起）
   ${c.b('stop')}         停止服务
+  ${c.b('connect')}      接上另一个后端：${c.dim('connect dsh | connect codex')}${c.dim('  ← 会改那个产品自己的配置')}
   ${c.b('tunnel')}       公网隧道：${c.dim('tunnel on | off | status')}${c.dim('  ← 网络禁止设备互通时用')}
   ${c.b('trust')}        信任当前网络（陌生网络下服务只绑本机）
   ${c.b('untrust')}      撤销信任：${c.dim('untrust [id前缀 | all]')}${c.dim('  ← 不带参数则撤当前网络')}
@@ -630,6 +632,145 @@ switch (cmd) {
   case 'logs':
     spawnSync('tail', ['-f', LOG], { stdio: 'inherit' })
     break
+
+  /**
+   * 一份能直接粘进 issue 的现场。判据和取舍见 src/doctor.mjs 顶部。
+   *
+   * 模块从**包自己**加载，不走 appImport：旧运行时里没有 doctor.mjs，而
+   * 「运行时是旧的」恰恰是这条命令要诊断的情况之一——去旧运行时里找一个
+   * 不存在的文件，只会让它在最该出结果的时候 exit(1)。status 踩过同一个坑
+   * （见那边 checkUpdate 的注释）。
+   */
+  case 'doctor': {
+    const [{ collect, render }, { verifyHooks }, net, dsh, codex] = await Promise.all([
+      import('./src/doctor.mjs'),
+      import('./src/settings.mjs'),
+      import('./src/network.mjs'),
+      import('./src/dsh.mjs'),
+      import('./src/codex.mjs'),
+    ])
+    const { SETTINGS_FILE } = await import('./src/settings.mjs')
+
+    // 配置直接读盘，不经 loadConfig：那个函数在没有配置时会**建一个**，
+    // 于是「查一下我装好没有」的净效果是凭空多出一份配置和一把新钥匙。
+    // uninstall 踩过同一个坑，注释在 install.mjs 里。
+    let config = {}
+    const cfgMod = await import('./src/config.mjs')
+    try {
+      config = JSON.parse(readFileSync(cfgMod.CONFIG_FILE, 'utf8'))
+    } catch { /* 没装过 —— 那本身就是一条结论，不是错误 */ }
+    /**
+     * lanIp 是**派生值**（DERIVED_KEYS），从来不落盘。
+     *
+     * 只读盘的话它永远是 undefined，doctor 就会一口咬定「没探测到局域网
+     * 地址」——而下面「监听」那一行同时印着一个 192.168 的地址。
+     * 一份自相矛盾的报告比没有报告更浪费人的时间。所以这一项单独现算。
+     */
+    config.lanIp ??= cfgMod.detectLanIp()
+
+    const { HISTORY_FILE } = await import('./src/history.mjs')
+    const facts = await collect({
+      pkgVersion: PKG_VERSION,
+      runtimeVersion: installedInfo()?.version ?? null,
+      config,
+      appDir: APP_DIR,
+      settingsFile: SETTINGS_FILE,
+      historyFile: HISTORY_FILE,
+      verifyHooks: (a) => verifyHooks({ ...a, statusLinePath: appPaths().statusLine }),
+      fingerprint: net.fingerprint,
+      isTrusted: net.isTrusted,
+      weakNote: net.weakNote,
+      hasDsh: dsh.hasDsh,
+      isDshWired: dsh.isWired,
+      hasCodex: codex.hasCodex,
+      verifyCodex: codex.verifyConfig,
+    })
+
+    console.log()
+    console.log(render(facts))
+    console.log()
+    console.log(c.dim('  把上面从 ### 开始的整段复制走，贴到：'))
+    // 指到模板选择页而不是 issues/new —— 空白文本框是人放弃的地方，
+    // 而模板第一个字段就是上面这段
+    console.log(c.dim('  https://github.com/laosji/clamicro/issues/new/choose'))
+    console.log(c.dim('  里面没有令牌、没有 SSID、没有你的用户名 —— 判据见 src/doctor.mjs'))
+    console.log()
+    break
+  }
+
+  /**
+   * 接上另一个后端。
+   *
+   * **为什么这是一条单独的命令，而不是安装流程里的一问。**
+   *
+   * 它要写的是别人的配置文件：`~/.dsh/profiles`（拷目录 + 改
+   * cordis.patch.yml）、`~/.codex/config.toml`（塞一段哨兵块）。装 clamicro
+   * 顺手改掉它们不合适，所以从一开始就标了 optIn=true、连 `--yes` 都不代答。
+   *
+   * 但那道防线在安装流程里其实是失效的：那两问排在 `closePrompt()` 之后，
+   * stdin 已经关了，`confirm()` 会把问题打出来、当场自己答「是」。
+   * install.mjs 两头都补了（confirm 认「没人能回答」，安装也不再在那里问），
+   * 而问题真正该被问的地方是这里 —— 用户自己敲了这条命令，stdin 开着，
+   * 问得出来也答得回去。
+   *
+   * 已经接过的机器不必跑它：`install` 会静默重接，让插件文件跟上新版本。
+   */
+  case 'connect': {
+    const which = (rest[0] ?? '').toLowerCase()
+    if (which !== 'dsh' && which !== 'codex') {
+      console.error(c.r(`\n  要接哪个？ ${c.b('npx clamicro connect dsh')} ${c.dim('|')} ${c.b('npx clamicro connect codex')}\n`))
+      process.exit(1)
+    }
+    const auto = rest.includes('--yes') || rest.includes('-y')
+    // 非交互又没给 --yes 的话，readline 会在 EOF 上直接挂住。说清楚比挂住好
+    if (!process.stdin.isTTY && !auto) {
+      console.error(c.r('\n  这条命令要当面问你一句，但现在没有终端可问。'))
+      console.error(c.dim('  在终端里直接跑，或者加 --yes 表示你已经同意改那个文件。\n'))
+      process.exit(1)
+    }
+
+    const { createInterface } = await import('node:readline/promises')
+    const rl = auto ? null : createInterface({ input: process.stdin, output: process.stdout })
+    const confirm = async (q) => {
+      if (auto) { console.log(`${q} ${c.dim('[Y/n]')} y`); return true }
+      const a = (await rl.question(`${q} ${c.dim('[Y/n]')} `)).trim().toLowerCase()
+      return a === '' || a === 'y' || a === 'yes'
+    }
+
+    const p = await port()
+    const ui = { b: c.b, dim: c.dim, g: c.g, y: c.y }
+    const say = (s = '') => console.log(s)
+    try {
+      if (which === 'dsh') {
+        const { wireUp, hasDsh } = await appImport('dsh.mjs')
+        if (!hasDsh()) {
+          console.log(c.y('\n  这台机器上没有 DeepSeek Harness') + c.dim('（找不到 ~/.dsh/profiles）\n'))
+          break
+        }
+        // here 用 APP_DIR：插件源目录是运行时里那份 plugins/，不是 npm 包缓存
+        const r = await wireUp({ here: APP_DIR, port: p, confirm, say, ui })
+        if (r.action === 'failed') process.exitCode = 1
+      } else {
+        const { wireUp: wireUpCodex, hasCodex } = await appImport('codex.mjs')
+        if (!hasCodex()) {
+          console.log(c.y('\n  这台机器上没有 Codex') + c.dim('（找不到 ~/.codex/config.toml）\n'))
+          break
+        }
+        const r = await wireUpCodex({
+          port: p,
+          relayPath: appPaths().codexHook,
+          confirm,
+          say,
+          ui,
+        })
+        if (r.action === 'manual') process.exitCode = 1
+      }
+    } finally {
+      rl?.close()
+    }
+    console.log()
+    break
+  }
 
   case 'help':
   case '--help':

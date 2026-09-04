@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-import { createInterface } from 'node:readline/promises'
 import { spawn, spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, openSync, rmSync, writeFileSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
@@ -11,8 +10,15 @@ import { isOurService } from './src/service-id.mjs'
 import { fingerprint, isTrusted, trust, weakNote } from './src/network.mjs'
 import { saveConfig } from './src/config.mjs'
 import { syncApp, appPaths, APP_DIR } from './src/paths.mjs'
-import { wireUp, removePlugins } from './src/dsh.mjs'
-import { wireUp as wireUpCodex, unpatchConfig as unpatchCodex, codexConfig } from './src/codex.mjs'
+import { makePrompt } from './src/prompt.mjs'
+import { wireUp, removePlugins, hasDsh, isWired as isDshWired } from './src/dsh.mjs'
+import {
+  wireUp as wireUpCodex,
+  unpatchConfig as unpatchCodex,
+  codexConfig,
+  hasCodex,
+  verifyConfig as verifyCodex,
+} from './src/codex.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const PLIST_DEST = join(homedir(), 'Library', 'LaunchAgents', 'com.clamicro.plist')
@@ -95,51 +101,29 @@ const c = {
 const say = (s = '') => console.log(s)
 
 /**
- * 自己缓冲行队列，而不是用 rl.question()。
+ * 把一段文本画成终端里的二维码。装不到 qrencode 就返回 null。
  *
- * 管道输入（`printf 'y\nn\n' | node install.mjs`）时 stdin 会立刻 EOF，
- * readline 把所有行一次性发完——第二行在第二次提问注册之前就丢了，
- * 随后 EOF，question() 的 promise 永不 settle，进程挂死。
- * 队列 + close 时回落默认值可以同时覆盖 TTY 和管道。
+ * **这里印的码里没有任何凭证**，只有一个局域网网址——所以它不受
+ * 「终端里不放二维码」那条规矩的约束。那条规矩针对的是**凭证**：
+ * 早期版本印的是内嵌主令牌的码（永久、全权、吊销不掉），后来是 60 秒的
+ * 配对券（安全，但等你掏出手机它已经死了）。回滚缓冲、屏幕录制、旁人的
+ * 镜头能从这张码里拿到的东西，和从下面那行明文网址拿到的完全一样。
+ *
+ * 只在真的连着终端时画。输出被重定向到文件或管道时，一屏 ANSI 色块是垃圾。
  */
-let rl = null
-const queued = []
-const waiting = []
-let closed = false
-
-function initPrompt() {
-  if (rl) return
-  rl = createInterface({ input: process.stdin })
-  rl.on('line', (line) => (waiting.length ? waiting.shift()(line) : queued.push(line)))
-  rl.on('close', () => {
-    closed = true
-    while (waiting.length) waiting.shift()('') // 没输入了，按默认（是）处理
-  })
+function terminalQr(text) {
+  if (!process.stdout.isTTY) return null
+  // -t ANSIUTF8 自己带前景/背景色，深色浅色终端都扫得出来；靠终端默认色的
+  // ANSI 模式在深色主题上是反相的，相机认不出来
+  const r = spawnSync('qrencode', ['-t', 'ANSIUTF8', '-m', '2', text], { encoding: 'utf8' })
+  // 缺二进制时 status 是 null 而不是非零 —— 只能判 === 0（同 pages.mjs 那处）
+  return r.status === 0 && r.stdout ? r.stdout.replace(/\n$/, '') : null
 }
 
-/**
- * @param q      问题
- * @param optIn  true 表示这一项在 --yes 下也**不**自动同意。
- *               注册 LaunchAgent 是持久的系统级改动，不该被一次批量确认捎带过去。
- */
-async function confirm(q, optIn = false) {
-  if (YES) return !optIn
-  initPrompt()
-  process.stdout.write(`${q} ${c.dim('[Y/n]')} `)
-  const line = queued.length
-    ? queued.shift()
-    : closed
-      ? ''
-      : await new Promise((resolve) => waiting.push(resolve))
-  if (closed || !process.stdin.isTTY) process.stdout.write(`${line}\n`)
-  const a = line.trim().toLowerCase()
-  return a === '' || a === 'y' || a === 'yes'
-}
-
-const closePrompt = () => {
-  rl?.close()
-  process.stdin.unref?.()
-}
+// 问答的实现和它那条「optIn 谁都不许代答」的不变式在 src/prompt.mjs，
+// 抽出去是为了能被断言 —— 那条不变式破过一次，破在 closePrompt 之后再问的
+// 路径上，而在这里它只有人肉跑一遍安装才看得见。
+const { confirm, close: closePrompt } = makePrompt({ yes: YES, dim: c.dim })
 
 // ---------------- 卸载 ----------------
 if (has('--uninstall')) {
@@ -409,6 +393,16 @@ if (config.lanIp) {
   // Windows 解析不了 mDNS，必须同时给出 IP，否则那部分人会直接卡死在这里
   if (config.altUrl) say(`     ${c.dim(`解析不了的话用：${config.altUrl}`)}`)
   say('')
+  const qr = terminalQr(base)
+  if (qr) {
+    say(qr)
+    say(`  ${c.dim('用相机扫这个码就能打开，不用手输。')}`)
+  } else {
+    // 没装 qrencode 时**不提码**。说「扫那个码」而屏幕上没有码，
+    // 是这个项目反复踩过的那类假话
+    say(`  ${c.dim('装上 qrencode 这里会直接画出二维码：brew install qrencode')}`)
+  }
+  say('')
   say(`  ${c.dim('打开后点「在 Mac 上显示二维码」，用手机相机扫 Mac 屏幕上那个码。')}`)
   say(`  ${c.dim('然后 Mac 上会弹确认框 —— 点「允许」才会真的配对。')}`)
 } else {
@@ -421,37 +415,57 @@ say(`  ${c.dim('想直接看二维码：npx clamicro qr')}`)
 say('')
 
 /**
- * 探测到 DeepSeek Harness 就问一句要不要接上。
+ * DSH / Codex：**探测到也不在这里问。**
  *
- * **必须问**：这会往用户的 `~/.dsh/profiles` 里拷目录、改 cordis.patch.yml。
- * 那是另一个产品的配置，不是我们的地盘，装 clamicro 顺手改掉它不合适。
+ * 这两问原来就在这个位置，紧跟着上面那句「最后一步：手机打开这个网址」——
+ * 人已经被打发去掏手机了，回来发现终端卡在一个问题上。
  *
- * 用 optIn=true，所以 `--yes` 批量确认也不会把它捎带过去——理由同上。
+ * 而更硬的理由是：`closePrompt()` 在第 4 步就跑过了，**stdin 已经关掉**。
+ * 关掉之后 `confirm()` 会把问题打在屏幕上、当场按「是」答掉、继续往下走——
+ * 于是 `~/.dsh/profiles` 和 `~/.codex/config.toml` 被改了，而用户一个字
+ * 都没输入。这两处恰恰是当初特意标了 `optIn=true`、连 `--yes` 都不许代答的
+ * 地方，那道防线在这条路径上从来没生效过。（confirm 自己也补了一道，
+ * 见上面：关掉之后 optIn 的问题一律按「没答应」算。）
+ *
+ * 现在分两种情况：
+ *
+ *   · **已经接过** → 静默重接。升级换了版本，插件文件和端口得跟着新，
+ *     这一步不问是对的：它没有引入任何新的改动范围。
+ *   · **没接过**   → 别人的配置一个字节都不动，末尾提一句命令。
+ *     `npx clamicro connect` 跑起来时 stdin 还开着，问得出来也答得回去。
  */
-const dsh = await wireUp({
-  here: APP_DIR,
-  port: config.port ?? 8765,
-  confirm,
-  say,
-  ui: { b: c.b, dim: c.dim, g: c.g, y: c.y },
-})
-if (dsh.action === 'failed') process.exitCode = 0 // 接 DSH 失败不影响整体安装
+const offers = []
+const ui = { b: c.b, dim: c.dim, g: c.g, y: c.y }
+const port = config.port ?? 8765
 
-/**
- * Codex 同样是「探测到就问一句」。
- *
- * 跟 DSH 一条纪律：那是别人的配置文件（而且这一份通常还挺满——MCP、插件、
- * 模型设置几十行），装 clamicro 顺手改掉它不合适，所以 optIn=true，
- * `--yes` 也不替用户答应。
- */
-const codex = await wireUpCodex({
-  port: config.port ?? 8765,
-  relayPath: appPaths().codexHook,
-  confirm,
-  say,
-  ui: { b: c.b, dim: c.dim, g: c.g, y: c.y },
-})
-if (codex.action === 'manual') process.exitCode = 0 // 同上：不影响整体安装
+if (isDshWired()) {
+  const dsh = await wireUp({ here: APP_DIR, port, confirm: async () => true, say, ui })
+  if (dsh.action === 'failed') process.exitCode = 0 // 接 DSH 失败不影响整体安装
+} else if (hasDsh()) {
+  offers.push(['DeepSeek Harness', '~/.dsh/profiles', 'npx clamicro connect dsh'])
+}
+
+if (hasCodex()) {
+  if (verifyCodex(port).present) {
+    const codex = await wireUpCodex({
+      port,
+      relayPath: appPaths().codexHook,
+      confirm: async () => true,
+      say,
+      ui,
+    })
+    if (codex.action === 'manual') process.exitCode = 0 // 同上：不影响整体安装
+  } else {
+    offers.push(['Codex', codexConfig(), 'npx clamicro connect codex'])
+  }
+}
+
+for (const [name, where, how] of offers) {
+  say('')
+  say(`  ${c.b(`检测到 ${name}`)} ${c.dim(where)}`)
+  say(`  ${c.dim('没有自动接上 —— 那是它自己的配置文件，得你点头。接上跑：')}`)
+  say(`      ${c.b(how)}`)
+}
 
 say('')
 say(`  配对完点「发一条测试审批」，在手机上批一次 ${c.dim('—— 这就是验收')}`)

@@ -739,8 +739,9 @@
 (function () {
   try {
     if (localStorage.getItem('ccm-onboarded')) return;
-    const step = Number(localStorage.getItem('ccm-onboard-step')) || 1;
-    location.replace('/ui/onboarding/' + Math.min(3, Math.max(1, step)));
+    // 引导只有一屏了，没有「上次走到第几步」可续 —— 老的 ccm-onboard-step
+    // 由引导页自己清掉，这里不再读它
+    location.replace('/ui/onboarding/1');
   } catch { /* 拿不到 localStorage 就当已经引导过 */ }
 })();
 </script>

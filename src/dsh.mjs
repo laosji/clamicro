@@ -35,6 +35,20 @@ export function hasDsh() {
   try { return statSync(PROFILES).isDirectory() } catch { return false }
 }
 
+/**
+ * 已经接上了吗。
+ *
+ * 判据是**桥接插件的目录在不在**，不是补丁层里有没有那几行：补丁层可能是
+ * 用户照着 manual 那条路自己抄进去的，而插件文件是我们拷的，两者只有后者
+ * 能证明「这台机器上确实装过」。
+ *
+ * 这个判断存在的意义是区分「升级」和「第一次」：升级要静默重拷一遍插件
+ * （版本变了，文件得跟着新），第一次则一个字都不改别人的配置，只提一句。
+ */
+export function isWired({ exists = existsSync } = {}) {
+  return PLUGINS.some((p) => p.required && exists(join(MODULES, p.name)))
+}
+
 /** 插件源目录（包内的 plugins/）。传 HERE 进来，避免这个模块自己去猜安装路径。 */
 export function sourceDir(here, dir) {
   return join(here, 'plugins', dir)
